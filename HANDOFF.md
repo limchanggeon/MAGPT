@@ -805,5 +805,11 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - README: 사용자 안내를 새 설치 흐름으로 다시 쓰고, 스크린샷 4장(`docs/images/`)과 exe·dmg 직접 링크
   (`releases/latest/download/...`)를 넣었다. 스크린샷은 `scripts/demo_server.py`(가짜 넥슨 응답, 익명 캐릭터 '시험렌렌', 임시 DB)로 찍었다.
   외형·장비는 사용자 캐릭터의 것이다(이름·길드 제외). 원하지 않으면 교체한다.
-- **저장소가 비공개라 README의 다운로드 링크는 저장소 권한이 있는 사람에게만 열린다.** 지인이 받게 하려면 저장소를 공개로 바꾸거나 파일을 직접 전달해야 한다(사용자 결정).
 - 검증: 자동 테스트 **271개 통과**(263→271). 모델 선택 7건, 출처 안내 1건 추가.
+- **릴리스 v0.2.0**: CI(push)에서 두 OS 빌드 통과를 먼저 확인한 뒤 태그를 올렸다. Windows 빌드는 Inno Setup 6.7.1로
+  `Korean.isl`을 읽어 컴파일에 성공했다(마법사 버튼도 한국어). 릴리스 작업이 `Mepiti-Windows-Setup.exe`(14.2MB)와
+  `Mepiti-macOS.dmg`(15.2MB)를 올렸고, 설명을 한국어로 바꿨다. https://github.com/limchanggeon/MAGPT/releases/tag/v0.2.0
+- 확인: 저장소는 이미 **공개(PUBLIC)** 상태였다. 로그인 없이 README의 `releases/latest/download/...` 두 링크가 HTTP 200으로 받아진다.
+  공개 상태이므로 README 스크린샷의 캐릭터 외형·장비(이름 제외)가 누구에게나 보인다.
+- 미검증: 실제 Windows PC에서 마법사 흐름(VRAM 감지, Ollama 1.5GB 다운로드·무인 설치, setup.json → 첫 실행 자동 다운로드)과
+  Mac에서 Ollama 자동 설치는 아직 실기로 돌려 보지 않았다.
