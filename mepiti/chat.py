@@ -46,12 +46,17 @@ def answer(store, model, data, nexon=None):
         return result
     picked = capture_conditions(store, question, history)
     if picked:
-        result.update(status='conditions',content='강화 조건을 저장했습니다. 다음부터는 묻지 않습니다.\n\n'
-                      + conditions.summary(picked) + '\n\n바꾸려면 "강화 조건 다시"라고 적어 주세요.')
-        result['conditions'] = ['이 조건으로 기대값을 계산합니다. 이벤트는 기간이 지나면 다시 알려 주세요.']
-        store.message(sid,'user',{'content':question})
-        store.message(sid,'assistant',result)
-        return result
+        prior = last_starforce(history)
+        if prior and nexon:
+            # '샤타포스일때는' 같은 후속 질문. 바뀐 조건으로 직전 계산을 다시 돌린다.
+            question = f"{prior['slot']} {prior['target_star']}성 기대값"
+        else:
+            result.update(status='conditions',content='강화 조건을 저장했습니다. 다음부터는 묻지 않습니다.\n\n'
+                          + conditions.summary(picked) + '\n\n바꾸려면 "강화 조건 다시"라고 적어 주세요.')
+            result['conditions'] = ['이 조건으로 기대값을 계산합니다. 이벤트는 기간이 지나면 다시 알려 주세요.']
+            store.message(sid,'user',{'content':data.get('message','').strip()})
+            store.message(sid,'assistant',result)
+            return result
     saved_prices = capture_prices(store, question, history)
     if saved_prices:
         result.update(status='price',content='노작값을 저장했습니다. 다음부터는 이 값을 씁니다.\n\n'
@@ -164,30 +169,38 @@ def analyse_character(store, model, nexon, managed, question, history, result):
                     + '\n'.join(f"- {r['item']}" for r in unknown[:6])
     selected_model = store.setting('model')
     if not selected_model:
-        result.update(status='context',content=text)
+        block = result.pop('starforce_text', None)
+        result.update(status='context', content=block or '조회한 사실은 아래 항목에서 확인하세요.')
+        result['facts'] = text
         result['conditions'] = ['로컬 모델을 선택하지 않아 조회한 사실만 정리했습니다. 설정에서 모델을 고르면 이 정보를 바탕으로 서술합니다.']
         return
     previous = [{'role':m['role'],'content':m['payload']['content']}
                 for m in history[-4:] if m['payload'].get('content')]
     try:
-        written, metrics = model.analyse(selected_model, text, question, previous)
+        written, metrics = model.analyse(selected_model, text, question, previous,
+                                         numbers_shown=bool(result.get('starforce_text')))
         result['metrics'] = metrics
     except AppError as e:
-        result.update(status='context',content=text)
-        result['conditions'] = [f'모델 응답에 실패해 조회한 사실만 표시합니다. {e}']
+        kept = result.pop('starforce_text', None)
+        result.update(status='context', content=kept or '조회한 사실은 아래 항목에서 확인하세요.')
+        result['facts'] = text
+        result['conditions'] = [f'모델 응답에 실패해 계산 결과와 조회한 사실만 표시합니다. {e}']
         return
     written = fix_name(written, facts['name'])
     # 넘겨준 사실에 없는 확률이나 수치가 섞이면 그 서술은 쓰지 않는다.
     invented = unsupported_numbers(written, text)
     if FABRICATION.search(written) or invented:
-        result.update(status='context',content=text)
+        kept = result.pop('starforce_text', None)
+        result.update(status='context', content=kept or '조회한 사실은 아래 항목에서 확인하세요.')
+        result['facts'] = text
         reason = ('모델이 조회한 사실에 없는 수치를 만들어 사용하지 않았습니다: '
                   + ', '.join(invented[:5])) if invented else \
                  '모델 서술에 근거 없는 확률 표현이 섞여 사용하지 않았습니다.'
         result['conditions'] = [reason + ' 조회한 사실만 표시합니다.',
                                 '강화 확률과 시세는 검토된 자료가 등록되어야 답변합니다.']
         return
-    result.update(status='analysis',content=written)
+    block = result.pop('starforce_text', None)
+    result.update(status='analysis', content=(block + '\n\n' + written) if block else written)
     result['facts'] = text
     result['conditions'] = ([missing_note] if missing_note else []) + [
         f"넥슨 Open API로 {facts['retrieved_at']}에 조회한 이 캐릭터의 실제 값만 근거로 삼았습니다.",
@@ -326,10 +339,19 @@ def starforce_facts(store, profile, question, result):
     except AppError as e:
         return f"\n\n[강화 기대값] 계산하지 못했다: {e}"
     result['starforce'] = {**calc, 'slot': item['slot'], 'item': item['name']}
-    return (f"\n\n[강화 기대값] 앱이 직접 계산한 값이다. 이 수치를 그대로 쓰고 다른 확률을 지어내지 말 것.\n"
+    result['starforce_text'] = (
+        f"**{item['slot']} {item['name']}** {current}성 → {target}성\n\n"
+        f"- 기대 비용: **{calc['expected_cost']:,} 메소**\n"
+        f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
+        f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
+        f"- 적용 조건: {conditions.summary(picked)}\n"
+        f"- 스페어 장비 값: {price['price']:,.0f} 메소 (파괴 시 1개 소모로 계산)")
+    return (f"\n\n[강화 기대값] 앱이 이미 계산해 사용자에게 그대로 보여 준 값이다.\n"
+            f"계산할 수 없다고 쓰지 말 것. 아래 수치를 다시 나열하지도 말 것.\n"
+            f"필요하면 이 수치가 무엇을 뜻하는지 한두 줄만 덧붙여라.\n"
             f"- 대상: {item['slot']} {item['name']} (레벨 {item['equip_level']})\n"
             f"- {current}성 -> {target}성\n"
-            f"- 기대 비용: {calc['expected_cost']:,} 메소 (파괴 시 스페어 {price['price']:,.0f} 메소 포함)\n"
+            f"- 기대 비용: {calc['expected_cost']:,} 메소\n"
             f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
             f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
             f"- 적용 조건: {conditions.summary(picked)}\n"
@@ -337,12 +359,30 @@ def starforce_facts(store, profile, question, result):
 
 
 def capture_conditions(store, question, history):
-    """직전 답변이 강화 조건을 물었을 때만 답을 읽어 저장한다."""
-    last = next((m for m in reversed(history) if m['role']=='assistant'), None)
-    if not last or last['payload'].get('status') != 'ask_conditions':
+    """강화 조건 답변을 읽어 저장한다.
+
+    되묻기 직후이거나, 조건만 짧게 말한 경우('샤타포스일때는')에 반응한다.
+    긴 문장에서 우연히 단어가 걸려 조건이 바뀌는 일을 막으려고 길이를 제한한다.
+    """
+    last = next((m for m in reversed(history) if m['role'] == 'assistant'), None)
+    asked = bool(last and last['payload'].get('status') == 'ask_conditions')
+    if not asked and len(question) > 40:
         return None
     parsed = conditions.parse(question)
     if not parsed:
         return None
-    conditions.save(store, parsed)
-    return parsed
+    if not asked and parsed == dict(conditions.DEFAULTS):
+        return None      # '기본'만으로는 조건을 되돌리지 않는다. 되묻기 직후에만 인정한다.
+    # 되묻기 답이면 처음부터 새로, 후속 수정이면 기존 조건 위에 얹는다.
+    base = dict(conditions.DEFAULTS) if asked else conditions.load(store)
+    merged = {k: v for k, v in {**base, **parsed}.items() if k in conditions.DEFAULTS}
+    conditions.save(store, merged)
+    return merged
+
+
+def last_starforce(history):
+    """직전에 계산한 강화 대상. 조건만 바꿔 다시 물을 때 쓴다."""
+    for message in reversed(history):
+        if message['role'] == 'assistant' and message['payload'].get('starforce'):
+            return message['payload']['starforce']
+    return None

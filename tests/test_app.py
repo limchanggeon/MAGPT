@@ -215,8 +215,8 @@ class CharacterAnalysisTests(unittest.TestCase):
         def character(self,name,details=False): return self.profile
     class FakeModel:
         def __init__(self,text): self.text=text; self.seen=None
-        def analyse(self,model,facts,question,history=None):
-            self.seen=facts; return self.text,{'eval_count':10}
+        def analyse(self,model,facts,question,history=None,numbers_shown=False):
+            self.seen=facts; self.numbers_shown=numbers_shown; return self.text,{'eval_count':10}
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
         self.store.character_save({'name':'테스트','budget':0,'main':True})
@@ -261,8 +261,8 @@ class CharacterAnalysisTests(unittest.TestCase):
             with self.subTest(text=made_up):
                 r,_=self.ask(made_up)
                 self.assertEqual(r['status'],'context')
-                self.assertNotIn(made_up,r['content'])       # 서술은 버려지고 사실만 남는다
-                self.assertIn('제네시스 창세검',r['content'])
+                self.assertNotIn(made_up,r['content'])       # 서술은 버려진다
+                self.assertIn('제네시스 창세검',r['facts'])     # 사실은 접이식으로 남는다
     def test_repeated_name_syllable_is_corrected(self):
         from mepiti.chat import fix_name
         self.assertEqual(fix_name('시험렌렌렌의 장비','시험렌렌'),'시험렌렌의 장비')
@@ -277,7 +277,7 @@ class CharacterAnalysisTests(unittest.TestCase):
             def analyse(self,*a,**k): raise AppError('모델 없음',502)
         r=answer(self.store,Broken(),{'message':'내 장비 어때'},self.FakeNexon(self.PROFILE))
         self.assertEqual(r['status'],'context')
-        self.assertIn('제네시스 창세검',r['content'])
+        self.assertIn('제네시스 창세검',r['facts'])
     def test_without_model_only_facts(self):
         self.store.set_setting('model','')
         r,_=self.ask('아무 말')
@@ -508,6 +508,11 @@ class ConditionTests(unittest.TestCase):
                 got=conditions.parse(text)
                 self.assertIsNotNone(got)
                 for k,v in expected.items(): self.assertEqual(got[k],v)
+    def test_parse_returns_only_mentioned_keys(self):
+        """후속 수정에서 말하지 않은 조건이 초기화되면 안 된다."""
+        self.assertEqual(conditions.parse('샤타포스'),{'event':'샤타포스'})
+        self.assertEqual(conditions.parse('안전모드도 쓸래'),{'safeguard':True})
+        self.assertEqual(conditions.parse('MVP 다이아'),{'discounts':['MVP 다이아']})
     def test_basic_answer_accepted(self):
         self.assertEqual(conditions.parse('기본'),dict(conditions.DEFAULTS))
         self.assertIsNone(conditions.parse('안녕'))
@@ -552,6 +557,75 @@ class ConditionConversationTests(CharacterAnalysisTests):
         self.assertEqual(r['starforce']['event'],'샤타포스')
         self.assertEqual(r['starforce']['expected_destroys'],0.0)   # 안전모드로 파괴 없음
         self.assertIn('샤타포스',model.seen)
+    def test_followup_condition_recalculates(self):
+        """실제로 겪은 문제: '샤타포스일때는' 후속 질문이 자료 검색으로 빠져 보류됐다."""
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        first,_=self.ask('서술','벨트 22성 기대값 얼마야?')
+        self.assertEqual(first['status'],'analysis')
+        plain=first['starforce']['expected_cost']
+        follow=answer(self.store,self.FakeModel('덧붙이는 말'),
+                      {'message':'샤타포스일때는','session_id':first['session_id']},
+                      self.FakeNexon(self.PROFILE))
+        self.assertEqual(follow['status'],'analysis')          # 보류가 아니라 재계산
+        self.assertEqual(follow['starforce']['event'],'샤타포스')
+        self.assertEqual(follow['starforce']['target_star'],22)
+        self.assertLess(follow['starforce']['expected_cost'],plain)
+    def test_model_is_told_numbers_are_already_shown(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,model=self.ask('덧붙이는 말','벨트 22성 기대값 얼마야?')
+        self.assertTrue(model.numbers_shown)
+        plain,plain_model=self.ask('서술','내 장비 어때')
+        self.assertFalse(plain_model.numbers_shown)
+    def test_numbers_are_written_by_the_app(self):
+        """모델이 '계산할 수 없다'고 써도 앱이 만든 수치 블록은 답변에 남는다."""
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,_=self.ask('정확히 계산할 수 없습니다.','벨트 22성 기대값 얼마야?')
+        self.assertEqual(r['status'],'analysis')
+        self.assertIn('기대 비용',r['content'])
+        self.assertIn(f"{r['starforce']['expected_cost']:,}",r['content'])
+    def test_block_survives_rejected_model_text(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,_=self.ask('시세 9,999,999,999 메소입니다.','벨트 22성 기대값 얼마야?')
+        self.assertEqual(r['status'],'context')
+        self.assertIn('기대 비용',r['content'])        # 계산 결과는 본문에 살아남는다
+        self.assertNotIn('9,999,999,999',r['content'])
+        self.assertIn('제네시스 창세검',r['facts'])     # 사실 전문은 접이식으로
+    def test_followup_merges_instead_of_resetting(self):
+        """실제로 겪은 문제: '안전모드도 쓸래'가 샤타포스를 없음으로 되돌렸다."""
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        answer(self.store,self.FakeModel('x'),
+               {'message':'샤타포스','session_id':first['session_id']},self.FakeNexon(self.PROFILE))
+        after=answer(self.store,self.FakeModel('x'),
+                     {'message':'안전모드도 쓸래','session_id':first['session_id']},
+                     self.FakeNexon(self.PROFILE))
+        self.assertEqual(after['starforce']['event'],'샤타포스')       # 유지된다
+        self.assertEqual(after['starforce']['expected_destroys'],0.0)  # 안전모드도 적용
+    def test_basic_resets_everything_after_asking(self):
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스','safeguard':True})
+        conditions.clear(self.store)
+        r=answer(self.store,self.FakeModel('x'),{'message':'강화 조건 다시'},self.FakeNexon(self.PROFILE))
+        answer(self.store,self.FakeModel('x'),
+               {'message':'기본','session_id':r['session_id']},self.FakeNexon(self.PROFILE))
+        self.assertEqual(conditions.load(self.store)['event'],'없음')
+        self.assertFalse(conditions.load(self.store)['safeguard'])
+    def test_facts_do_not_flood_the_answer(self):
+        """거절·실패 시 사실 전문이 본문에 통째로 쏟아지던 문제."""
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,_=self.ask('시세 9,999,999,999 메소','벨트 22성 기대값 얼마야?')
+        self.assertLess(len(r['content']),400)
+        self.assertGreater(len(r['facts']),400)
+    def test_long_message_does_not_change_conditions(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        long_text='샤타포스 이벤트가 언제 열리는지 궁금한데 혹시 지난번에 했던 것처럼 이번에도 비슷한 기간으로 진행되나요'
+        answer(self.store,self.FakeModel('x'),{'message':long_text},self.FakeNexon(self.PROFILE))
+        self.assertEqual(conditions.load(self.store)['event'],'없음')
     def test_reset_asks_again(self):
         conditions.save(self.store,dict(conditions.DEFAULTS))
         r=answer(self.store,self.FakeModel('x'),{'message':'강화 조건 다시'},self.FakeNexon(self.PROFILE))

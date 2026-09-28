@@ -52,14 +52,20 @@ def clear(store):
 
 
 def parse(text):
-    """자유롭게 쓴 답에서 조건을 읽는다. 읽어낸 게 없으면 None."""
+    """자유롭게 쓴 답에서 조건을 읽는다.
+
+    **말한 항목만** 돌려준다. 후속 질문에서 한 가지만 바꿀 때 나머지가 초기화되면 안 되기 때문이다.
+    '기본'이라고만 하면 전체를 기본값으로 되돌린다는 뜻이라 DEFAULTS 전체를 돌려준다.
+    읽어낸 게 없으면 None.
+    """
     if not isinstance(text, str) or not text.strip():
         return None
     body = text.strip()
-    found = dict(DEFAULTS)
+    found = {}
     hit = False
 
     if re.search(r'기본|그냥|없음|아무것도|디폴트', body) and not re.search(r'이벤트\s*\S', body):
+        found.update(DEFAULTS)
         hit = True
 
     for name in sorted(EVENTS, key=len, reverse=True):
@@ -72,12 +78,11 @@ def parse(text):
             found['event'] = '샤타포스'
             hit = True
 
-    for name in DISCOUNTS:
-        if name.replace(' ', '') in body.replace(' ', ''):
-            found['discounts'].append(name)
-            hit = True
-    if 'pc방' in body.lower().replace(' ', '') and 'PC방' not in found['discounts']:
-        found['discounts'].append('PC방')
+    picked = [name for name in DISCOUNTS if name.replace(' ', '') in body.replace(' ', '')]
+    if 'pc방' in body.lower().replace(' ', '') and 'PC방' not in picked:
+        picked.append('PC방')
+    if picked:
+        found['discounts'] = picked
         hit = True
 
     # 안전모드·복구는 언급 자체를 '쓴다'로 보고, 부정 표현이 붙었을 때만 뒤집는다.
