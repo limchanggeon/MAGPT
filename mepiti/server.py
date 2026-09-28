@@ -75,7 +75,7 @@ class Application:
         s = self.store
         if method == 'GET':
             if path == '/api/status': return self.status()
-            if path == '/api/sessions': return s.rows('SELECT * FROM sessions ORDER BY rowid DESC')
+            if path == '/api/sessions': return s.sessions()
             if path == '/api/messages': return s.messages(query.get('session_id',[''])[0])
             if path == '/api/characters': return s.characters()
             if path == '/api/documents': return s.documents()

@@ -37,7 +37,11 @@ def answer(store, model, data, nexon=None):
     if not isinstance(question,str) or not question.strip() or len(question)>12000:
         raise AppError('질문은 1~12,000자로 입력해 주세요.')
     question = said = question.strip()
-    sid = store.session(data.get('session_id'),question)
+    new_topic = clean_topic(data.get('topic')) if not data.get('session_id') else None
+    title = f"{new_topic['slot']} · {new_topic['name']}" if new_topic else question
+    sid = store.session(data.get('session_id'), title, new_topic)
+    # 장비를 주제로 연 대화면, 부위를 말하지 않은 질문은 그 장비 이야기로 본다.
+    topic = store.session_topic(sid)
     history = store.messages(sid)
     last = next((m['payload'] for m in reversed(history) if m['role']=='assistant'), None) or {}
     # 되물었던 원래 질문. 조건·노작값을 답하면 이 질문을 이어서 계산한다.
@@ -118,21 +122,27 @@ def answer(store, model, data, nexon=None):
         store.message(sid,'user',{'content':question})
         store.message(sid,'assistant',result)
         return result
+    if topic and not SLOT_WORDS.search(question) and topic['name'] not in question:
+        question = f"{topic['slot']} {question}"
     terms = [t for t in TERMS if t['term'] in normalize(question)]
     if terms and any(t['term'] in ('환산','대장장이') for t in terms):
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
-    elif (CHARACTER_INTENT.search(question)
+    elif (topic or CHARACTER_INTENT.search(question)
           or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
               and SLOT_WORDS.search(question))):
         chars = store.characters()
         main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
+        if topic and topic.get('character'):
+            # 캐릭터 화면에서 고른 장비면 그 캐릭터를 조회한다(대표 캐릭터가 아니어도).
+            main = next((c for c in chars if c['name'] == topic['character']), None) or \
+                {'name': topic['character'], 'goal': None, 'budget': 0}
         if not main:
             result.update(status='clarify',content='캐릭터 화면에서 캐릭터를 먼저 등록하세요. 등록한 캐릭터의 실제 장비와 능력치를 근거로 정리합니다.')
         elif not nexon:
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
-            analyse_character(store, model, nexon, main, question, history, result, skip_prices)
+            analyse_character(store, model, nexon, main, question, history, result, skip_prices, topic)
     elif terms and any(k in question for k in ('뜻','뭐','무엇','의미')):
         result.update(status='term',content='\n'.join(t['meaning'] for t in terms))
         result['conditions'] = ['용어 설명은 요구사항 v0.1 기준입니다. 게임별 확률과 비용을 뜻하지 않습니다.']
@@ -183,7 +193,7 @@ def answer(store, model, data, nexon=None):
     return result
 
 
-def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False):
+def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False, topic=None):
     """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다."""
     try:
         profile = nexon.character(managed['name'], details=True)
@@ -193,6 +203,17 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     facts = context.build(profile, managed)
     text = context.as_text(facts)
     missing_note = None
+    if topic:
+        item = context.find_item(profile, topic)
+        if item:
+            text = context.item_text(item) + '\n\n' + text
+            result['topic_item'] = context.item_summary(item)
+            if item.get('name') != topic['name']:
+                missing_note = (f"대화 주제였던 {topic['name']}은(는) 지금 착용하고 있지 않아, "
+                                f"같은 부위에 착용한 {item.get('name')} 기준으로 답했습니다.")
+        else:
+            missing_note = f"대화 주제인 {topic['slot']} {topic['name']}을(를) 지금은 착용하고 있지 않습니다."
+            text = f"[대화 주제 장비] {topic['slot']} {topic['name']} — 지금은 착용하지 않아 상세를 알 수 없다.\n\n" + text
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
     # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
@@ -266,6 +287,19 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.',
         '추가옵션 등급(급·n추)은 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아닙니다.',
     ]
+
+
+def clean_topic(topic):
+    """화면에서 보낸 대화 주제 장비를 검사한다. 부위·이름 외의 값은 표시용 요약만 받는다."""
+    if topic is None:
+        return None
+    if not isinstance(topic, dict):
+        raise AppError('대화 주제 장비 형식이 올바르지 않습니다.')
+    slot, name = str(topic.get('slot') or '').strip(), str(topic.get('name') or '').strip()
+    character = str(topic.get('character') or '').strip()
+    if not slot or not name or len(slot) > 20 or len(name) > 60 or len(character) > 30:
+        raise AppError('대화 주제 장비의 부위와 이름을 확인해 주세요.')
+    return {'slot': slot, 'name': name, **({'character': character} if character else {})}
 
 
 def fix_name(text, name):

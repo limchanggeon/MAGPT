@@ -113,6 +113,8 @@ function renderEquipmentBoard(board,extras,detail,data){
 function gradeClass(grade){return {'레전드리':'grade-legendary','유니크':'grade-unique','에픽':'grade-epic','레어':'grade-rare'}[grade]||'grade-normal';}
 function renderEquipmentDetail(box,item){
   box.replaceChildren();const head=el('div','item-detail-head');head.append(nexonImage(item.icon,item.name,'item-detail-icon'));const names=el('div');names.append(el('span','item-category',item.slot||item.part||'장비'),el('h3','',item.name),el('span','item-starforce',(item.starforce==null?'—':`★${item.starforce}`)+(item.scroll_upgrade?` · 주문서 +${item.scroll_upgrade}`:'')));head.append(names);box.append(head);
+  // 이 장비를 주제로 채팅을 연다. 부위를 말하지 않아도 이 장비 이야기로 알아듣는다.
+  const talk=el('button','primary item-talk','이 장비로 대화');talk.type='button';talk.onclick=()=>startItemChat(item,selectedCharacterName);box.append(talk);
   const labels={str:'STR',dex:'DEX',int:'INT',luk:'LUK',max_hp:'HP',max_mp:'MP',attack_power:'공격력',magic_power:'마력',armor:'방어력',boss_damage:'보스 데미지 (%)',ignore_monster_armor:'방어율 무시 (%)',all_stat:'올스탯 (%)',damage:'데미지 (%)'};
   const options=el('div','item-options');Object.entries(item.options||{}).filter(([,v])=>Number(v)!==0).forEach(([k,v])=>{const row=el('div');row.append(el('span','',labels[k]||k),el('strong','',numericText(v)));options.append(row);});box.append(options);
   if(item.description){const info=el('div','item-info');item.description.split('\n').filter(line=>line.trim()).forEach(line=>info.append(el('p','',line.trim())));box.append(info);}

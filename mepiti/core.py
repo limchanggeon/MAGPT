@@ -75,6 +75,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS prices(id TEXT PRIMARY KEY, item TEXT NOT NULL, add_grade INTEGER, potential TEXT, price REAL NOT NULL, source TEXT NOT NULL, note TEXT, recorded_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS prices_item ON prices(item);
             ''')
+            # 장비를 주제로 한 대화. 예전 DB에는 이 열이 없어 추가만 한다(기존 대화는 그대로).
+            if 'topic' not in [r['name'] for r in db.execute('PRAGMA table_info(sessions)')]:
+                db.execute('ALTER TABLE sessions ADD COLUMN topic TEXT')
         os.chmod(self.path, 0o600)
         self.purge_expired()
 
@@ -254,15 +257,27 @@ class Store:
     def price_count(self):
         return self.rows('SELECT COUNT(*) AS n FROM prices')[0]['n']
 
-    def session(self, sid=None, title='새 대화'):
+    def session(self, sid=None, title='새 대화', topic=None):
         if sid:
             if not self.rows('SELECT id FROM sessions WHERE id=?', (sid,)):
                 raise AppError('대화를 찾을 수 없습니다.', 404)
             return sid
         sid = identifier()
         with self.db() as db:
-            db.execute('INSERT INTO sessions VALUES(?,?,?)', (sid,title[:50],now()))
+            db.execute('INSERT INTO sessions(id,title,created_at,topic) VALUES(?,?,?,?)',
+                       (sid, title[:50], now(), json.dumps(topic, ensure_ascii=False) if topic else None))
         return sid
+
+    def session_topic(self, sid):
+        rows = self.rows('SELECT topic FROM sessions WHERE id=?', (sid,))
+        try:
+            return json.loads(rows[0]['topic']) if rows and rows[0]['topic'] else None
+        except ValueError:
+            return None
+
+    def sessions(self):
+        return [{**r, 'topic': json.loads(r['topic']) if r.get('topic') else None}
+                for r in self.rows('SELECT * FROM sessions ORDER BY rowid DESC')]
 
     def messages(self, sid):
         return [{**r,'payload':json.loads(r['payload'])} for r in self.rows('SELECT * FROM messages WHERE session_id=? ORDER BY rowid', (sid,))]

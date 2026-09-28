@@ -95,6 +95,40 @@ def starforce_item(profile, question):
     return best
 
 
+def find_item(profile, topic):
+    """대화 주제 장비를 지금 조회한 장비 목록에서 찾는다. 이름이 같으면 우선, 없으면 같은 부위."""
+    items = profile.get('equipment') or []
+    same = [i for i in items if i.get('name') == topic.get('name')]
+    return next((i for i in same if i.get('slot') == topic.get('slot')), None) or \
+        (same[0] if same else next((i for i in items if i.get('slot') == topic.get('slot')), None))
+
+
+def item_summary(item):
+    """화면의 장비 카드와 대화 주제에 저장하는 짧은 요약."""
+    add = item.get('add_grade') or {}
+    return {'slot': item.get('slot'), 'name': item.get('name'), 'icon': item.get('icon'),
+            'starforce': item.get('starforce'), 'scroll_upgrade': item.get('scroll_upgrade'),
+            'equip_level': item.get('equip_level'), 'add_label': add.get('label') or None,
+            'potential_grade': item.get('potential_grade'), 'potential': list(item.get('potential') or []),
+            'additional_grade': item.get('additional_grade'),
+            'additional_potential': list(item.get('additional_potential') or [])}
+
+
+def item_text(item):
+    """대화 주제 장비 하나의 상세. 모델이 이 장비 이야기를 할 때 근거로 삼는다."""
+    add = item.get('add_grade') or {}
+    lines = [f"\n[대화 주제 장비] 사용자가 이 장비를 두고 묻고 있다. 부위를 말하지 않으면 이 장비 이야기다.",
+             f"- 부위·이름: {item.get('slot')} {item.get('name')}"
+             + (f" (장비 레벨 {item['equip_level']})" if item.get('equip_level') else ''),
+             f"- 스타포스: {item['starforce']}성" if item.get('starforce') is not None else '- 스타포스: 없음',
+             f"- 주문서 강화: {item['scroll_upgrade']}회" if item.get('scroll_upgrade') else '- 주문서 강화: 없음',
+             f"- 추가옵션: {add['label']}" if add.get('label') else '- 추가옵션: 없음']
+    for label, grade, rows in (('잠재능력', item.get('potential_grade'), item.get('potential')),
+                               ('에디셔널 잠재능력', item.get('additional_grade'), item.get('additional_potential'))):
+        lines.append(f"- {label}: {grade or '없음'}" + (' / ' + ', '.join(rows) if rows else ''))
+    return '\n'.join(lines)
+
+
 def build(profile, managed=None):
     """모델 프롬프트에 넣을 구조와, 화면에 그대로 보여 줄 수 있는 본문을 함께 돌려준다."""
     stats = stat_map(profile)

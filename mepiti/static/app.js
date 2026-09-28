@@ -17,8 +17,8 @@ $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
 function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
-async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
-function newChat(){if(busy)return;sessionId=null;$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
+async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);const latest=[...messages].reverse().find(m=>m.payload?.topic_item)?.payload.topic_item;chatTopic=s.topic?{...s.topic,...(latest||{})}:null;renderTopicCard();messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
+function newChat(){if(busy)return;sessionId=null;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
 $('#new-chat').addEventListener('click',newChat);
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();newChat();}});
 $$('[data-prompt]').forEach(b=>b.addEventListener('click',()=>{$('#message').value=b.dataset.prompt;$('#message').focus();}));
@@ -30,11 +30,67 @@ async function sendChat(message,answer){
   renderMessage('user',{content:message});
   const thinking=el('div','thinking','근거 확인 중…');$('#messages').append(thinking);scrollBottom();
   try{
-    const result=await api('chat',{message,session_id:sessionId,...(answer?{answer}:{})});
-    sessionId=result.session_id;thinking.remove();renderMessage('assistant',result);await loadHistory();
+    const topic=!sessionId&&chatTopic?{topic:{slot:chatTopic.slot,name:chatTopic.name,...(chatTopic.character?{character:chatTopic.character}:{})}}:{};
+    const result=await api('chat',{message,session_id:sessionId,...(answer?{answer}:{}),...topic});
+    sessionId=result.session_id;thinking.remove();
+    if(chatTopic&&result.topic_item){chatTopic={...chatTopic,...result.topic_item};renderTopicCard();}
+    renderMessage('assistant',result);await loadHistory();
   }catch(err){thinking.remove();$('#messages').lastElementChild?.remove();$('#welcome').hidden=$('#messages').children.length>0;throw err;}
   finally{busy=false;$('#send-button').disabled=false;}
 }
+// 장비를 주제로 한 대화. 새 대화를 시작할 때 서버에 넘기고, 그다음부터는 서버가 대화에 묶어 기억한다.
+let chatTopic=null;
+function itemSummary(item){return {slot:item.slot,name:item.name,icon:item.icon,starforce:item.starforce,scroll_upgrade:item.scroll_upgrade,
+  equip_level:item.equip_level,add_label:item.add_grade?.label||null,potential_grade:item.potential_grade,additional_grade:item.additional_grade};}
+function topicLine(t){
+  const parts=[];if(t.starforce!=null)parts.push('★'+t.starforce);if(t.scroll_upgrade)parts.push('주문서 +'+t.scroll_upgrade);
+  if(t.add_label)parts.push('추옵 '+t.add_label);if(t.potential_grade)parts.push('잠재 '+t.potential_grade);if(t.additional_grade)parts.push('에디 '+t.additional_grade);
+  return parts.join(' · ');
+}
+function topicPrompts(t){
+  const list=[],s=t.starforce;
+  if(s!=null&&t.equip_level){if(s<30)list.push([`${s+1}성 기대값`,`${s+1}성 기대값 얼마야`]);if(s<21)list.push(['22성 기대값','22성 기대값 얼마야']);}
+  list.push(['지금 상태 어때?','이 장비 지금 상태 어때?'],['추옵·잠재 평가','추옵이랑 잠재 평가해줘'],['바꾸는 게 나아?','이 장비 바꾸는 게 나아? 노작값 기준으로']);
+  return list;
+}
+function renderTopicCard(){
+  const box=$('#topic-card');box.replaceChildren();box.hidden=!chatTopic;
+  $('#message').placeholder=chatTopic?`${chatTopic.slot} 이야기로 질문 (부위를 말하지 않아도 됩니다)`:'질문 입력';
+  if(!chatTopic)return;
+  $('#welcome').hidden=true;
+  const head=el('div','topic-head');head.append(nexonImage(chatTopic.icon,chatTopic.name,'topic-icon'));
+  const names=el('div','topic-names');names.append(el('span','topic-slot',`${chatTopic.slot} · 대화 주제`+(chatTopic.character?` · ${chatTopic.character}`:'')),el('strong','',chatTopic.name));
+  const line=topicLine(chatTopic);if(line)names.append(el('span','topic-line',line));
+  const close=el('button','topic-close','×');close.type='button';close.setAttribute('aria-label','장비 주제 없이 새 대화');close.onclick=newChat;
+  head.append(names,close);box.append(head);
+  const chips=el('div','topic-prompts');
+  topicPrompts(chatTopic).forEach(([label,question])=>{const b=el('button','choice',label);b.type='button';b.onclick=()=>{if(!busy)guard(()=>sendChat(question));};chips.append(b);});
+  box.append(chips);
+}
+function startItemChat(item,character){newChat();chatTopic={...itemSummary(item),...(character?{character}:{})};renderTopicCard();switchView('chat');$('#message').focus();}
+// 착용 장비를 골라 대화 주제로 삼는다. 캐릭터 화면에서 보고 있는 캐릭터, 없으면 대표 캐릭터 기준.
+async function openItemPicker(){
+  const dialog=$('#item-dialog'),list=$('#item-picker'),status=$('#item-dialog-status');
+  list.replaceChildren();status.textContent='착용 장비를 불러오는 중';dialog.showModal();
+  try{
+    if(!managedCharacters.length)managedCharacters=await api('characters');
+    const name=selectedCharacterName||managedCharacters.find(c=>c.main)?.name||managedCharacters[0]?.name;
+    if(!name){status.textContent='캐릭터 화면에서 캐릭터를 먼저 등록하세요.';return;}
+    const cached=profileCache.get(name);
+    const data=cached&&Date.now()-cached.at<5*60*1000?cached.data:await api('characters/profile',{name});
+    profileCache.set(name,{data,at:Date.now()});
+    const order=EQUIPMENT_LAYOUT.flat().filter(Boolean);
+    const items=(data.equipment||[]).filter(i=>i.slot&&i.name).sort((a,b)=>(order.indexOf(a.slot)+99)%99-(order.indexOf(b.slot)+99)%99);
+    status.textContent=`${name} · 착용 장비 ${items.length}개. 고르면 그 장비를 주제로 새 대화를 엽니다.`;
+    items.forEach(item=>{
+      const b=el('button','picker-item');b.type='button';b.append(nexonImage(item.icon,item.name,'picker-icon'));
+      const text=el('span','picker-text');text.append(el('small','',item.slot+(item.starforce?` · ★${item.starforce}`:'')),el('strong','',item.name));
+      b.append(text);b.onclick=()=>{dialog.close();startItemChat(item,name);};list.append(b);
+    });
+  }catch(e){status.textContent='장비를 불러오지 못했습니다: '+e.message;}
+}
+$('#item-button').onclick=()=>guard(openItemPicker);
+$('#welcome-pick-item').onclick=()=>guard(openItemPicker);
 // 되묻기 선택창 — 조건은 버튼으로 고르고, 노작값은 칸에 적는다. 직접 입력창에 적어도 된다.
 function renderChoiceForm(form){
   const box=el('form','choice-form');

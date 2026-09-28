@@ -560,3 +560,18 @@ node --check mepiti/static/app.js
 - 이전 작업 이력의 '안전모드' 표기는 당시 기록이라 고치지 않았다.
 - 검증(2026-09-28, 클라우드 컨테이너): 테스트 190개 통과(파괴방지 해석·요약 문구 확인 추가), JS 구문 검사 통과.
 
+### 2026-09-28 — 장비를 주제로 한 대화 (사용자 요청: 일반 LLM과 차별점)
+
+- 사용자 요청: 메이플 GPT답게 내 장비를 바로 불러오거나, 장비(예: 모자)를 주제로 대화 세션을 만들 수 있게.
+- 변경:
+  - `mepiti/core.py`: `sessions.topic` 열(없으면 추가), `session(topic=)`, `session_topic`, `sessions`.
+  - `mepiti/server.py`: `/api/sessions`가 주제를 함께 돌려준다.
+  - `mepiti/context.py`: `find_item`, `item_summary`, `item_text`.
+  - `mepiti/chat.py`: `clean_topic`(검증), 새 대화에 주제 저장·제목, 부위 없는 질문에 주제 부위 보충, 주제 대화는 캐릭터 분석으로,
+    주제 캐릭터 조회, 주제 장비 사실·`topic_item`, 바뀐 장비·미착용 안내.
+  - `mepiti/static/index.html`·`app.js`·`characters.js`·`style.css`: 장비 버튼·선택 창, 장비 카드·빠른 질문, 캐릭터 화면 '이 장비로 대화', 기록에서 카드 복원.
+  - `tests/test_app.py`: `ItemTopicTests` 7개. `README.md`, `IMPLEMENTATION.md`.
+- 검증(2026-09-28, 클라우드 컨테이너): 테스트 209개 통과, JS 구문 검사 통과, Chromium으로 두 경로와 기록 복원 확인.
+  이 컨테이너는 키체인 라이브러리(`cryptography`)가 충돌해, 브라우저 시험 서버에서는 키 저장소도 가짜로 바꿨다(앱 코드 변경 아님).
+- 다음 후보(미구현, 사용자와 정할 것): 장비 카드에서 바로 단계별 기대값 표, 장비 비교(현재 vs 목표), 캐릭터 전체 요약 대화, 스냅샷 간 장비 변화 알림.
+

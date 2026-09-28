@@ -937,3 +937,67 @@ class RestoreCompareTests(CharacterAnalysisTests):
         conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스'})
         plain,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
         self.assertNotIn('흔적 복구를 안 쓰면',plain['content'])
+
+
+class ItemTopicTests(CharacterAnalysisTests):
+    """장비를 주제로 연 대화. 부위를 말하지 않아도 그 장비로 알아듣는다."""
+    PROFILE=PriceScopeTests.PROFILE
+    HAT={'slot':'모자','name':'에테르넬 나이트헬름'}
+    def setUp(self):
+        super().setUp()
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스'})
+        self.store.price_save({'item':'에테르넬 나이트헬름','price':2e7,'source':'user'})
+    def start(self,message,topic=None,model_text='x'):
+        model=self.FakeModel(model_text)
+        r=answer(self.store,model,{'message':message,'topic':topic or self.HAT},self.FakeNexon(self.PROFILE))
+        return r,model
+    def follow(self,first,message,model_text='x'):
+        model=self.FakeModel(model_text)
+        return answer(self.store,model,{'message':message,'session_id':first['session_id']},
+                      self.FakeNexon(self.PROFILE)),model
+    def test_session_keeps_item_topic(self):
+        r,_=self.start('21성 기대값')
+        self.assertEqual(r['starforce']['item'],'에테르넬 나이트헬름')      # '모자'라고 안 해도 된다
+        self.assertEqual(r['topic_item']['starforce'],18)
+        s=next(x for x in self.store.sessions() if x['id']==r['session_id'])
+        self.assertEqual(s['title'],'모자 · 에테르넬 나이트헬름')
+        self.assertEqual(s['topic'],self.HAT)
+        again,_=self.follow(r,'22성은?')
+        self.assertEqual(again['starforce']['target_star'],22)
+        self.assertEqual(again['starforce']['item'],'에테르넬 나이트헬름')
+    def test_general_question_gets_item_facts(self):
+        r,model=self.start('이거 어때?',model_text='183급 추옵이라 괜찮습니다.')
+        self.assertEqual(r['status'],'analysis')
+        self.assertIn('[대화 주제 장비]',model.seen)
+        self.assertIn('183급',model.seen)
+    def test_other_slot_can_still_be_named(self):
+        r,_=self.start('21성 기대값')
+        self.store.price_save({'item':'골든 클로버 벨트','price':3e8,'source':'user'})
+        other,_=self.follow(r,'벨트 21성 기대값')
+        self.assertEqual(other['starforce']['item'],'골든 클로버 벨트')
+    def test_unequipped_topic_is_reported(self):
+        # 모자를 바꿨으면 지금 착용한 모자 기준이라고 알린다.
+        r,_=self.start('이거 어때?',topic={'slot':'모자','name':'예전 모자'})
+        self.assertIn('에테르넬 나이트헬름 기준',' '.join(r['conditions']))
+        # 그 부위에 아무것도 없으면 착용하지 않았다고 알린다.
+        r,_=self.start('이거 어때?',topic={'slot':'얼굴장식','name':'없는 장식'})
+        self.assertIn('착용하고 있지 않습니다',' '.join(r['conditions']))
+    def test_topic_is_validated(self):
+        with self.assertRaises(AppError):
+            self.start('x',topic={'slot':'','name':'a'})
+        with self.assertRaises(AppError):
+            self.start('x',topic='모자')
+    def test_topic_ignored_on_existing_session(self):
+        r,_=self.ask('x','내 캐릭터 약한 부위 알려줘')
+        again=answer(self.store,self.FakeModel('x'),{'message':'x','session_id':r['session_id'],'topic':self.HAT},
+                     self.FakeNexon(self.PROFILE))
+        self.assertIsNone(self.store.session_topic(again['session_id']))
+    def test_old_database_gets_topic_column(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as folder:
+            db=sqlite3.connect(str(Path(folder)/'mepiti.sqlite3'))
+            db.execute('CREATE TABLE sessions(id TEXT PRIMARY KEY, title TEXT, created_at TEXT)')
+            db.execute("INSERT INTO sessions VALUES('old','옛 대화','2026-09-01')"); db.commit(); db.close()
+            store=Store(folder)
+            self.assertEqual(store.sessions()[0]['title'],'옛 대화')
+            self.assertIsNone(store.session_topic('old'))
