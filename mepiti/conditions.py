@@ -1,7 +1,7 @@
 """강화 조건 슬롯 채우기.
 
-기대값은 조건에 따라 몇 배씩 달라진다. 250레벨 18→22성이 기본 88.9조인데
-샤타포스면 43.8조, 안전모드를 쓰면 15.5조다. 그래서 조건을 모른 채 숫자를 내놓지 않는다.
+기대값은 조건에 따라 크게 달라진다. 250레벨 18→22성(스페어 45억)이 기본 약 890억인데
+샤타포스면 약 438억이다. 그래서 조건을 모른 채 숫자를 내놓지 않는다.
 
 **어떤 조건이 빠졌는지 판단하는 일은 모델에 맡기지 않는다.** 필수 슬롯을 코드로 정의하고
 여기서 채운다. 작은 모델은 물어봐야 할 것을 자주 빠뜨리는데, 그러면 틀린 숫자가 그대로 나간다.
@@ -11,13 +11,15 @@
 import json
 import re
 
-from .starforce import DISCOUNTS, EVENTS
+from .starforce import DISCOUNTS, EVENTS, SAFEGUARD_STARS as SAFEGUARD_RANGE
 
 SETTING = 'enhance_conditions'
 DEFAULTS = {'event': '없음', 'discounts': [], 'safeguard': False, 'use_restore': False}
 
-# 안전모드는 파괴가 생기는 구간에만 의미가 있다.
-SAFEGUARD_STARS = list(range(15, 22))
+# 안전모드는 게임에서 15~17성 시도에만 고를 수 있다. 조건에서는 파괴가 있는 15성 이상 구간을
+# 그대로 넘기고, 계산 쪽에서 15~17성만 적용한 뒤 나머지는 '반영하지 않음'으로 알린다.
+SAFEGUARD_STARS = list(SAFEGUARD_RANGE)
+SAFEGUARD_FROM = SAFEGUARD_STARS[0]
 
 RESET = re.compile(r'(강화\s*)?조건.{0,6}(바꾸|바꿔|바꿀|변경|다시|수정|재설정|초기화)')
 _NO = re.compile(r'안\s*[쓰써씀쓸]|미\s*사용|사용\s*안|없|끄|off|아니|제외|빼')
@@ -119,6 +121,6 @@ def to_arguments(conditions, current_star, target_star):
         'event': conditions.get('event') or '없음',
         'discounts': list(conditions.get('discounts') or []),
         'use_restore': bool(conditions.get('use_restore')),
-        'safeguard': ([s for s in SAFEGUARD_STARS if current_star <= s < target_star]
+        'safeguard': ([s for s in range(max(current_star, SAFEGUARD_FROM), target_star)]
                       if conditions.get('safeguard') else []),
     }

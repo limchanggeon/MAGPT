@@ -408,6 +408,24 @@ class StarforceTests(unittest.TestCase):
                                  'safeguard':[15,16,17]})
         self.assertEqual(safe['expected_destroys'],0.0)
         self.assertLess(safe['expected_cost'],plain['expected_cost'])
+    def test_safeguard_charges_double_base_cost(self):
+        # mesulive: 할인된 비용 + 할인 없는 기본 비용 x2. 파괴가 없으므로 기대 시도 x 시도당 비용과 같다.
+        base=starforce.attempt_costs(250)[17]
+        r=starforce.expected({'level':250,'current_star':17,'target_star':18,'spare_cost':0,
+                              'event':'샤타포스','safeguard':[17]})
+        self.assertEqual(r['safeguard'],[17])
+        self.assertAlmostEqual(r['expected_cost'],(round(base*0.7)+base*2)/0.1575,delta=1)
+    def test_safeguard_ignored_outside_15_to_17(self):
+        plain=starforce.expected({'level':250,'current_star':18,'target_star':21,'spare_cost':4.5e9})
+        asked=starforce.expected({'level':250,'current_star':18,'target_star':21,'spare_cost':4.5e9,
+                                  'safeguard':[18,19,20]})
+        self.assertEqual(asked['safeguard'],[])
+        self.assertEqual(asked['safeguard_ignored'],[18,19,20])
+        self.assertEqual(asked['expected_cost'],plain['expected_cost'])
+    def test_safeguard_free_on_guaranteed_star(self):
+        base=dict(level=250,current_star=15,target_star=16,spare_cost=0,event='5/10/15성 100%')
+        self.assertEqual(starforce.expected({**base,'safeguard':[15]})['expected_cost'],
+                         starforce.expected(base)['expected_cost'])
     def test_events_change_probability_and_cost(self):
         base=dict(level=250,current_star=18,target_star=22,spare_cost=4.5e9)
         plain=starforce.expected(base)
@@ -523,8 +541,9 @@ class ConditionTests(unittest.TestCase):
         conditions.clear(self.store)
         self.assertFalse(conditions.answered(self.store))
     def test_safeguard_only_covers_destroy_range(self):
-        args=conditions.to_arguments({'safeguard':True},18,22)
-        self.assertEqual(args['safeguard'],[18,19,20,21])
+        # 15성 이상 요청 구간을 넘기고, 15~17성만 적용하는 것은 계산 쪽이 맡는다.
+        self.assertEqual(conditions.to_arguments({'safeguard':True},14,18)['safeguard'],[15,16,17])
+        self.assertEqual(conditions.to_arguments({'safeguard':True},18,22)['safeguard'],[18,19,20,21])
         self.assertEqual(conditions.to_arguments({'safeguard':True},0,10)['safeguard'],[])
         self.assertEqual(conditions.to_arguments({'safeguard':False},18,22)['safeguard'],[])
     def test_reset_phrases(self):
@@ -555,7 +574,9 @@ class ConditionConversationTests(CharacterAnalysisTests):
         r,model=self.ask('서술','벨트 22성 기대값 얼마야?')
         self.assertEqual(r['status'],'analysis')
         self.assertEqual(r['starforce']['event'],'샤타포스')
-        self.assertEqual(r['starforce']['expected_destroys'],0.0)   # 안전모드로 파괴 없음
+        # 18→22성은 안전모드를 쓸 수 없는 구간이다. 켜 둔 요청은 반영하지 않았다고 알린다.
+        self.assertEqual(r['starforce']['safeguard'],[])
+        self.assertEqual(r['starforce']['safeguard_ignored'],[18,19,20,21])
         self.assertIn('샤타포스',model.seen)
     def test_followup_condition_recalculates(self):
         """실제로 겪은 문제: '샤타포스일때는' 후속 질문이 자료 검색으로 빠져 보류됐다."""
@@ -605,7 +626,8 @@ class ConditionConversationTests(CharacterAnalysisTests):
                      {'message':'안전모드도 쓸래','session_id':first['session_id']},
                      self.FakeNexon(self.PROFILE))
         self.assertEqual(after['starforce']['event'],'샤타포스')       # 유지된다
-        self.assertEqual(after['starforce']['expected_destroys'],0.0)  # 안전모드도 적용
+        self.assertTrue(conditions.load(self.store)['safeguard'])     # 안전모드도 합쳐진다
+        self.assertEqual(after['starforce']['safeguard_ignored'],[18,19,20,21])  # 18성 이상은 불가
     def test_basic_resets_everything_after_asking(self):
         conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스','safeguard':True})
         conditions.clear(self.store)

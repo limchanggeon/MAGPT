@@ -57,6 +57,8 @@ EVENTS = {
     '샤타포스(15 16 포함)': {'destroy': 0.7, 'guaranteed': (5,10,15), 'discount': 0.3, 'one_plus_one': False},
 }
 DESTROY_REDUCTION_MAX_STAR = 22   # 파괴 확률 감소는 21성 이하(표 인덱스 0~21)에만 붙는다.
+# 안전모드(파괴방지)는 15·16·17성 시도에서만 고를 수 있다(mesulive safeGuardRecordAtom).
+SAFEGUARD_STARS = (15, 16, 17)
 
 # 할인. 여러 개를 함께 쓰면 비율을 더한다.
 DISCOUNTS = {'MVP 실버': 0.03, 'MVP 골드': 0.05, 'MVP 다이아': 0.10, 'PC방': 0.05}
@@ -175,9 +177,12 @@ def expected(data):
     use_restore = bool(data.get('use_restore'))
     meso_discount = 0.2 if data.get('restore_discount') else 0.0
 
-    costs = [round(c * (1 - discount)) for c in attempt_costs(level)]
+    base_costs = attempt_costs(level)
+    costs = [round(c * (1 - discount)) for c in base_costs]
     table, adjusted = normalised_table()
-    safeguard = set(int(s) for s in (data.get('safeguard') or []) if str(s).isdigit())
+    requested = set(int(s) for s in (data.get('safeguard') or []) if str(s).isdigit())
+    safeguard = requested & set(SAFEGUARD_STARS)
+    ignored_safeguard = sorted(requested - safeguard)
     # 이벤트를 확률표에 반영한다. 파괴 감소분은 유지 쪽으로 옮긴다.
     for star, row in enumerate(table):
         if event['destroy'] != 1.0 and star < DESTROY_REDUCTION_MAX_STAR and row[2]:
@@ -196,12 +201,18 @@ def expected(data):
     destroys = [[0.0] * size for _ in range(size)]
     destroy_vec = [0.0] * size
     restore_used = []
+    safeguard_used = []
     for star in range(size):
         success, maintain, destroy = table[star]
-        if star in safeguard:
+        attempt = costs[star]
+        # 안전모드는 파괴를 막는 대신 할인 없는 기본 비용의 2배를 더 받는다.
+        # 100% 성공 구간(5/10/15성 이벤트)에서는 추가 비용이 없다(mesulive isDecided).
+        if star in safeguard and success < 1.0:
+            attempt += base_costs[star] * 2
+            safeguard_used.append(star)
             maintain, destroy = maintain + destroy, 0.0
         # 1+1 이벤트는 10성 이하에서 성공 시 두 칸 오른다.
-        jump = 2 if (event['one_plus_one'] and star <= 9) else 1
+        jump = 2 if (event['one_plus_one'] and star <= 10) else 1
         # 흔적 복구를 쓰면 파괴돼도 그 성으로 돌아온다. 아니면 12성으로 떨어진다.
         back, penalty = DESTROY_FALLBACK_STAR, spare_cost
         if destroy and use_restore:
@@ -209,7 +220,7 @@ def expected(data):
             if recovered is not None:
                 back, penalty = star, recovered
                 restore_used.append(star)
-        for row, rhs, own_cost, own_destroy in ((matrix, vector, costs[star], 0.0),
+        for row, rhs, own_cost, own_destroy in ((matrix, vector, attempt, 0.0),
                                                 (attempts, attempt_vec, 1.0, 0.0),
                                                 (destroys, destroy_vec, 0.0, 1.0)):
             row[star][star] += 1.0 - maintain
@@ -233,7 +244,8 @@ def expected(data):
         'expected_attempts': round(tries, 2),
         'expected_destroys': round(broken, 3),
         'attempt_cost_at_current': costs[current],
-        'safeguard': sorted(safeguard),
+        'safeguard': sorted(safeguard_used),
+        'safeguard_ignored': ignored_safeguard,
         'source': dict(SOURCE),
         'assumptions': [
             '확률표·비용식은 오픈소스 계산기 mesulive에서 가져왔습니다. 넥슨 공시와 이 앱이 대조한 값이 아닙니다.',
@@ -243,9 +255,13 @@ def expected(data):
              '아래 총비용에는 파괴 손실이 빠져 있습니다. 노작값을 알려주면 다시 계산합니다.'
              if not spare_cost else f'파괴 1회당 스페어 장비 값 {spare_cost:,.0f} 메소로 계산했습니다.'),
             (f'이벤트: {event_name}' if event_name != '없음' else '이벤트를 적용하지 않은 기본 비용입니다.'),
+            (f"안전모드 적용 구간 {', '.join(str(x)+'성' for x in safeguard_used)}. "
+             '안전모드는 파괴를 막는 대신 할인 없는 기본 비용의 2배를 추가로 냅니다.'
+             if safeguard_used else '안전모드는 쓰지 않는 것으로 계산했습니다.'),
             (f"할인 {round(discount*100,1)}% 적용 ({', '.join(picked) or '이벤트 할인'})" if discount else '할인 없음.'),
             (f"흔적 복구를 쓰는 것으로 계산했습니다(적용 구간 {', '.join(str(x)+'성' for x in sorted(set(restore_used)))})."
              if restore_used else '흔적 복구는 쓰지 않는 것으로 계산했습니다. 파괴 시 12성으로 떨어집니다.'),
-        ] + ([f"원본 확률표의 {r['star']}성 행 합이 {r['sum']}이라 유지 확률에서 차이를 덜어 맞췄습니다."
+        ] + ([f"안전모드는 15~17성에서만 쓸 수 있어 {', '.join(str(x)+'성' for x in ignored_safeguard)} 요청은 반영하지 않았습니다."]
+             if ignored_safeguard else []) + ([f"원본 확률표의 {r['star']}성 행 합이 {r['sum']}이라 유지 확률에서 차이를 덜어 맞췄습니다."
               for r in adjusted]),
     }
