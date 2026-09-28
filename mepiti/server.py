@@ -15,7 +15,7 @@ from . import __version__
 from .adapters import Nexon, Ollama, Vault, recognize, system_info
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import earnings, prices, starforce
+from . import earnings, history, prices, starforce
 
 STATIC = Path(__file__).parent/'static'
 
@@ -55,6 +55,9 @@ class CachedNexon:
     def scheduler(self, name, day=None):
         return self.nexon.scheduler(name, day)
 
+    def starforce_history(self, day):
+        return self.nexon.starforce_history(day)
+
     def _cached(self, key, fetch):
         with self.lock:
             hit = self.cache.get(key)
@@ -93,8 +96,8 @@ class Application:
             if path == '/api/sessions': return s.sessions()
             if path == '/api/messages': return s.messages(query.get('session_id',[''])[0])
             if path == '/api/characters': return s.characters()
-            if path == '/api/documents': return s.documents()
             if path == '/api/download': return dict(self.download)
+            if path == '/api/history/starforce': return history.overview(s)
             if path == '/api/earnings': return earnings.overview(s)
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
         if method == 'POST':
@@ -141,12 +144,8 @@ class Application:
                 s.set_setting(prices.FETCH_SETTING,'1' if data.get('enabled') else '0')
                 return prices.status(s)
             if path == '/api/ocr': return recognize(required(data,'image',8_100_000))
-            if path == '/api/documents': return s.import_document(data)
-            if path == '/api/documents/review': return s.review(data)
-            if path == '/api/documents/delete':
-                with s.db() as db:
-                    db.execute('DELETE FROM documents WHERE id=?',(required(data,'id',100),))
-                return {'ok':True}
+            if path == '/api/history/starforce/fetch': return history.fetch(s, self.nexon, data.get('days') or 14)
+            if path == '/api/history/starforce/level': return history.set_level(s, data.get('item'), data.get('level'))
             if path == '/api/settings/key':
                 self.vault.save(required(data,'key',500))
                 return {'ok':True}

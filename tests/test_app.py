@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from mepiti.adapters import Nexon, Ollama, Vault, recognize
 from mepiti.chat import answer
-from mepiti import conditions, context, earnings, prices, starforce, union
+from mepiti import conditions, context, earnings, history, prices, starforce, union
 from mepiti.core import AppError, KST, Store, identifier, now
 from mepiti.server import Application, make_server
 from pathlib import Path
@@ -1127,3 +1127,77 @@ class CrystalPriceTests(unittest.TestCase):
             with self.assertRaises(AppError):
                 earnings.add(store,{'kind':'boss','boss':'모르는 보스'})              # 표에 없으면 가격을 적어야 한다
 
+
+
+class StarforceHistoryTests(unittest.TestCase):
+    """스타포스 강화 기록 — 필드는 사용자가 붙여 준 넥슨 문서 기준(destroy_defence 등)."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+    def tearDown(self): self.tmp.cleanup()
+    SHINING=[{'success_rate':'','destroy_decrease_rate':'30','cost_discount_rate':'30','plus_value':'',
+              'starforce_event_range':'0~21','recovery_cost_discount_rate':''}]
+    def api_row(self,i,before,after,result,guard='',events=None):
+        return {'id':f'r{i}','item_upgrade_result':result,'before_starforce_count':before,'after_starforce_count':after,
+                'starcatch_result':'성공','destroy_defence':guard,'character_name':'본캐','world_name':'크로아',
+                'target_item':'에테르넬 나이트헬름','date_create':f'2026-09-2{i%8}T12:00:00.000+09:00',
+                'starforce_event_list':events if events is not None else self.SHINING}
+    def test_adapter_reads_documented_fields(self):
+        class V:
+            def get(self): return 'k'
+        page={'count':2,'next_cursor':'','starforce_history':[self.api_row(1,17,18,'성공','파괴 방지 적용'),
+                                                             self.api_row(2,18,12,'파괴'),{'id':'x'}]}
+        with patch('mepiti.adapters.request_json',return_value=page) as call:
+            rows=Nexon(V()).starforce_history('2026-09-27')
+        self.assertEqual(call.call_args.args[0].split('?')[0].rsplit('/',2)[-2:],['history','starforce'])
+        self.assertEqual(len(rows),2)                       # 알아볼 수 없는 기록은 건너뛴다
+        self.assertTrue(rows[0]['safeguard']); self.assertFalse(rows[1]['safeguard'])
+        self.assertEqual(rows[0]['events'][0]['discount'],0.3)
+        self.assertEqual(rows[0]['events'][0]['range'],[0,21])
+    def test_attempt_cost_uses_recorded_event(self):
+        base=starforce.attempt_costs(250)[17]
+        shining=[{'discount':0.3,'destroy_decrease':0.3,'range':[0,21]}]
+        self.assertEqual(history.attempt_cost(250,17,False,{},shining),round(base*0.7))
+        self.assertEqual(history.attempt_cost(250,17,True,{},shining),round(base*0.7)+base*2)   # 파괴방지
+        self.assertEqual(history.attempt_cost(250,17,False,{},[]),base)
+        self.assertEqual(history.event_name(shining,18),'샤타포스')
+        self.assertEqual(history.event_name([{'discount':0.3,'range':[0,21]}],18),'30% 할인')
+    def test_overview_compares_with_expected(self):
+        class N:
+            def __init__(s,rows): s.rows=rows
+            def starforce_history(s,day): return s.rows if day=='2026-09-27' else []
+            def character(s,name,details=False):
+                return {'equipment':[{'name':'에테르넬 나이트헬름','equip_level':250}],'equipment_presets':{}}
+        rows=[{'id':f'a{i}','character':'본캐','world':'크로아','item':'에테르넬 나이트헬름','before':b,'after':a,
+               'result':r,'starcatch':None,'safeguard':False,'created':f'2026-09-27T1{i}:00','events':
+               [{'discount':0.3,'destroy_decrease':0.3,'range':[0,21]}]}
+              for i,(b,a,r) in enumerate([(18,18,'실패(유지)'),(18,19,'성공'),(19,12,'파괴'),(12,13,'성공')])]
+        self.store.price_save({'item':'에테르넬 나이트헬름','price':2e7,'source':'user'})
+        with patch('mepiti.history.today',return_value=__import__('datetime').date(2026,9,28)):
+            r=history.fetch(self.store,N(rows),days=3)
+        self.assertEqual(r['added'],4)
+        g=history.overview(self.store)['groups'][0]
+        self.assertEqual((g['level'],g['start'],g['reached'],g['end'],g['attempts'],g['destroy']),(250,18,19,13,4,1))
+        self.assertEqual(g['event'],'샤타포스')
+        costs=starforce.attempt_costs(250)
+        spent=sum(round(costs[s]*0.7) for s in (18,18,19,12))+2e7
+        self.assertEqual(g['actual']['total'],spent)
+        self.assertIsNotNone(g['expected']); self.assertAlmostEqual(g['difference'],spent-g['expected']['cost'])
+    def test_fetch_skips_old_days_once_fetched(self):
+        calls=[]
+        class N:
+            def starforce_history(s,day): calls.append(day); return []
+            def character(s,name,details=False): return {}
+        with patch('mepiti.history.today',return_value=__import__('datetime').date(2026,9,28)):
+            history.fetch(self.store,N(),days=5); history.fetch(self.store,N(),days=5)
+        self.assertEqual(len(calls),5+2)           # 두 번째는 오늘·어제만 다시 받는다
+        with self.assertRaises(AppError): history.fetch(self.store,N(),days=91)
+    def test_unknown_level_asks_and_can_be_set(self):
+        with self.store.db() as db:
+            history.ensure(self.store)
+            db.execute("INSERT INTO starforce_history VALUES('z','본캐',null,'모르는 모자',15,16,'성공',null,0,'2026-09-27',null)")
+        g=history.overview(self.store)['groups'][0]
+        self.assertIsNone(g['actual']); self.assertIn('장비 레벨',' '.join(g['notes']))
+        history.set_level(self.store,'모르는 모자',200)
+        self.assertIsNotNone(history.overview(self.store)['groups'][0]['actual'])
+        with self.assertRaises(AppError): history.set_level(self.store,'모르는 모자',999)

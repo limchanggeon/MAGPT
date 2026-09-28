@@ -627,3 +627,16 @@ node --check mepiti/static/app.js
   `mepiti/earnings.py` 가격표 응답에 `name`·`difficulty` 추가, `mepiti/static/index.html`·`app.js`·`style.css`.
 - 검증(2026-09-28, 클라우드 컨테이너): 테스트 245개 통과, Chromium에서 체크·중복 난이도 해제·2인 분배·저장 확인(세렌 하드 3.02억 + 카링 하드 2인 7.8억 + 칼로스 노멀 4.79억 = 15.61억).
 
+### 2026-09-28 — 자료 탭을 스타포스 기록 탭으로 교체 (사용자 요청·문서 제공)
+
+- 사용자 요청: 자료 탭은 전부 지우고, 스타포스 강화 기록을 API로 받아 장비마다 실제로 쓴 돈과 기대값 차이를 볼 수 있게.
+- 사용자가 `/maplestory/v1/history/starforce` 문서를 붙여 주었다(파괴방지 필드는 `destroy_defence`, 기록마다 `starforce_event_list`).
+- 변경: `mepiti/adapters.py`(`starforce_history`, `starforce_event`, `rate`, `star_range`, `applied`), `mepiti/history.py`(신규),
+  `mepiti/server.py`(`/api/history/starforce` GET, `/fetch`, `/level`; 문서 등록·검토·삭제 API 삭제), `mepiti/static/*`(기록 화면),
+  `tests/test_app.py`(`StarforceHistoryTests` 5개).
+- 계산: 쓴 메소는 기록에 없어 시도마다 비용식으로 다시 계산. 이벤트 할인은 기록의 강화 당시 이벤트, MVP·PC방은 저장한 조건, 파괴방지는 기록대로.
+  파괴 1회 = 노작값. 기대값은 시작 성 → 도달 최고 성, 기록에 가장 많은 이벤트와 실제로 켠 파괴방지 구간. 흔적 복구 비용은 반영하지 않음.
+- 자료 탭 삭제 영향: 문서 등록 화면·API가 없어졌다. 채팅의 근거 문서 검색 로직과 `scripts/import_documents.py`는 남아 있다.
+- 검증(2026-09-28, 클라우드 컨테이너): 테스트 250개 통과, JS 구문 검사. **브라우저 확인과 커밋은 도구 오류로 아직 못 했다.** 실제 계정 응답 미확인.
+- 다음 후보(사용자와 논의 중): 공지 API(공지·업데이트·진행 중 이벤트·캐시샵)로 이벤트 기간 안내, 공지 본문을 근거 문서로 자동 수집.
+

@@ -3,7 +3,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
 let accountCatalog = null, accountLoading = false, managedNames = new Set(), managedCharacters = [];
-const titles = {chat:'질의',characters:'캐릭터',calculator:'수익',library:'자료',settings:'설정'};
+const titles = {chat:'질의',characters:'캐릭터',calculator:'수익',library:'기록',settings:'설정'};
 const fmt = (n) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:3}).format(n);
 const el = (tag,cls,text) => { const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e; };
 function toast(message,error=false){const e=$('#toast');e.textContent=message;e.classList.toggle('error',error);e.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.hidden=true,6500);}
@@ -12,7 +12,7 @@ async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadDocuments);if(view==='settings'){guard(loadStatus);guard(loadPrices);}location.hash=view;}
+function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
@@ -307,9 +307,52 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
   box.append(head,list,save);
 });
 
-async function loadDocuments(){const docs=await api('documents');$('#doc-count').textContent=docs.length;const list=$('#document-list');list.replaceChildren();if(!docs.length)list.append(el('div','empty-state','등록된 자료 없음.\n원문과 적용 조건을 등록하세요.'));docs.forEach(d=>{const m=d.metadata;const details=el('details','panel document-card');const summary=el('summary','',d.title);summary.append(el('span','badge',m.verification_status==='reviewed'?'검토 완료':'검토 대기'));details.append(summary,sourceLink(m.source_url,m.source_url),el('div','doc-meta',`출처 ${m.source_type==='official'?'공식':'커뮤니티'} · ${m.region}/${m.server_type} · 버전 ${m.version||'미확인'}\n적용 ${m.effective_from||'미확인'} ~ ${m.effective_to||'종료 미지정'} · 재검토 ${m.valid_until||'미지정'}\n발행 ${m.published_at||'미확인'} · 수정 ${m.modified_at||'미확인'} · 수집 ${m.retrieved_at}\n주제 ${m.topic||'미지정'} · SHA-256 ${m.content_hash}`),el('pre','',d.body));const approved=m.verification_status==='reviewed';const approve=el('button','primary',approved?'승인 취소':'검토 완료로 승인');approve.onclick=()=>task(approve,async()=>{await api('documents/review',{id:d.id,approve:!approved});await loadDocuments();toast(approved?'검색에서 제외했습니다.':'승인했습니다. 유효 기간에만 검색됩니다.');});const del=el('button','secondary','삭제');del.onclick=()=>guard(async()=>{if(!confirm('이 자료를 삭제합니다.'))return;await api('documents/delete',{id:d.id});await loadDocuments();});details.append(approve,del);list.append(details);});}
-$('#document-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const data=formData(e.target);const {title,body,...metadata}=data;await api('documents',{title,body,metadata});e.target.reset();toast('검토 대기로 저장했습니다.');await loadDocuments();});};
-async function loadStatus(){const s=await api('status');$('#doc-count').textContent=s.documents;const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';if(s.download.running)pollDownload();else if(s.download.status)$('#download-status').textContent=s.download.status;}
+// 기록 — 스타포스 강화 기록(넥슨 Open API)을 장비마다 묶어 실제 비용과 기대값을 비교한다.
+async function loadForgeHistory(){
+  const d=await api('history/starforce');
+  $('#history-status').textContent=d.fetched_days?`받아 둔 날짜 ${fmt(d.fetched_days)}일 · 최근 ${d.latest_day} · 강화 조건(MVP 할인) ${d.conditions}`:'아직 불러온 기록이 없습니다.';
+  const list=$('#history-list');list.replaceChildren();
+  if(!d.groups.length)list.append(el('div','empty-state','강화 기록이 없습니다.\n기간을 고르고 기록 불러오기를 누르세요.'));
+  d.groups.forEach(g=>list.append(historyCard(g)));
+  const notes=$('#history-notes');notes.replaceChildren();d.notes.forEach(n=>notes.append(el('p','',n)));
+}
+function historyCard(g){
+  const card=el('article','panel history-card');
+  const head=el('div','history-head');const names=el('div');
+  names.append(el('strong','',g.item),el('small','',`${g.character||'캐릭터 미확인'}${g.level?` · ${g.level}레벨`:''} · ${g.first}${g.last!==g.first?' ~ '+g.last:''}${g.event&&g.event!=='없음'?' · '+g.event:''}`));
+  const stars=el('div','history-stars',`★${g.start} → ★${g.end}`+(g.reached>g.end?` (최고 ★${g.reached})`:''));
+  head.append(names,stars);card.append(head);
+  const stats=el('div','history-stats');
+  const stat=(label,value,sub,cls)=>{const b=el('div',cls||'');b.append(el('span','',label),el('strong','',value));if(sub)b.append(el('small','',sub));stats.append(b);};
+  const exp=g.expected;
+  stat('시도',`${fmt(g.attempts)}회`,exp?`기대 ${fmt(exp.attempts)}회`:`성공 ${fmt(g.success)} · 실패 ${fmt(g.fail)}`);
+  stat('파괴',`${fmt(g.destroy)}회`,exp?`기대 ${fmt(exp.destroys)}회`:(g.safeguard?`파괴방지 ${fmt(g.safeguard)}회`:''));
+  if(g.actual)stat('실제 쓴 돈',mesoText(g.actual.total),`강화 ${mesoText(g.actual.attempts_cost)}`+(g.destroy?` + 파괴 ${mesoText(g.actual.destroy_cost)}`:''));
+  if(exp){const diff=g.difference;const more=diff>0;
+    stat('기대값',mesoText(exp.cost),`★${g.start} → ★${g.reached} 평균`);
+    stat(more?'기대보다 더 씀':'기대보다 덜 씀',mesoText(Math.abs(diff)),g.ratio?`기대값의 ${fmt(Math.round(g.ratio*100))}%`:'',more?'history-bad':'history-good');}
+  card.append(stats);
+  if(!g.level||(g.destroy&&g.spare_price==null)){
+    const fix=el('form','history-fix');
+    if(!g.level){const l=el('label','','장비 레벨');const i=el('input');i.name='level';i.type='number';i.min=1;i.max=300;i.placeholder='예: 250';l.append(i);fix.append(l);}
+    if(g.destroy&&g.spare_price==null){const l=el('label','','노작값');const i=el('input');i.name='price';i.placeholder='예: 2천만';i.autocomplete='off';l.append(i);fix.append(l);}
+    const b=el('button','secondary','저장하고 다시 계산');b.type='submit';fix.append(b);
+    fix.onsubmit=e=>{e.preventDefault();task(b,async()=>{const f=fix.elements;
+      if(f.level&&f.level.value)await api('history/starforce/level',{item:g.item,level:f.level.value});
+      if(f.price&&f.price.value){const price=parsePrice(f.price.value);if(price==null)throw new Error("노작값은 '2천만'처럼 적어 주세요.");await api('prices',{item:g.item,price,source:'user'});}
+      await loadForgeHistory();});};
+    card.append(fix);
+  }
+  g.notes.forEach(n=>card.append(el('p','hint',n)));
+  return card;
+}
+$('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
+  $('#history-status').textContent='넥슨 기록을 날짜별로 불러오는 중…';
+  const r=await api('history/starforce/fetch',{days:Number($('#history-days').value)});
+  toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
+  await loadForgeHistory();
+});
+async function loadStatus(){const s=await api('status');const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';if(s.download.running)pollDownload();else if(s.download.status)$('#download-status').textContent=s.download.status;}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){

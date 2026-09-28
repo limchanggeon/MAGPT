@@ -77,6 +77,40 @@ def flag(value):
     return str(value or '').strip().lower() in ('true', 'y', 'yes', '1', 'complete', 'completed', '완료')
 
 
+def rate(value):
+    """'30', '30%', '0.3' 같은 비율 표기를 0~1로."""
+    try:
+        number = float(str(value or '0').replace('%', '').strip() or 0)
+    except ValueError:
+        return 0.0
+    return number / 100 if number > 1 else number
+
+
+def star_range(text):
+    """'0~21', '21성 이하' 같은 이벤트 적용 구간. 알아볼 수 없으면 None(전 구간)."""
+    numbers = [int(n) for n in re.findall(r'\d+', str(text or ''))]
+    if len(numbers) >= 2:
+        return [min(numbers[:2]), max(numbers[:2])]
+    if len(numbers) == 1:
+        return [0, numbers[0] - 1] if '미만' in str(text) else [0, numbers[0]]
+    return None
+
+
+def starforce_event(e):
+    """강화 당시 적용된 이벤트 한 개."""
+    plus = str(e.get('plus_value') or '').strip()
+    return {'discount': rate(e.get('cost_discount_rate')), 'destroy_decrease': rate(e.get('destroy_decrease_rate')),
+            'success_rate': rate(e.get('success_rate')), 'plus': plus not in ('', '0', 'false', 'N'),
+            'recovery_discount': rate(e.get('recovery_cost_discount_rate')),
+            'range': star_range(e.get('starforce_event_range'))}
+
+
+def applied(value):
+    """'파괴 방지 적용' 같은 표시. '미적용'·빈 값은 적용 안 함."""
+    text = str(value or '').strip()
+    return flag(value) or ('적용' in text and '미적용' not in text)
+
+
 def extra_slot(slot, name, icon, description=None):
     """장비창에 자리는 있으나 item_equipment에 들어오지 않는 칸(칭호·안드로이드)."""
     return {'slot':slot,'part':slot,'name':name,'icon':static_icon(icon),
@@ -184,7 +218,7 @@ class Nexon:
         self.vault = vault
 
     def get(self, path, query):
-        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state'):
+        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce'):
             raise AppError('허용되지 않은 API입니다.')
         key = self.vault.get()
         if not key:
@@ -338,6 +372,39 @@ class Nexon:
                 'date':state.get('date'), 'bosses':bosses,
                 'weekly_clear':integer(state.get('weekly_boss_clear_count')),
                 'weekly_limit':integer(state.get('weekly_boss_clear_limit_count'))}
+
+    def starforce_history(self, day):
+        """그날의 스타포스 강화 결과(계정 단위). 쪽수가 넘으면 cursor로 이어 받는다.
+
+        필드 이름은 사용자가 붙여 준 넥슨 문서 기준이다(2026-09-28). 실제 응답으로는 아직 확인하지 못했다.
+        없는 필드는 비워 두고, 알아볼 수 없는 기록은 건너뛴다.
+        """
+        rows, cursor = [], None
+        for _ in range(20):
+            query = {'count': 1000, **({'cursor': cursor} if cursor else {'date': day})}
+            page = self.get('history/starforce', query)
+            if not isinstance(page, dict):
+                raise AppError('스타포스 기록 응답 형식을 확인할 수 없습니다.',502)
+            for r in page.get('starforce_history') or []:
+                if not isinstance(r, dict) or not r.get('target_item'):
+                    continue
+                before, after = integer(r.get('before_starforce_count')), integer(r.get('after_starforce_count'))
+                if before is None or after is None:
+                    continue
+                rows.append({'id': str(r.get('id') or f"{day}-{len(rows)}")[:120],
+                             'character': str(r.get('character_name') or '')[:30] or None,
+                             'world': str(r.get('world_name') or '')[:20] or None,
+                             'item': str(r['target_item'])[:60], 'before': before, 'after': after,
+                             'result': str(r.get('item_upgrade_result') or '')[:20],
+                             'starcatch': str(r.get('starcatch_result') or '')[:20] or None,
+                             'safeguard': applied(r.get('destroy_defence', r.get('destroy_defense'))),
+                             'created': str(r.get('date_create') or day)[:32],
+                             'events': [starforce_event(e) for e in (r.get('starforce_event_list') or [])
+                                        if isinstance(e, dict)][:5]})
+            cursor = page.get('next_cursor')
+            if not cursor:
+                break
+        return rows
 
     @staticmethod
     def equipment_item(item, main_stat):
