@@ -1,0 +1,314 @@
+import re
+from . import context, prices, starforce
+from .core import AppError, TERMS, normalize, now
+
+# 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
+CHARACTER_INTENT = re.compile(
+    r'내\s*캐릭|제\s*캐릭|내\s*장비|제\s*장비|내\s*스펙|제\s*스펙|내\s*성장|제\s*성장|'
+    r'내\s*예산|제\s*예산|뭘\s*올|어디를?\s*올|어느\s*부위|다음\s*단계|스펙업|약한\s*부위|'
+    r'추옵\s*(?:상태|등급)|보완|우선순위')
+# 게임 규칙은 검토된 자료에서만 나와야 한다. 확률 관련 표현은 문구 자체로 막는다.
+FABRICATION = re.compile(r'\d+\s*%\s*(?:확률|성공|파괴)|성공\s*확률\s*\d|파괴\s*확률')
+# 금액·수치를 찾는 패턴. 서술에 나온 값은 모두 넘겨준 사실 안에 있어야 한다.
+AMOUNT = re.compile(r'(\d[\d,]*(?:\.\d+)?)\s*(조|억|만)?')
+UNIT_SCALE = {'조':1_0000_0000_0000,'억':1_0000_0000,'만':1_0000,None:1}
+# 값을 따져야 답할 수 있는 질문. 노작값을 모르면 지어내지 말고 되물어야 한다.
+PRICE_INTENT = re.compile(r'노작|시세|가격|얼마|값이|사는\s*게|살까|구매|바꾸는\s*게|'
+                          r'가성비|예산|이득|싸[냐게]|비싸')
+# 강화 기대값 질문. 목표 성을 함께 찾는다.
+STARFORCE_INTENT = re.compile(r'기대\s*값|기댓값|강화\s*비용|몇\s*번|스타포스|(\d+)\s*성')
+TARGET_STAR = re.compile(r'(\d{1,2})\s*성')
+# 장비 부위 이름. 값·교체 질문에 부위가 나오면 내 캐릭터 이야기로 본다.
+SLOT_WORDS = re.compile('|'.join(sorted(
+    (set(context.SLOT_ORDER) | {'장비','템','아이템','방어구','장신구','무기','반지','펜던트'}),
+    key=len, reverse=True)))
+# 사용자가 '골든 클로버 벨트 32억' 처럼 알려 주는 형태.
+PRICE_REPLY = re.compile(r'^(?P<item>.+?)\s*[:=]?\s*(?P<price>[\d,.]+\s*(?:조|억|만)?(?:\s*\d+\s*(?:억|만))?)\s*(?:메소)?$')
+
+
+def answer(store, model, data, nexon=None):
+    question = data.get('message','')
+    if not isinstance(question,str) or not question.strip() or len(question)>12000:
+        raise AppError('질문은 1~12,000자로 입력해 주세요.')
+    question = question.strip()
+    sid = store.session(data.get('session_id'),question)
+    history = store.messages(sid)
+    previous = [m['payload']['content'] for m in history if m['role']=='user'][-2:]
+    # Preserve only a short prior topic for explicitly elliptical follow-ups.
+    followup = bool(re.match(r'^(그럼|그러면|이벤트 때|그거|그건|같은|이 경우)',question))
+    query = '\n'.join(previous+[question]) if followup else question
+    result = {'content':'','status':'held','sources':[],'conditions':[],'created_at':now(),'session_id':sid}
+    saved_prices = capture_prices(store, question, history)
+    if saved_prices:
+        result.update(status='price',content='노작값을 저장했습니다. 다음부터는 이 값을 씁니다.\n\n'
+                      +'\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소" for r in saved_prices))
+        result['conditions'] = ['사용자가 알려 준 값입니다. 조회 시점의 실제 거래가와 다를 수 있습니다.']
+        store.message(sid,'user',{'content':question})
+        store.message(sid,'assistant',result)
+        return result
+    terms = [t for t in TERMS if t['term'] in normalize(question)]
+    if terms and any(t['term'] in ('환산','대장장이') for t in terms):
+        result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
+        result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
+    elif (CHARACTER_INTENT.search(question)
+          or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
+              and SLOT_WORDS.search(question))):
+        chars = store.characters()
+        main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
+        if not main:
+            result.update(status='clarify',content='캐릭터 화면에서 캐릭터를 먼저 등록하세요. 등록한 캐릭터의 실제 장비와 능력치를 근거로 정리합니다.')
+        elif not nexon:
+            result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
+        else:
+            analyse_character(store, model, nexon, main, question, history, result)
+    elif terms and any(k in question for k in ('뜻','뭐','무엇','의미')):
+        result.update(status='term',content='\n'.join(t['meaning'] for t in terms))
+        result['conditions'] = ['용어 설명은 요구사항 v0.1 기준입니다. 게임별 확률과 비용을 뜻하지 않습니다.']
+    elif any(k in question for k in ('기대값','기댓값','강화 비용','확률 계산')):
+        result.update(status='clarify',content='어떤 장비·현재 단계·목표 단계·이벤트 조건으로 계산할까요?\n\n현재 승인된 메이플 강화 확률·비용표가 없어 게임 강화 기대값은 보류합니다. 계산 도구에서는 직접 입력한 고정 확률·비용의 독립 시행과 일정한 일일 획득량만 계산할 수 있습니다.')
+    else:
+        docs, conflict = store.search(query)
+        if conflict:
+            result['content'] = '같은 주제에 서로 다른 적용 버전의 자료가 검색되었습니다. 후속 수정과 실제 적용 시점을 검토하기 전까지 답변을 보류합니다.'
+        elif not docs:
+            result['content'] = '현재 질문에 답할 수 있는 검토 완료된 한국 본서버 근거를 찾지 못했습니다. 확인되지 않은 내용으로 답변하지 않겠습니다.\n\n자료실에서 출처·적용일·버전을 갖춘 자료를 등록하고 검토하거나, 질문의 직업·대상·조건을 더 알려 주세요. 검색 실패가 해당 정보의 부재를 뜻하지는 않습니다.'
+        else:
+            passages = []
+            tokens = re.findall(r'[가-힣A-Za-z0-9]{2,}',normalize(query))
+            for d in docs:
+                ranked = sorted(d['passages'],key=lambda p:sum(t in p for t in tokens),reverse=True)
+                for p in ranked[:3]:
+                    if len(p)<=1800:
+                        passages.append({'id':len(passages),'text':p,'doc_id':d['id']})
+            selected = list(range(min(3,len(passages))))
+            selected_model = store.setting('model')
+            model_note = '로컬 모델을 선택하지 않아 원문 검색 결과를 표시합니다.'
+            if selected_model and passages:
+                try:
+                    selected, metrics = model.select(selected_model,query,passages)
+                    result['metrics'] = metrics
+                    model_note = '로컬 모델이 관련 문장을 선택했습니다. 출력은 검토된 원문으로 제한됩니다.'
+                except AppError as e:
+                    model_note = str(e)
+            if not selected:
+                result['content'] = '검색된 자료만으로 질문을 뒷받침하기 어려워 답변을 보류합니다. 대상과 조건을 구체적으로 알려 주세요.'
+            else:
+                excerpts = []
+                for i in selected:
+                    p = passages[i]
+                    d = next(d for d in docs if d['id']==p['doc_id'])
+                    ref = next((s for s in result['sources'] if s['id']==d['id']),None)
+                    if ref is None:
+                        ref = {'id':d['id'],'title':d['title'],**d['metadata'],'citation':len(result['sources'])+1}
+                        result['sources'].append(ref)
+                    excerpts.append(f"[{ref['citation']}] {p['text']}")
+                result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
+                result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
+    store.message(sid,'user',{'content':question})
+    store.message(sid,'assistant',result)
+    return result
+
+
+def analyse_character(store, model, nexon, managed, question, history, result):
+    """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다."""
+    try:
+        profile = nexon.character(managed['name'], details=True)
+    except AppError as e:
+        result.update(status='clarify',content=f"{managed['name']} 조회에 실패해 답변을 보류합니다. {e}")
+        return
+    facts = context.build(profile, managed)
+    text = context.as_text(facts)
+    missing_note = None
+    result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
+                           'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
+    # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
+    if STARFORCE_INTENT.search(question):
+        computed = starforce_facts(store, profile, question, result)
+        if computed is None:
+            return
+        text += computed
+    # 값을 따져야 하는 질문이면 노작값부터 확보한다. 모르면 지어내지 않고 되묻는다.
+    if PRICE_INTENT.search(question):
+        resolved = prices.resolve_many(store, price_targets(facts, question))
+        known = [r for r in resolved if r['known']]
+        unknown = [r for r in resolved if not r['known']]
+        if known:
+            text += ('\n\n[저장된 노작값] 사용자가 알려 주었거나 조회해 둔 값이다. 여기 없는 장비의 값은 모른다.\n'
+                     + '\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소 ({r['source']}, {r['recorded_at'][:10]})"
+                                  for r in known))
+        # 하나도 모를 때만 멈추고 묻는다. 일부라도 알면 그걸로 답하고 모르는 것은 각주로 남긴다.
+        if unknown and not known:
+            result.update(status='ask_price', content=prices.ask_text(unknown))
+            result['asked'] = [{'item':r['item']} for r in unknown]
+            result['conditions'] = ['값을 모르는 채로 비용을 비교하지 않습니다. 알려 주시면 저장해 두고 다시 묻지 않습니다.',
+                                    '경매장 조회가 실패했거나 한도를 넘었습니다.' if prices.status(store)['fetcher']
+                                    else '외부 시세 조회기가 연결되어 있지 않아 저장된 값만 사용합니다.']
+            return
+        if unknown:
+            missing_note = '노작값을 모르는 장비: ' + ', '.join(r['item'] for r in unknown[:6])
+            text += f'\n\n[값을 모르는 장비] 아래는 노작값을 모른다. 값을 추측해서 비교하지 말 것.\n' \
+                    + '\n'.join(f"- {r['item']}" for r in unknown[:6])
+    selected_model = store.setting('model')
+    if not selected_model:
+        result.update(status='context',content=text)
+        result['conditions'] = ['로컬 모델을 선택하지 않아 조회한 사실만 정리했습니다. 설정에서 모델을 고르면 이 정보를 바탕으로 서술합니다.']
+        return
+    previous = [{'role':m['role'],'content':m['payload']['content']}
+                for m in history[-4:] if m['payload'].get('content')]
+    try:
+        written, metrics = model.analyse(selected_model, text, question, previous)
+        result['metrics'] = metrics
+    except AppError as e:
+        result.update(status='context',content=text)
+        result['conditions'] = [f'모델 응답에 실패해 조회한 사실만 표시합니다. {e}']
+        return
+    written = fix_name(written, facts['name'])
+    # 넘겨준 사실에 없는 확률이나 수치가 섞이면 그 서술은 쓰지 않는다.
+    invented = unsupported_numbers(written, text)
+    if FABRICATION.search(written) or invented:
+        result.update(status='context',content=text)
+        reason = ('모델이 조회한 사실에 없는 수치를 만들어 사용하지 않았습니다: '
+                  + ', '.join(invented[:5])) if invented else \
+                 '모델 서술에 근거 없는 확률 표현이 섞여 사용하지 않았습니다.'
+        result['conditions'] = [reason + ' 조회한 사실만 표시합니다.',
+                                '강화 확률과 시세는 검토된 자료가 등록되어야 답변합니다.']
+        return
+    result.update(status='analysis',content=written)
+    result['facts'] = text
+    result['conditions'] = ([missing_note] if missing_note else []) + [
+        f"넥슨 Open API로 {facts['retrieved_at']}에 조회한 이 캐릭터의 실제 값만 근거로 삼았습니다.",
+        '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.',
+        '추가옵션 등급(급·n추)은 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아닙니다.',
+    ]
+
+
+def fix_name(text, name):
+    """모델이 캐릭터 이름 끝 글자를 늘려 쓰는 경우를 원래 이름으로 되돌린다.
+
+    한국어 소형 모델에서 자주 나오는 반복 오류다. 이름은 API가 준 정확한 문자열이므로
+    그 이름으로 시작하면서 같은 글자가 더 붙은 덩어리만 잘라낸다.
+    """
+    if not name or name in ('', None):
+        return text
+    pattern = re.compile(re.escape(name) + r'(' + re.escape(name[-1]) + r')+')
+    return pattern.sub(name, text)
+
+
+def capture_prices(store, question, history):
+    """직전 답변이 노작값을 물었을 때만, 사용자가 적어 준 금액을 저장한다.
+
+    아무 때나 숫자를 값으로 받아들이면 엉뚱한 기록이 쌓이므로 되묻기 직후로 제한한다.
+    """
+    last = next((m for m in reversed(history) if m['role']=='assistant'), None)
+    if not last or last['payload'].get('status') != 'ask_price':
+        return []
+    asked = {a['item'] for a in last['payload'].get('asked') or []}
+    saved = []
+    for line in question.splitlines():
+        line = line.strip().lstrip('-').strip()
+        if not line:
+            continue
+        found = PRICE_REPLY.match(line)
+        if not found:
+            continue
+        item = found.group('item').strip()
+        price = prices.parse_price(found.group('price'))
+        match = next((a for a in asked if a == item), None) or \
+                next((a for a in asked if a in item or item in a), None)
+        if match and price:
+            saved.append(store.price_save({'item':match,'price':price,'source':'user'}))
+    return saved
+
+
+def price_targets(facts, question):
+    """질문과 관련된 장비를 추린다.
+
+    장비 이름이나 부위가 질문에 나오면 그것만 본다. 아무것도 지목하지 않았을 때만
+    손볼 후보를 몇 개 추린다. 한 번에 여러 개를 묻지 않으려는 것이다.
+    """
+    rows = (facts.get('weak_add_options') or []) + (facts.get('low_starforce') or [])
+    named = [r for r in rows if r['name'] in question or (r.get('slot') and r['slot'] in question)]
+    if named:
+        picked, seen = [], set()
+        for r in named:
+            if r['name'] not in seen:
+                seen.add(r['name'])
+                picked.append((r['name'], r.get('grade')))
+        return picked
+    candidates = [(r['name'], r.get('grade')) for r in (facts.get('weak_add_options') or []) if not r.get('empty')]
+    candidates += [(r['name'], None) for r in (facts.get('low_starforce') or [])]
+    return candidates[:4]
+
+
+def numbers_in(text):
+    """글에 나온 수치를 실제 값으로 바꿔 모은다. '32억'과 '3,200,000,000'을 같은 값으로 본다."""
+    found = set()
+    for digits, unit in AMOUNT.findall(text or ''):
+        try:
+            value = float(digits.replace(',', ''))
+        except ValueError:
+            continue
+        found.add(round(value * UNIT_SCALE.get(unit or None, 1)))
+        if unit:
+            found.add(round(value))      # '32억'을 '32'로 다시 쓴 경우도 인정한다.
+    return found
+
+
+def unsupported_numbers(written, facts_text, floor=1000):
+    """서술에 있으나 넘겨준 사실에는 없는 큰 수치. 지어낸 금액을 잡아내는 용도다.
+
+    작은 수(등급·성·퍼센트 등)는 모델이 합산하거나 세는 과정에서 나올 수 있어 통과시킨다.
+    금액 규모의 수치만 사실과 대조한다.
+    """
+    known = numbers_in(facts_text)
+    bad = []
+    for digits, unit in AMOUNT.findall(written or ''):
+        try:
+            value = float(digits.replace(',', ''))
+        except ValueError:
+            continue
+        actual = round(value * UNIT_SCALE.get(unit or None, 1))
+        if actual < floor or actual in known:
+            continue
+        bad.append(f"{digits}{unit or ''}")
+    return bad
+
+
+def starforce_facts(store, profile, question, result):
+    """질문이 가리키는 장비의 강화 기대값을 계산해 사실 묶음에 붙일 글을 돌려준다.
+
+    스페어(노작값)를 모르면 계산해도 총비용이 성립하지 않으므로 먼저 되묻는다.
+    되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
+    """
+    item = context.starforce_item(profile, question)
+    if not item:
+        return '\n\n[강화 기대값] 어느 장비를 말하는지 몰라 계산하지 않았다. 부위나 장비 이름을 물어볼 것.'
+    current = item['starforce']
+    found = TARGET_STAR.findall(question)
+    targets = [int(t) for t in found if int(t) > current]
+    if not targets:
+        return (f"\n\n[강화 기대값] {item['slot']}({item['name']})의 목표 성을 알 수 없어 계산하지 않았다. "
+                f"현재 {current}성이다. 목표 성을 물어볼 것.")
+    target = min(targets)
+    price = prices.resolve(store, item['name'], (item.get('add_grade') or {}).get('grade'))
+    if not price['known']:
+        result.update(status='ask_price', content=prices.ask_text([price]))
+        result['asked'] = [{'item': price['item']}]
+        result['conditions'] = [
+            f"{item['slot']}({item['name']})을 {current}성에서 {target}성으로 올리는 기대 비용은 "
+            '파괴 시 쓸 스페어 장비 값이 있어야 계산됩니다. 노작값을 알려주시면 바로 계산합니다.',
+            '값을 모르는 채로 비용을 내놓지 않습니다.']
+        return None
+    try:
+        calc = starforce.expected({'level': item['equip_level'], 'current_star': current,
+                                   'target_star': target, 'spare_cost': price['price']})
+    except AppError as e:
+        return f"\n\n[강화 기대값] 계산하지 못했다: {e}"
+    result['starforce'] = {**calc, 'slot': item['slot'], 'item': item['name']}
+    return (f"\n\n[강화 기대값] 앱이 직접 계산한 값이다. 이 수치를 그대로 쓰고 다른 확률을 지어내지 말 것.\n"
+            f"- 대상: {item['slot']} {item['name']} (레벨 {item['equip_level']})\n"
+            f"- {current}성 -> {target}성\n"
+            f"- 기대 비용: {calc['expected_cost']:,} 메소 (파괴 시 스페어 {price['price']:,.0f} 메소 포함)\n"
+            f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
+            f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
+            f"- 확률표 출처: {calc['source']['name']} (넥슨 공시와 대조하지 않은 커뮤니티 값, 스타캐치 반영)")
