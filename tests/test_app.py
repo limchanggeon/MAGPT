@@ -4,6 +4,7 @@ import json
 import re
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -617,6 +618,14 @@ class ConditionConversationTests(CharacterAnalysisTests):
         self.assertTrue(model.numbers_shown)
         plain,plain_model=self.ask('서술','내 장비 어때')
         self.assertFalse(plain_model.numbers_shown)
+    def test_source_note_matches_computed_answer(self):
+        """기대값을 보여 준 답에 '강화 확률·비용은 근거가 없어 뺐다'고 쓰면 앞뒤가 맞지 않는다."""
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,_=self.ask('덧붙이는 말','벨트 22성 기대값 얼마야?')
+        joined=' '.join(r['conditions'])
+        self.assertIn('mesulive',joined)
+        self.assertNotIn('근거가 없어 서술에서 제외',joined)
     def test_numbers_are_written_by_the_app(self):
         """모델이 '계산할 수 없다'고 써도 앱이 만든 수치 블록은 답변에 남는다."""
         conditions.save(self.store,dict(conditions.DEFAULTS))
@@ -685,6 +694,62 @@ class FabricationFilterTests(unittest.TestCase):
     def test_percent_from_facts_is_allowed(self):
         for text in ('STR +10%와 올스탯 +7%가 붙어 있습니다.','크리티컬 확률은 124입니다.'):
             with self.subTest(text=text): self.assertFalse(self.rejected(text))
+
+class ModelChoiceTests(unittest.TestCase):
+    """2B·8B는 사용자가 고른다. 설치 마법사의 선택은 setup.json으로 넘어와 첫 실행에서 한 번 쓰인다."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.app=Application(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def status(self,models):
+        return patch.object(Ollama,'status',return_value={'connected':True,'models':models})
+    def test_recommendation_follows_hardware(self):
+        from mepiti import models
+        self.assertEqual(models.recommend({'gpu':'NVIDIA GeForce GTX 1650, 4096 MiB'}),'light')
+        self.assertEqual(models.recommend({'gpu':'NVIDIA GeForce RTX 3070, 8192 MiB'}),'quality')
+        self.assertEqual(models.recommend({'os':'Darwin','architecture':'arm64','ram_gb':16}),'quality')
+        self.assertEqual(models.recommend({'os':'Darwin','architecture':'arm64','ram_gb':8}),'light')
+        self.assertEqual(models.recommend({}),'light')
+    def test_selected_model_is_not_changed_by_the_app(self):
+        self.app.store.set_setting('model','exaone3.5:7.8b')
+        (Path(self.tmp.name)/'setup.json').write_text('{"model_choice":"light"}',encoding='utf-8')
+        with self.status(['exaone3.5:7.8b']):
+            st=self.app.status()
+        self.assertEqual(st['selected_model'],'exaone3.5:7.8b')
+        self.assertIsNone(st['setup_choice'])           # 이미 고른 모델이 있으면 마법사 선택을 쓰지 않는다
+    def test_setup_choice_is_reported_until_used(self):
+        (Path(self.tmp.name)/'setup.json').write_text('{"model_choice":"quality"}',encoding='utf-8')
+        with self.status([]):
+            self.assertEqual(self.app.status()['setup_choice'],'quality')
+        (Path(self.tmp.name)/'setup.json').write_text('{"model_choice":"later"}',encoding='utf-8')
+        with self.status([]):
+            self.assertIsNone(self.app.status()['setup_choice'])   # '나중에'는 선택 없음
+    def test_installed_preset_is_selected_directly(self):
+        (Path(self.tmp.name)/'setup.json').write_text('{"model_choice":"light"}',encoding='utf-8')
+        with self.status(['qwen3.5:2b']):
+            r=self.app.route('POST','/api/model/preset',{},{'id':'light'})
+        self.assertEqual(r['selected'],'qwen3.5:2b')
+        self.assertEqual(self.app.store.setting('model'),'qwen3.5:2b')
+        self.assertFalse((Path(self.tmp.name)/'setup.json').exists())
+    def test_missing_preset_is_downloaded_then_selected(self):
+        def fake_pull(model,update): update({'status':'success'})
+        with self.status([]), patch.object(Ollama,'pull',side_effect=fake_pull):
+            self.app.route('POST','/api/model/preset',{},{'id':'quality'})
+            for _ in range(50):
+                if not self.app.download.get('running'): break
+                time.sleep(0.02)
+        self.assertEqual(self.app.store.setting('model'),'exaone3.5:7.8b')
+    def test_failed_download_does_not_select(self):
+        def failing(model,update): raise AppError('저장 공간 부족',503)
+        with self.status([]), patch.object(Ollama,'pull',side_effect=failing):
+            self.app.route('POST','/api/model/preset',{},{'id':'light'})
+            for _ in range(50):
+                if not self.app.download.get('running'): break
+                time.sleep(0.02)
+        self.assertEqual(self.app.store.setting('model'),'')
+        self.assertTrue(self.app.download.get('error'))
+    def test_unknown_preset_rejected(self):
+        with self.assertRaises(AppError):
+            self.app.route('POST','/api/model/preset',{},{'id':'huge'})
 
 class OllamaSwitchTests(unittest.TestCase):
     """생각 모드가 기본으로 켜진 모델(Qwen3·3.5)은 끈다. 켜 두면 추론에 토큰을 다 써서 답이 빈다."""

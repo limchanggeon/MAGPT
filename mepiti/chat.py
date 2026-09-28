@@ -331,9 +331,13 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     block = result.pop('starforce_text', None)
     result.update(status='analysis', content=(block + '\n\n' + written) if block else written)
     result['facts'] = text
+    # 기대값을 계산해 보여 준 답에 '강화 확률·비용은 근거가 없어 뺐다'고 쓰면 앞뒤가 맞지 않는다.
+    source_note = ('강화 기대값은 앱이 mesulive 확률표·비용식으로 계산한 값입니다(넥슨 공시와 대조하지 않음). '
+                   '시세·패치 내용은 서술에서 제외했습니다.' if result.get('starforce') else
+                   '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.')
     result['conditions'] = [
         f"넥슨 Open API로 {facts['retrieved_at']}에 조회한 이 캐릭터의 실제 값만 근거로 삼았습니다.",
-        '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.',
+        source_note,
         '추가옵션 등급(급·n추)은 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아닙니다.',
     ]
 

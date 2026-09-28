@@ -780,3 +780,30 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 변경: `mepiti/adapters.py`, `mepiti/chat.py`, `scripts/eval_models.py`(신규), `tests/test_app.py`, `HANDOFF.md`, `IMPLEMENTATION.md`.
 - 검증: 자동 테스트 **263개 통과**(258→263). 생각 모드 스위치 3건, 지어낸 확률 필터 2건 추가.
   Homebrew Ollama 서비스를 원래대로(q8_0 KV 캐시) 되돌렸고 qwen3.5:2b·Kanana가 그 설정에서 동작하는 것을 확인했다.
+
+### 2026-09-28 — 모델 선택·설치 마법사·README·릴리스 준비 (사용자 요청)
+
+- 사용자 결정: 탈락 모델만 지우고, 기본 모델을 앱이 바꾸지 말고 **사용자가 고르게** 한다. 설치할 때 Ollama도 함께 설치하고
+  8B/2B를 고르게 한다. README에 이미지와 exe·dmg 다운로드 링크를 넣고 릴리스한다.
+- 모델 정리: 사용자 Mac에서 탈락 모델 7종을 지웠다. 남은 것 `qwen3.5:2b`, `exaone3.5:7.8b`(약 7GB).
+- `mepiti/models.py`(신규): 선택지 2개(`light`=qwen3.5:2b, `quality`=exaone3.5:7.8b)와 기기 추천
+  (NVIDIA VRAM 7.5GB 이상 또는 Apple Silicon 16GB 이상이면 8B, 그 밖은 2B). 추천은 표시만 하고 고르지는 않는다.
+- 서버: `/api/model/preset`(받아 둔 모델이면 바로 사용, 없으면 받은 뒤 사용), `/api/model/setup/skip`,
+  `/api/ollama/install`(macOS 전용). `status`에 `presets`·`setup_choice`·`ollama_setup` 추가. 다운로드 실패 시 사용 모델을 바꾸지 않는다.
+- 첫 실행 카드(`#setup-card`): 사용 모델이 없을 때 질의 화면 위에 뜬다. Ollama가 없으면 Mac은 설치 버튼,
+  Windows는 공식 사이트 안내, 설치됐지만 꺼져 있으면 '다시 확인'. 설치 마법사에서 고른 모델이 있으면 자동으로 받기 시작한다.
+- macOS Ollama 설치(`adapters.install_ollama_mac`): 공식 `Ollama-darwin.zip`(약 190MB)을 받아 `ditto`로 풀어
+  `~/Applications/Ollama.app`에 두고 연다. 관리자 권한 불필요. **실제 설치까지는 이 Mac에서 돌려 보지 않았다**(이미 Homebrew Ollama가 있음).
+- Windows 설치 마법사(`scripts/installer.iss`): 설치 폴더 → AI 모델 선택(2B/8B/나중에, nvidia-smi VRAM으로 기본값) →
+  Ollama 설치(없을 때만, 공식 `OllamaSetup.exe` 약 1.5GB를 마법사에서 내려받아 `/SILENT`로 실행) → `%USERPROFILE%\.mepiti\setup.json`에
+  선택 기록. 모델 파일은 마법사에서 받지 않고 앱 첫 실행에서 진행률과 함께 받는다(Ollama 실행이 필요하고 대용량 진행률은 앱이 더 잘 보여 줌).
+  Ollama 다운로드·설치가 실패해도 메피티 설치는 계속한다. 한국어 메시지 파일(`Korean.isl`)은 있으면 쓴다.
+  **Pascal 코드는 이 Mac에서 컴파일할 수 없어 CI(windows-latest)의 빌드로 처음 검증한다. 실제 설치 흐름은 Windows 실기에서 확인해야 한다.**
+- 버전 0.2.0(`pyproject.toml`, `mepiti/__init__.py`, 설치 파일, 화면 표기는 서버 버전으로 표시).
+- 화면 수정: 답변의 `**굵게**`가 기호째 보이던 문제(텍스트 노드로만 굵게 처리), 기대값을 보여 준 답에 '강화 확률·비용은 근거가 없어
+  뺐다'고 쓰던 모순된 안내, 첫 화면 세로 가운데 정렬 때문에 내용이 길면 위쪽이 스크롤로 닿지 않던 문제(grid→flex auto 여백).
+- README: 사용자 안내를 새 설치 흐름으로 다시 쓰고, 스크린샷 4장(`docs/images/`)과 exe·dmg 직접 링크
+  (`releases/latest/download/...`)를 넣었다. 스크린샷은 `scripts/demo_server.py`(가짜 넥슨 응답, 익명 캐릭터 '시험렌렌', 임시 DB)로 찍었다.
+  외형·장비는 사용자 캐릭터의 것이다(이름·길드 제외). 원하지 않으면 교체한다.
+- **저장소가 비공개라 README의 다운로드 링크는 저장소 권한이 있는 사람에게만 열린다.** 지인이 받게 하려면 저장소를 공개로 바꾸거나 파일을 직접 전달해야 한다(사용자 결정).
+- 검증: 자동 테스트 **271개 통과**(263→271). 모델 선택 7건, 출처 안내 1건 추가.

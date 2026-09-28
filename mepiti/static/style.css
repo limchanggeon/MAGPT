@@ -128,7 +128,12 @@ main{margin-left:200px;width:calc(100% - 200px)}
 /* ---- 질의 ---- */
 .chat-view{height:calc(100dvh - 46px);display:flex;flex-direction:column}
 .chat-scroll{overflow-y:auto;flex:1}
-.chat-scroll:has(>#welcome:not([hidden])){display:grid;align-content:center}
+/* 첫 화면은 세로 가운데. grid의 align-content:center는 내용이 넘치면 위쪽이 스크롤로 닿지 않는 곳에
+   잘려 나가므로(설정 카드 제목이 사라졌다) auto 여백을 쓴다. 넘치면 여백이 0이 되어 잘리지 않는다. */
+.chat-scroll:has(>#welcome:not([hidden])){display:flex;flex-direction:column}
+.chat-scroll:has(>#welcome:not([hidden]))>#welcome{margin-block:auto}
+.chat-scroll:has(>#welcome:not([hidden]))>#setup-card:not([hidden]){margin-top:auto}
+.chat-scroll:has(>#welcome:not([hidden]))>#setup-card:not([hidden])+#welcome{margin-top:24px}
 .welcome{max-width:760px;padding:56px 24px 20px;margin:0 auto}
 .welcome h1{font-size:26px;line-height:1.45;letter-spacing:-.8px;margin:0 0 12px;font-weight:650;text-wrap:balance}
 .welcome-copy{font-size:12.5px;line-height:1.85;color:var(--muted);max-width:60ch;margin-bottom:26px}
@@ -623,3 +628,22 @@ dialog::backdrop{background:#05080bcc}
 .sidebar{font-size:14px}
 .nav-item{font-size:14px}
 @media(max-width:820px){:root{--ui-scale:1}}
+
+/* ---- AI 모델 선택 (설정·첫 실행) ---- */
+.model-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.preset-card{display:flex;flex-direction:column;gap:8px;background:var(--inset);border:1px solid var(--line);border-radius:5px;padding:14px}
+.preset-card.selected{border-color:var(--gold)}
+.preset-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.preset-top strong{font-size:14px;margin-right:auto}
+.badge.gold{color:var(--gold);border-color:var(--gold-dim)}
+.preset-fits{margin:0;font-size:12px;color:var(--ink)}
+.preset-card .hint{margin:0}
+.preset-meta{display:flex;flex-wrap:wrap;gap:4px 10px;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.preset-card>button{align-self:flex-start;margin-top:auto}
+.download-status{font-family:var(--mono);font-size:11px;color:var(--muted);min-height:1em;margin:6px 0}
+.model-advanced{margin:6px 0 10px}
+.model-advanced>summary{cursor:pointer;font-size:12px;color:var(--muted);padding:6px 0}
+.setup-card{max-width:760px;margin:24px auto 0;padding:18px;background:var(--panel);border:1px solid var(--gold-dim);border-radius:6px}
+.setup-card h2{margin:0 0 8px}
+.setup-card>p{font-size:12.5px;line-height:1.75;margin:0 0 10px}
+@media(max-width:820px){.model-presets{grid-template-columns:1fr}}

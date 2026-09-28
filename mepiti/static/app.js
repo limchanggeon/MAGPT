@@ -16,7 +16,9 @@ function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
-function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.links?.length){const links=el('div','sources');payload.links.forEach(l=>{const a=sourceLink(l.url,l.title);a.className='source';links.append(a);});block.append(links);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
+// **굵게**만 살린다. 텍스트 노드로만 만들어 HTML이 끼어들 틈이 없다.
+function richText(cls,text){const box=el('div',cls);String(text||'').split(/(\*\*[^*\n]+?\*\*)/).forEach(part=>{if(/^\*\*[^*\n]+?\*\*$/.test(part))box.append(el('strong','',part.slice(2,-2)));else if(part)box.append(document.createTextNode(part));});return box;}
+function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,richText('message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.links?.length){const links=el('div','sources');payload.links.forEach(l=>{const a=sourceLink(l.url,l.title);a.className='source';links.append(a);});block.append(links);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
 async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);const latest=[...messages].reverse().find(m=>m.payload?.topic_item)?.payload.topic_item;chatTopic=s.topic?{...s.topic,...(latest||{})}:null;renderTopicCard();messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
 function newChat(){if(busy)return;sessionId=null;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
 $('#new-chat').addEventListener('click',newChat);
@@ -371,7 +373,7 @@ $('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
   toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
   await loadForgeHistory();
 });
-async function loadStatus(){const s=await api('status');const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';if(s.download.running)pollDownload();else if(s.download.status)$('#download-status').textContent=s.download.status;}
+async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderSetup(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){
@@ -413,7 +415,52 @@ $('#key-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await 
 $('#delete-key').onclick=e=>task(e.currentTarget,async()=>{if(!confirm('저장된 API 키를 삭제합니다.'))return;await api('settings/key/delete',{});accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='키 삭제됨 · 설정에서 등록하세요';await loadStatus();toast('키를 삭제했습니다.');});
 $('#model-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('settings/model',formData(e.target));await loadStatus();toast('모델을 저장했습니다.');});};
 $('#pull-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('model/pull',formData(e.target));pollDownload();});};
-async function pollDownload(){clearTimeout(downloadTimer);try{const d=await api('download');$('#download-status').textContent=(d.status||'대기')+(d.total?` · ${Math.round((d.completed||0)/d.total*100)}%`:'');$('#pull-form button').disabled=d.running;if(d.running)downloadTimer=setTimeout(pollDownload,1500);else await loadStatus();}catch(e){toast(e.message,true);$('#pull-form button').disabled=false;}}
+function progressText(d){return (d.status||'대기')+(d.total?` · ${Math.round((d.completed||0)/d.total*100)}% (${(d.completed/1e9).toFixed(2)} / ${(d.total/1e9).toFixed(2)} GB)`:'');}
+async function pollDownload(){clearTimeout(downloadTimer);try{const d=await api('download');$$('.download-status').forEach(e=>e.textContent=progressText(d));$('#pull-form button').disabled=d.running;$$('.preset-card button').forEach(b=>b.disabled=d.running);if(d.running)downloadTimer=setTimeout(pollDownload,1500);else await loadStatus();}catch(e){toast(e.message,true);$('#pull-form button').disabled=false;}}
+// 2B·8B 선택. 기본값을 앱이 정하지 않고 사용자가 고른다(설치 마법사·첫 실행·설정).
+let setupSkipped=false,setupAutoStarted=false,ollamaTimer;
+async function choosePreset(id){const r=await api('model/preset',{id});if(r.selected){toast(`${r.selected}를 사용합니다.`);await loadStatus();}else pollDownload();}
+function presetCard(p,busy){
+  const card=el('div','preset-card'+(p.selected?' selected':''));
+  const top=el('div','preset-top');top.append(el('strong','',p.label));
+  if(p.recommended)top.append(el('span','badge gold','이 기기 추천'));
+  if(p.selected)top.append(el('span','badge','사용 중'));else if(p.installed)top.append(el('span','badge','받아 둠'));
+  card.append(top,el('p','preset-fits',p.fits),el('p','hint',p.note));
+  const meta=el('div','preset-meta');[`모델 ${p.model}`,`내려받기 ${p.download_gb}GB`,`메모리 약 ${p.memory_gb}GB`,p.license].forEach(t=>meta.append(el('span','',t)));card.append(meta);
+  const button=el('button',p.selected?'secondary':'primary',p.selected?'사용 중':p.installed?'이 모델 쓰기':`받고 쓰기 (${p.download_gb}GB)`);
+  button.type='button';button.disabled=p.selected||busy;button.onclick=()=>task(button,()=>choosePreset(p.id));card.append(button);
+  return card;
+}
+function renderPresets(s){const box=$('#model-presets');box.replaceChildren();(s.presets||[]).forEach(p=>box.append(presetCard(p,s.download.running)));}
+function renderSetup(s){
+  const card=$('#setup-card');const ready=s.selected_model&&s.model.models.includes(s.selected_model);
+  card.hidden=ready||setupSkipped;if(card.hidden)return;card.replaceChildren();
+  card.append(el('h2','','AI 모델 준비'));
+  const sys=s.system||{},setup=s.ollama_setup||{};
+  if(!s.model.connected){
+    if(setup.running){card.append(el('p','download-status',progressText(setup)));return;}
+    if(setup.error)card.append(el('p','notice',setup.status));
+    if(!sys.ollama_installed&&sys.os==='Darwin'){
+      card.append(el('p','','AI 답변에는 Ollama가 필요합니다. 공식 Ollama 앱(약 190MB)을 내려받아 사용자 폴더에 설치합니다. 관리자 권한은 필요 없습니다.'));
+      const install=el('button','primary','Ollama 설치');install.type='button';
+      install.onclick=()=>task(install,async()=>{await api('ollama/install',{});clearInterval(ollamaTimer);ollamaTimer=setInterval(()=>guard(loadStatus),2000);});card.append(install);
+    }else if(!sys.ollama_installed){
+      card.append(el('p','','AI 답변에는 Ollama가 필요합니다. 설치 프로그램을 다시 실행해 Ollama를 함께 설치하거나, 공식 사이트에서 받아 설치하세요.'));
+      card.append(sourceLink('https://ollama.com/download','Ollama 내려받기 ↗'));
+    }else{
+      card.append(el('p','','Ollama가 설치되어 있지만 실행 중이 아닙니다. Ollama를 실행한 뒤 다시 확인하세요.'));
+      const again=el('button','secondary','다시 확인');again.type='button';again.onclick=()=>task(again,loadStatus);card.append(again);
+    }
+    return;
+  }
+  clearInterval(ollamaTimer);
+  const chosen=s.setup_choice&&(s.presets||[]).find(p=>p.id===s.setup_choice);
+  card.append(el('p','',chosen?`설치할 때 고른 ${chosen.label} 모델을 받습니다. 끝나면 바로 쓸 수 있습니다.`:'답변을 쓸 모델을 고르세요. 나중에 설정에서 바꿀 수 있습니다.'));
+  const grid=el('div','model-presets');(s.presets||[]).forEach(p=>grid.append(presetCard(p,s.download.running)));card.append(grid);
+  card.append(el('p','download-status',s.download.running||s.download.status?progressText(s.download):''));
+  const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;await api('model/setup/skip',{});card.hidden=true;});card.append(later);
+  if(chosen&&!chosen.installed&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
+}
 (async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
 
 $('#quit-app').onclick=()=>guard(async()=>{if(!confirm('앱을 종료합니다. 저장된 데이터는 유지됩니다.'))return;await api('shutdown',{});clearTimeout(downloadTimer);toast('종료했습니다. 탭을 닫아도 됩니다.');});

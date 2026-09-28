@@ -12,7 +12,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .adapters import Nexon, Ollama, Vault, recognize, system_info
+from .adapters import Nexon, Ollama, Vault, install_ollama_mac, recognize, system_info
+from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
 from . import earnings, history, notices, prices, starforce
@@ -83,6 +84,7 @@ class Application:
         self.model = Ollama()
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
+        self.ollama_setup = {'running':False}
         self.lock = threading.Lock()
         self.chat_lock = threading.Lock()
 
@@ -93,7 +95,33 @@ class Application:
         except AppError as e:
             key, vault_error = False, str(e)
         docs = self.store.documents()
-        return {'version':__version__,'model':self.model.status(),'selected_model':self.store.setting('model'),'key_present':key,'vault_error':vault_error,'system':system_info(self.store.folder),'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder)}
+        ollama = self.model.status()
+        system = system_info(self.store.folder)
+        selected = self.store.setting('model')
+        return {'version':__version__,'model':ollama,'selected_model':selected,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
+                'presets':models.describe(system,ollama['models'],selected),
+                'setup_choice':models.setup_choice(self.store.folder) if not selected else None,
+                'ollama_setup':dict(self.ollama_setup)}
+
+    def start_pull(self, model, select_after=False):
+        """모델 다운로드를 뒤에서 돌린다. select_after면 끝난 뒤 그 모델을 사용 모델로 정한다."""
+        with self.lock:
+            if self.download.get('running'): raise AppError('이미 모델을 다운로드 중입니다.',409)
+            self.download = {'running':True,'model':model,'status':'다운로드 준비 중'}
+        def run():
+            try:
+                self.model.pull(model,lambda event:self.download.update(event))
+                self.download.update(status='다운로드 완료')
+                if select_after:
+                    self.store.set_setting('model',model)
+                    models.clear_setup(self.store.folder)
+                    self.download.update(status='다운로드 완료 · 사용 모델로 정했습니다')
+            except AppError as e:
+                self.download.update(status=str(e),error=True)
+            finally:
+                self.download['running'] = False
+        threading.Thread(target=run,daemon=True).start()
+        return dict(self.download)
 
     def route(self,method,path,query,data):
         s = self.store
@@ -168,20 +196,32 @@ class Application:
                 s.set_setting('model',name)
                 return {'ok':True}
             if path == '/api/model/pull':
-                model = required(data,'model',100)
+                return self.start_pull(required(data,'model',100))
+            if path == '/api/model/preset':
+                # 2B·8B 중 하나를 고른다. 받아 둔 모델이면 바로 쓰고, 없으면 받은 뒤 쓴다.
+                preset = models.by_id(required(data,'id',20))
+                if not preset: raise AppError('고를 수 있는 모델이 아닙니다.')
+                if preset['model'] in self.model.status()['models']:
+                    s.set_setting('model',preset['model'])
+                    models.clear_setup(s.folder)
+                    return {'selected':preset['model']}
+                return self.start_pull(preset['model'], select_after=True)
+            if path == '/api/model/setup/skip':
+                models.clear_setup(s.folder)
+                return {'ok':True}
+            if path == '/api/ollama/install':
                 with self.lock:
-                    if self.download.get('running'): raise AppError('이미 모델을 다운로드 중입니다.',409)
-                    self.download = {'running':True,'model':model,'status':'다운로드 준비 중'}
-                def run():
+                    if self.ollama_setup.get('running'): raise AppError('이미 Ollama를 설치하고 있습니다.',409)
+                    self.ollama_setup = {'running':True,'status':'준비 중'}
+                def install():
                     try:
-                        self.model.pull(model,lambda event:self.download.update(event))
-                        self.download.update(status='다운로드 완료')
+                        install_ollama_mac(lambda event:self.ollama_setup.update(event))
                     except AppError as e:
-                        self.download.update(status=str(e),error=True)
+                        self.ollama_setup.update(status=str(e),error=True)
                     finally:
-                        self.download['running'] = False
-                threading.Thread(target=run,daemon=True).start()
-                return dict(self.download)
+                        self.ollama_setup['running'] = False
+                threading.Thread(target=install,daemon=True).start()
+                return dict(self.ollama_setup)
         raise AppError('요청 경로를 찾을 수 없습니다.',404)
 
 

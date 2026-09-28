@@ -592,6 +592,64 @@ def recognize(encoded):
     except Exception:
         raise AppError('이미지를 처리할 수 없습니다. PNG 또는 JPEG 파일을 확인해 주세요.')
 
+OLLAMA_MAC_ZIP = 'https://ollama.com/download/Ollama-darwin.zip'
+OLLAMA_WINDOWS_SETUP = 'https://ollama.com/download/OllamaSetup.exe'
+
+
+def ollama_installed():
+    """Ollama가 설치되어 있는가. 실행 중인지와는 별개다."""
+    if shutil.which('ollama'):
+        return True
+    system = platform.system()
+    if system == 'Darwin':
+        return any(p.exists() for p in (Path('/Applications/Ollama.app'), Path.home() / 'Applications' / 'Ollama.app'))
+    if system == 'Windows':
+        import os
+        local = os.environ.get('LOCALAPPDATA')
+        return bool(local) and (Path(local) / 'Programs' / 'Ollama' / 'ollama.exe').exists()
+    return False
+
+
+def install_ollama_mac(update):
+    """공식 Ollama 앱을 ~/Applications에 설치하고 실행한다. 관리자 권한이 필요 없다.
+
+    DMG에는 설치 마법사가 없어서 첫 실행 화면에서 이 함수로 설치한다.
+    압축은 macOS 내장 ditto로 푼다. 파이썬 zipfile은 실행 권한과 심볼릭 링크를 잃어 앱이 깨진다.
+    """
+    if platform.system() != 'Darwin':
+        raise AppError('이 기능은 macOS에서만 씁니다. Windows는 설치 마법사가 Ollama를 설치합니다.')
+    target = Path.home() / 'Applications'
+    with tempfile.TemporaryDirectory(prefix='mepiti-ollama-') as folder:
+        archive = Path(folder) / 'Ollama-darwin.zip'
+        try:
+            with urlopen(Request(OLLAMA_MAC_ZIP), timeout=60) as response, open(archive, 'wb') as out:
+                total = int(response.headers.get('Content-Length') or 0)
+                done = 0
+                while True:
+                    chunk = response.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    update({'status': 'Ollama 내려받는 중', 'completed': done, 'total': total})
+        except (URLError, TimeoutError, OSError):
+            raise AppError('Ollama를 내려받지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.', 503)
+        update({'status': 'Ollama 설치 중', 'completed': None, 'total': None})
+        unpacked = Path(folder) / 'unpacked'
+        result = subprocess.run(['ditto', '-x', '-k', str(archive), str(unpacked)], capture_output=True, timeout=300)
+        app = unpacked / 'Ollama.app'
+        if result.returncode or not app.exists():
+            raise AppError('Ollama 압축을 풀지 못했습니다. 다시 시도해 주세요.', 502)
+        target.mkdir(exist_ok=True)
+        destination = target / 'Ollama.app'
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.move(str(app), str(destination))
+    subprocess.run(['open', str(destination)], capture_output=True, timeout=30)
+    update({'status': 'Ollama 설치 완료', 'completed': None, 'total': None})
+    return str(destination)
+
+
 def system_info(folder):
     ram = None
     try:
@@ -605,4 +663,4 @@ def system_info(folder):
             gpu = subprocess.run(['nvidia-smi','--query-gpu=name,memory.total','--format=csv,noheader'],capture_output=True,text=True,timeout=3).stdout.strip()
         except (OSError,subprocess.TimeoutExpired):
             pass
-    return {'os':platform.system(),'architecture':platform.machine(),'cpu':platform.processor() or platform.machine(),'ram_gb':ram,'disk_free_gb':round(shutil.disk_usage(folder).free/1024**3,1),'gpu':gpu,'ocr_available':bool(shutil.which('tesseract'))}
+    return {'os':platform.system(),'architecture':platform.machine(),'cpu':platform.processor() or platform.machine(),'ram_gb':ram,'disk_free_gb':round(shutil.disk_usage(folder).free/1024**3,1),'gpu':gpu,'ocr_available':bool(shutil.which('tesseract')),'ollama_installed':ollama_installed()}
