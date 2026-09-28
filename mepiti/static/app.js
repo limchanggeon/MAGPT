@@ -325,13 +325,23 @@ function historyCard(g){
   const stats=el('div','history-stats');
   const stat=(label,value,sub,cls)=>{const b=el('div',cls||'');b.append(el('span','',label),el('strong','',value));if(sub)b.append(el('small','',sub));stats.append(b);};
   const exp=g.expected;
-  stat('시도',`${fmt(g.attempts)}회`,exp?`기대 ${fmt(exp.attempts)}회`:`성공 ${fmt(g.success)} · 실패 ${fmt(g.fail)}`);
-  stat('파괴',`${fmt(g.destroy)}회`,exp?`기대 ${fmt(exp.destroys)}회`:(g.safeguard?`파괴방지 ${fmt(g.safeguard)}회`:''));
-  if(g.actual)stat('실제 쓴 돈',mesoText(g.actual.total),`강화 ${mesoText(g.actual.attempts_cost)}`+(g.destroy?` + 파괴 ${mesoText(g.actual.destroy_cost)}`:''));
-  if(exp){const diff=g.difference;const more=diff>0;
+  const a=g.actual;
+  if(exp&&a){
+    // 기대값과는 최고 성을 처음 찍을 때까지만 비교한다.
+    stat(`★${g.start}→★${g.reached} 시도`,`${fmt(a.to_reach_attempts)}회`,`기대 ${fmt(exp.attempts)}회`);
+    stat('그동안 파괴',`${fmt(a.to_reach_destroys)}회`,`기대 ${fmt(exp.destroys)}회`);
+    stat(`★${g.reached} 달성까지 쓴 돈`,mesoText(a.to_reach),'강화 비용 + 파괴 × 노작값');
     stat('기대값',mesoText(exp.cost),`★${g.start} → ★${g.reached} 평균`);
-    stat(more?'기대보다 더 씀':'기대보다 덜 씀',mesoText(Math.abs(diff)),g.ratio?`기대값의 ${fmt(Math.round(g.ratio*100))}%`:'',more?'history-bad':'history-good');}
+    const more=g.difference>0;
+    stat(more?'기대보다 더 씀':'기대보다 덜 씀',mesoText(Math.abs(g.difference)),g.ratio?`기대값의 ${fmt(Math.round(g.ratio*100))}%`:'',more?'history-bad':'history-good');
+  }else{
+    stat('시도',`${fmt(g.attempts)}회`,`성공 ${fmt(g.success)} · 실패 ${fmt(g.fail)}`);
+    stat('파괴',`${fmt(g.destroy)}회`,g.safeguard?`파괴방지 ${fmt(g.safeguard)}회`:'');
+  }
+  if(a)stat('전체 쓴 돈',mesoText(a.total),`강화 ${mesoText(a.attempts_cost)}`+(g.destroy?` + 파괴 ${mesoText(a.destroy_cost)}`:''));
   card.append(stats);
+  if(a&&a.after_attempts)card.append(el('p','history-after',
+    `★${g.reached} 달성 이후 추가 도전 ${fmt(a.after_attempts)}회 · 파괴 ${fmt(a.after_destroys)}회 · ${mesoText(a.after)} (기대값 비교에서 제외)`));
   if(!g.level||(g.destroy&&g.spare_price==null)){
     const fix=el('form','history-fix');
     if(!g.level){const l=el('label','','장비 레벨');const i=el('input');i.name='level';i.type='number';i.min=1;i.max=300;i.placeholder='예: 250';l.append(i);fix.append(l);}

@@ -1182,7 +1182,12 @@ class StarforceHistoryTests(unittest.TestCase):
         costs=starforce.attempt_costs(250)
         spent=sum(round(costs[s]*0.7) for s in (18,18,19,12))+2e7
         self.assertEqual(g['actual']['total'],spent)
-        self.assertIsNotNone(g['expected']); self.assertAlmostEqual(g['difference'],spent-g['expected']['cost'])
+        # 기대값과는 19성을 처음 찍을 때까지(18 유지, 18→19)만 비교한다. 그 뒤 파괴·재강화는 따로.
+        to_reach=round(costs[18]*0.7)*2
+        self.assertEqual(g['actual']['to_reach'],to_reach)
+        self.assertEqual((g['actual']['after_attempts'],g['actual']['after_destroys']),(2,1))
+        self.assertEqual(g['actual']['after'],spent-to_reach)
+        self.assertIsNotNone(g['expected']); self.assertAlmostEqual(g['difference'],to_reach-g['expected']['cost'])
     def test_fetch_skips_old_days_once_fetched(self):
         calls=[]
         class N:

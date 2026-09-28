@@ -174,6 +174,8 @@ def analyse(store, character, item, rows, picked, levels):
     if not level or level > 300 or max(r['before'] for r in rows) >= 30:
         group['notes'].append('장비 레벨을 몰라 비용을 계산하지 않았습니다. 레벨을 적어 주세요.')
         return group
+    spent = [attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r))
+             + (group['spare_price'] or 0 if destroyed(r) else 0) for r in rows]
     attempts_cost = sum(attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r)) for r in rows)
     # 기대값은 기록에 가장 많이 남은 이벤트로 계산한다. 파괴방지는 실제로 켠 구간만 켠다.
     event = Counter(event_name(events_of(r), r['before']) for r in rows).most_common(1)[0][0]
@@ -181,8 +183,15 @@ def analyse(store, character, item, rows, picked, levels):
     group['event'] = event
     picked = {**picked, 'event': event, 'safeguard': False}
     destroy_cost = counts['destroy'] * (group['spare_price'] or 0)
+    # 기대값과는 '최고 성을 처음 찍을 때까지'만 비교한다. 그 뒤(더 높은 성 도전·파괴 후 복구)는 따로 보여 준다.
+    first = next(i for i, r in enumerate(rows) if r['after'] == reached)
+    until = rows[:first + 1]
     group['actual'] = {'attempts_cost': attempts_cost, 'destroy_cost': destroy_cost,
-                       'total': attempts_cost + destroy_cost}
+                       'total': attempts_cost + destroy_cost,
+                       'to_reach': sum(spent[:first + 1]), 'to_reach_attempts': len(until),
+                       'to_reach_destroys': sum(destroyed(r) for r in until),
+                       'after': sum(spent[first + 1:]), 'after_attempts': len(rows) - len(until),
+                       'after_destroys': counts['destroy'] - sum(destroyed(r) for r in until)}
     if group['spare_price'] is None and counts['destroy']:
         group['notes'].append('노작값을 몰라 파괴 비용을 0으로 두었습니다. 노작값을 적으면 다시 계산합니다.')
     if reached > start and reached <= starforce.reachable_star(level):
@@ -192,8 +201,8 @@ def analyse(store, character, item, rows, picked, levels):
                                        **conditions.to_arguments(picked, start, reached), 'safeguard': guarded})
             group['expected'] = {'cost': calc['expected_cost'], 'attempts': calc['expected_attempts'],
                                  'destroys': calc['expected_destroys']}
-            group['difference'] = group['actual']['total'] - calc['expected_cost']
-            group['ratio'] = round(group['actual']['total'] / calc['expected_cost'], 3) if calc['expected_cost'] else None
+            group['difference'] = group['actual']['to_reach'] - calc['expected_cost']
+            group['ratio'] = round(group['actual']['to_reach'] / calc['expected_cost'], 3) if calc['expected_cost'] else None
         except AppError as e:
             group['notes'].append(f'기대값을 계산하지 못했습니다: {e}')
     else:
@@ -216,4 +225,5 @@ def overview(store):
             'notes': ['쓴 메소는 넥슨 기록에 없어, 시도마다 그 성의 강화 비용을 비용식(mesulive 이식, 비공식)으로 다시 계산했습니다.',
                       '이벤트 할인은 기록에 남은 강화 당시 이벤트를 썼습니다. MVP·PC방 할인은 기록에 없어 저장한 강화 조건을 썼습니다.',
                       '기대값은 시작 성에서 도달한 최고 성까지, 기록에 가장 많이 남은 이벤트와 실제로 켠 파괴방지 구간으로 계산한 평균입니다.',
+                      '기대값과는 최고 성을 처음 달성할 때까지 쓴 돈만 비교하고, 그 뒤의 도전·파괴 후 재강화 비용은 따로 보여 줍니다.',
                       '흔적 복구 비용은 기록으로 알 수 없어 넣지 않았습니다.']}
