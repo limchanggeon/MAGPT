@@ -17,6 +17,23 @@ function nexonImage(url,alt,cls){
   catch{return el('span','image-unavailable','이미지 없음');}
   const img=el('img',cls);img.src=url;img.alt=alt;img.decoding='async';img.onerror=()=>img.replaceWith(el('span','image-unavailable','불러오기 실패'));return img;
 }
+// 넥슨 캐릭터 이미지는 캐릭터 주위에 투명 여백이 크다. 캐릭터가 있는 부분만 잘라 칸을 채운다.
+// 넥슨 서버가 교차 출처 읽기를 막으면 잘라낼 수 없으므로, 캐릭터 쪽으로 확대하는 방식으로 대신한다.
+function fitSprite(img,url){
+  const fallback=()=>img.classList.add('zoomed');
+  const probe=new Image();probe.crossOrigin='anonymous';
+  probe.onload=()=>{try{
+    const c=document.createElement('canvas');c.width=probe.naturalWidth;c.height=probe.naturalHeight;
+    const g=c.getContext('2d');g.drawImage(probe,0,0);const px=g.getImageData(0,0,c.width,c.height).data;
+    let x0=c.width,y0=c.height,x1=-1,y1=-1;
+    for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(px[(y*c.width+x)*4+3]>8){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+    if(x1<0)return fallback();
+    const pad=2,w=x1-x0+1+pad*2,h=y1-y0+1+pad*2,out=document.createElement('canvas');out.width=w;out.height=h;
+    out.getContext('2d').drawImage(c,x0-pad,y0-pad,w,h,0,0,w,h);
+    img.src=out.toDataURL('image/png');img.classList.add('trimmed');
+  }catch{fallback();}};
+  probe.onerror=fallback;probe.src=url;
+}
 function showProfileEmpty(message){
   const box=$('#character-profile');box.replaceChildren();const empty=el('div','profile-placeholder');empty.append(el('h2','','캐릭터 미선택'),el('p','',message||'아래 목록에서 캐릭터를 선택하세요.'));
   box.append(empty);
@@ -56,7 +73,7 @@ function renderCharacterProfile(data){
   const root=$('#character-profile');root.replaceChildren();
   const managed=managedCharacters.find(c=>c.name===data.name);
   const hero=el('section','character-hero');const stage=el('div','character-stage');
-  const identity=el('div','stage-identity');identity.append(el('h2','',data.name),el('p','',`${data.world||'월드 미확인'} · ${data.job||'직업 미확인'}`));stage.append(identity,nexonImage(data.image,data.name+' 실제 캐릭터 외형','hero-avatar'));
+  const identity=el('div','stage-identity');identity.append(el('h2','',data.name),el('p','',`${data.world||'월드 미확인'} · ${data.job||'직업 미확인'}`));const sprite=nexonImage(data.image,data.name+' 실제 캐릭터 외형','hero-avatar');stage.append(identity,sprite);if(sprite.tagName==='IMG')fitSprite(sprite,data.image);
   const level=el('div','stage-level');level.append(el('small','','LEVEL'),el('strong','',fmt(data.level)));stage.append(level);
   const body=el('div','profile-summary');const top=el('div','profile-topline');top.append(el('span','profile-live','NEXON OPEN API'),el('span','badge',managed?.main?'대표':'선택'));body.append(top);
   const power=el('div','combat-power');power.append(el('span','','전투력'),el('strong','',numericText(data.combat_power)));body.append(power);
