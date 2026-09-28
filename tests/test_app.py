@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from mepiti.adapters import Nexon, Ollama, Vault, recognize
 from mepiti.chat import answer
-from mepiti import context, prices, starforce
+from mepiti import conditions, context, prices, starforce
 from mepiti.conversion import convert, cooldowns, jobs
 from mepiti.core import AppError, KST, Store, calculate, identifier, now
 from mepiti.server import Application, make_server
@@ -457,7 +457,10 @@ class StarforceTests(unittest.TestCase):
                 with self.assertRaises(AppError): starforce.expected(bad)
 
 class StarforceConversationTests(CharacterAnalysisTests):
-    """기대값 질문 -> 노작값 필요 -> 알려주면 앱이 계산해 모델에 사실로 넘긴다."""
+    """기대값 질문 -> 강화 조건 -> 노작값 -> 앱이 계산해 모델에 사실로 넘긴다."""
+    def setUp(self):
+        super().setUp()
+        conditions.save(self.store, dict(conditions.DEFAULTS))   # 조건은 이미 답한 상태로 둔다
     PROFILE=dict(CharacterAnalysisTests.PROFILE)
     PROFILE['equipment']=[dict(e) for e in CharacterAnalysisTests.PROFILE['equipment']]
     PROFILE['equipment'][0].update(equip_level=250)
@@ -480,6 +483,80 @@ class StarforceConversationTests(CharacterAnalysisTests):
         self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
         r,model=self.ask('서술','벨트 강화 기대값 알려줘')
         self.assertIn('목표 성을 알 수 없어',model.seen)
+
+class ConditionTests(unittest.TestCase):
+    """강화 조건 슬롯. 어떤 조건이 빠졌는지는 코드가 판단하고 모델에 맡기지 않는다."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def test_defaults_before_answering(self):
+        self.assertFalse(conditions.answered(self.store))
+        c=conditions.load(self.store)
+        self.assertEqual(c['event'],'없음');self.assertEqual(c['discounts'],[])
+    def test_parses_free_form_answers(self):
+        cases={
+            '샤타포스':                        {'event':'샤타포스'},
+            '샤타':                           {'event':'샤타포스'},
+            '5/10/15성 100%':                 {'event':'5/10/15성 100%'},
+            'MVP 다이아, PC방':                {'discounts':['MVP 다이아','PC방']},
+            '안전모드 사용':                     {'safeguard':True},
+            '안전모드 안 씀':                    {'safeguard':False},
+            '복구 사용, 샤타포스':                {'use_restore':True,'event':'샤타포스'},
+        }
+        for text,expected in cases.items():
+            with self.subTest(text=text):
+                got=conditions.parse(text)
+                self.assertIsNotNone(got)
+                for k,v in expected.items(): self.assertEqual(got[k],v)
+    def test_basic_answer_accepted(self):
+        self.assertEqual(conditions.parse('기본'),dict(conditions.DEFAULTS))
+        self.assertIsNone(conditions.parse('안녕'))
+    def test_saved_and_reset(self):
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스'})
+        self.assertTrue(conditions.answered(self.store))
+        self.assertEqual(conditions.load(self.store)['event'],'샤타포스')
+        conditions.clear(self.store)
+        self.assertFalse(conditions.answered(self.store))
+    def test_safeguard_only_covers_destroy_range(self):
+        args=conditions.to_arguments({'safeguard':True},18,22)
+        self.assertEqual(args['safeguard'],[18,19,20,21])
+        self.assertEqual(conditions.to_arguments({'safeguard':True},0,10)['safeguard'],[])
+        self.assertEqual(conditions.to_arguments({'safeguard':False},18,22)['safeguard'],[])
+    def test_reset_phrases(self):
+        for text in ('강화 조건 다시','강화 조건 바꿀래','조건 변경'):
+            with self.subTest(text=text): self.assertTrue(conditions.RESET.search(text))
+
+class ConditionConversationTests(CharacterAnalysisTests):
+    """조건을 묻고 답을 저장한 뒤 그 조건으로 계산한다."""
+    PROFILE=StarforceConversationTests.PROFILE
+    def test_conditions_are_asked_first(self):
+        r,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        self.assertEqual(r['status'],'ask_conditions')
+        self.assertIn('이벤트',r['content'])
+    def test_answer_is_saved_then_price_is_asked(self):
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        reply=answer(self.store,self.FakeModel('x'),
+                     {'message':'샤타포스, 안전모드 사용','session_id':first['session_id']},
+                     self.FakeNexon(self.PROFILE))
+        self.assertEqual(reply['status'],'conditions')
+        self.assertEqual(conditions.load(self.store)['event'],'샤타포스')
+        nxt=answer(self.store,self.FakeModel('x'),
+                   {'message':'벨트 22성 기대값 얼마야?','session_id':first['session_id']},
+                   self.FakeNexon(self.PROFILE))
+        self.assertEqual(nxt['status'],'ask_price')
+    def test_saved_conditions_reach_the_calculation(self):
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스','safeguard':True})
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        r,model=self.ask('서술','벨트 22성 기대값 얼마야?')
+        self.assertEqual(r['status'],'analysis')
+        self.assertEqual(r['starforce']['event'],'샤타포스')
+        self.assertEqual(r['starforce']['expected_destroys'],0.0)   # 안전모드로 파괴 없음
+        self.assertIn('샤타포스',model.seen)
+    def test_reset_asks_again(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        r=answer(self.store,self.FakeModel('x'),{'message':'강화 조건 다시'},self.FakeNexon(self.PROFILE))
+        self.assertEqual(r['status'],'ask_conditions')
+        self.assertFalse(conditions.answered(self.store))
 
 class ConversionTests(unittest.TestCase):
     """원본 엑셀 계산기가 계산해 둔 값과 대조한다.

@@ -1,5 +1,5 @@
 import re
-from . import context, prices, starforce
+from . import conditions, context, prices, starforce
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -38,6 +38,20 @@ def answer(store, model, data, nexon=None):
     followup = bool(re.match(r'^(그럼|그러면|이벤트 때|그거|그건|같은|이 경우)',question))
     query = '\n'.join(previous+[question]) if followup else question
     result = {'content':'','status':'held','sources':[],'conditions':[],'created_at':now(),'session_id':sid}
+    if conditions.RESET.search(question):
+        conditions.clear(store)
+        result.update(status='ask_conditions', content=conditions.ask_text())
+        store.message(sid,'user',{'content':question})
+        store.message(sid,'assistant',result)
+        return result
+    picked = capture_conditions(store, question, history)
+    if picked:
+        result.update(status='conditions',content='강화 조건을 저장했습니다. 다음부터는 묻지 않습니다.\n\n'
+                      + conditions.summary(picked) + '\n\n바꾸려면 "강화 조건 다시"라고 적어 주세요.')
+        result['conditions'] = ['이 조건으로 기대값을 계산합니다. 이벤트는 기간이 지나면 다시 알려 주세요.']
+        store.message(sid,'user',{'content':question})
+        store.message(sid,'assistant',result)
+        return result
     saved_prices = capture_prices(store, question, history)
     if saved_prices:
         result.update(status='price',content='노작값을 저장했습니다. 다음부터는 이 값을 씁니다.\n\n'
@@ -280,6 +294,11 @@ def starforce_facts(store, profile, question, result):
     스페어(노작값)를 모르면 계산해도 총비용이 성립하지 않으므로 먼저 되묻는다.
     되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
     """
+    if not conditions.answered(store):
+        result.update(status='ask_conditions', content=conditions.ask_text())
+        result['conditions'] = ['이벤트·안전모드·복구·할인에 따라 기대값이 몇 배씩 달라져 먼저 확인합니다.',
+                                '한 번 답하면 저장해 두고 다시 묻지 않습니다.']
+        return None
     item = context.starforce_item(profile, question)
     if not item:
         return '\n\n[강화 기대값] 어느 장비를 말하는지 몰라 계산하지 않았다. 부위나 장비 이름을 물어볼 것.'
@@ -299,9 +318,11 @@ def starforce_facts(store, profile, question, result):
             '파괴 시 쓸 스페어 장비 값이 있어야 계산됩니다. 노작값을 알려주시면 바로 계산합니다.',
             '값을 모르는 채로 비용을 내놓지 않습니다.']
         return None
+    picked = conditions.load(store)
     try:
         calc = starforce.expected({'level': item['equip_level'], 'current_star': current,
-                                   'target_star': target, 'spare_cost': price['price']})
+                                   'target_star': target, 'spare_cost': price['price'],
+                                   **conditions.to_arguments(picked, current, target)})
     except AppError as e:
         return f"\n\n[강화 기대값] 계산하지 못했다: {e}"
     result['starforce'] = {**calc, 'slot': item['slot'], 'item': item['name']}
@@ -311,4 +332,17 @@ def starforce_facts(store, profile, question, result):
             f"- 기대 비용: {calc['expected_cost']:,} 메소 (파괴 시 스페어 {price['price']:,.0f} 메소 포함)\n"
             f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
             f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
+            f"- 적용 조건: {conditions.summary(picked)}\n"
             f"- 확률표 출처: {calc['source']['name']} (넥슨 공시와 대조하지 않은 커뮤니티 값, 스타캐치 반영)")
+
+
+def capture_conditions(store, question, history):
+    """직전 답변이 강화 조건을 물었을 때만 답을 읽어 저장한다."""
+    last = next((m for m in reversed(history) if m['role']=='assistant'), None)
+    if not last or last['payload'].get('status') != 'ask_conditions':
+        return None
+    parsed = conditions.parse(question)
+    if not parsed:
+        return None
+    conditions.save(store, parsed)
+    return parsed
