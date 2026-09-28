@@ -8,6 +8,8 @@
 외부 조회기는 아직 없다. `register_fetcher`로 붙이면 되고, 값이 충분히 쌓이면
 설정에서 꺼서 더 이상 조회하지 않게 할 수 있다.
 """
+import re
+
 from .core import AppError, now
 
 FETCH_SETTING = 'price_fetch'          # '1'이면 외부 조회를 시도한다.
@@ -89,31 +91,43 @@ def ask_text(unknown):
     """모르는 값이 있을 때 사용자에게 보낼 되묻기 문구."""
     if not unknown:
         return ''
-    names = '\n'.join(f"- {u['item']}" for u in unknown[:8])
     limited = any(u.get('reason') == 'limit' for u in unknown)
     head = ('오늘 조회 한도를 다 써서 아래 장비의 노작값을 가져오지 못했습니다.'
             if limited else '아래 장비의 노작값을 알지 못합니다.')
-    return (f'{head} 값을 알려주시면 저장해 두고 다음부터는 묻지 않습니다.\n\n{names}\n\n'
-            '예: 골든 클로버 벨트 32억 — 이런 식으로 적어 주세요.')
+    return f'{head} 값을 알려주시면 저장해 두고 다음부터는 묻지 않습니다.'
+
+
+def form(unknown):
+    """화면에서 장비별로 값을 적게 할 입력칸."""
+    return {'kind': 'price', 'submit': '저장하고 계속',
+            'fields': [{'item': u['item'], 'placeholder': '예: 2천만, 32억'} for u in unknown[:8]]}
 
 
 # 사용자가 답으로 적어 주는 금액 표기를 메소로 바꾼다.
 UNITS = (('조', 1_0000_0000_0000), ('억', 1_0000_0000), ('만', 1_0000))
+_THOUSAND = re.compile(r'(\d+(?:\.\d+)?)\s*천')
 
 
 def parse_price(text):
-    """'32억', '1조 2000억', '3,000만', '25000000000' 형태를 메소 숫자로."""
-    import re
+    """'32억', '1조 2000억', '3,000만', '2천만', '1억 5천만', '25000000000' 형태를 메소 숫자로.
+
+    '메소', '정도' 같은 말이 붙어 있어도 금액 부분만 읽는다. 금액이 없으면 None.
+    """
     if not isinstance(text, str):
         return None
     cleaned = text.replace(',', '').strip()
+    # '2천만' -> '2000만', '5천' -> '5000'
+    cleaned = _THOUSAND.sub(lambda m: format(float(m.group(1)) * 1000, 'g'), cleaned)
     total, matched = 0.0, False
     for unit, scale in UNITS:
         found = re.search(r'(\d+(?:\.\d+)?)\s*' + unit, cleaned)
         if found:
             total += float(found.group(1)) * scale
             matched = True
+            cleaned = cleaned[:found.start()] + ' ' + cleaned[found.end():]
     if matched:
-        return total
-    plain = re.fullmatch(r'\d+(?:\.\d+)?', cleaned)
-    return float(plain.group()) if plain else None
+        return total or None
+    plain = re.findall(r'\d+(?:\.\d+)?', cleaned)
+    if len(plain) == 1 and float(plain[0]) > 0:
+        return float(plain[0])
+    return None

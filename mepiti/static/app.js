@@ -16,14 +16,84 @@ function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
-function renderMessage(role,payload){$('#welcome').hidden=true;const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
+function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
 async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
 function newChat(){if(busy)return;sessionId=null;$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
 $('#new-chat').addEventListener('click',newChat);
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();newChat();}});
 $$('[data-prompt]').forEach(b=>b.addEventListener('click',()=>{$('#message').value=b.dataset.prompt;$('#message').focus();}));
 $('#message').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('#chat-form').requestSubmit();}});
-$('#chat-form').addEventListener('submit',e=>{e.preventDefault();guard(async()=>{if(busy)return;let message=$('#message').value.trim();if(!message&&!confirmedText)return;if(!confirmedText&&/^(내|제)\s*캐릭터(?:\s*(보여줘|보여주세요|보기|볼래|보고 싶어|보여 줘|보여 주세요))?[.!?]*$/.test(message)){$('#message').value='';switchView('characters');return;}if(confirmedText)message+='\n\n[사용자가 확인한 스크린샷 내용]\n'+confirmedText;if(message.length>12000)throw new Error('질문과 첨부를 합쳐 12,000자 이하.');busy=true;$('#send-button').disabled=true;const original=$('#message').value;renderMessage('user',{content:message});$('#message').value='';const thinking=el('div','thinking','근거 확인 중…');$('#messages').append(thinking);scrollBottom();try{const result=await api('chat',{message,session_id:sessionId});sessionId=result.session_id;thinking.remove();renderMessage('assistant',result);confirmedText='';renderAttachment();await loadHistory();}catch(err){thinking.remove();$('#messages').lastElementChild?.remove();$('#message').value=original;$('#welcome').hidden=$('#messages').children.length>0;throw err;}finally{busy=false;$('#send-button').disabled=false;}});});
+$('#chat-form').addEventListener('submit',e=>{e.preventDefault();guard(async()=>{if(busy)return;let message=$('#message').value.trim();if(!message&&!confirmedText)return;if(!confirmedText&&/^(내|제)\s*캐릭터(?:\s*(보여줘|보여주세요|보기|볼래|보고 싶어|보여 줘|보여 주세요))?[.!?]*$/.test(message)){$('#message').value='';switchView('characters');return;}if(confirmedText)message+='\n\n[사용자가 확인한 스크린샷 내용]\n'+confirmedText;if(message.length>12000)throw new Error('질문과 첨부를 합쳐 12,000자 이하.');const original=$('#message').value;$('#message').value='';try{await sendChat(message);confirmedText='';renderAttachment();}catch(err){$('#message').value=original;throw err;}});});
+// 질문을 보내고 답을 그린다. answer는 선택창에서 고른 값(구조화된 답)이다.
+async function sendChat(message,answer){
+  busy=true;$('#send-button').disabled=true;
+  renderMessage('user',{content:message});
+  const thinking=el('div','thinking','근거 확인 중…');$('#messages').append(thinking);scrollBottom();
+  try{
+    const result=await api('chat',{message,session_id:sessionId,...(answer?{answer}:{})});
+    sessionId=result.session_id;thinking.remove();renderMessage('assistant',result);await loadHistory();
+  }catch(err){thinking.remove();$('#messages').lastElementChild?.remove();$('#welcome').hidden=$('#messages').children.length>0;throw err;}
+  finally{busy=false;$('#send-button').disabled=false;}
+}
+// 되묻기 선택창 — 조건은 버튼으로 고르고, 노작값은 칸에 적는다. 직접 입력창에 적어도 된다.
+function renderChoiceForm(form){
+  const box=el('form','choice-form');
+  if(form.kind==='conditions'){
+    form.questions.forEach(q=>{
+      const group=el('fieldset','choice-group');group.dataset.key=q.key;group.dataset.type=q.type;
+      group.append(el('legend','',q.label));
+      const row=el('div','choice-options');
+      q.options.forEach(o=>{
+        const b=el('button','choice',o.label);b.type='button';b.dataset.value=JSON.stringify(o.value);
+        const set=on=>{b.classList.toggle('selected',on);b.setAttribute('aria-pressed',String(on));};
+        set(!!o.selected);
+        b.onclick=()=>{
+          if(q.type==='single'){row.querySelectorAll('.choice').forEach(x=>{x.classList.remove('selected');x.setAttribute('aria-pressed','false');});set(true);}
+          else set(!b.classList.contains('selected'));
+        };
+        row.append(b);
+      });
+      group.append(row);box.append(group);
+    });
+  }else{
+    form.fields.forEach(f=>{
+      const label=el('label','choice-field');const input=el('input');
+      input.name=f.item;input.placeholder=f.placeholder||'';input.autocomplete='off';input.inputMode='text';
+      label.append(el('span','',f.item),input);box.append(label);
+    });
+  }
+  const submit=el('button','primary choice-submit',form.submit||'확인');submit.type='submit';
+  box.append(submit);
+  box.onsubmit=e=>{e.preventDefault();if(busy||box.classList.contains('answered'))return;guard(async()=>{
+    const {values,summary}=collectChoices(box,form);
+    lockChoiceForm(box);
+    try{await sendChat(summary,{kind:form.kind,values});}
+    catch(err){unlockChoiceForm(box);throw err;}
+  });};
+  return box;
+}
+function collectChoices(box,form){
+  if(form.kind==='price'){
+    const values={},parts=[];
+    box.querySelectorAll('input').forEach(i=>{const v=i.value.trim();if(v){values[i.name]=v;parts.push(i.name+' '+v);}});
+    if(!parts.length)throw new Error('노작값을 입력하세요.');
+    return {values,summary:parts.join('\n')};
+  }
+  const values={},parts=[];
+  box.querySelectorAll('.choice-group').forEach(g=>{
+    const picked=[...g.querySelectorAll('.choice.selected')];
+    const label=picked.map(b=>b.textContent);
+    if(g.dataset.type==='multi'){values[g.dataset.key]=picked.map(b=>JSON.parse(b.dataset.value));parts.push('할인 '+(label.join(', ')||'없음'));}
+    else{
+      values[g.dataset.key]=picked.length?JSON.parse(picked[0].dataset.value):null;
+      const name={safeguard:'안전모드 ',use_restore:'흔적 복구 '}[g.dataset.key]||'';
+      parts.push(name+(label[0]||''));
+    }
+  });
+  return {values,summary:parts.join(' · ')};
+}
+function lockChoiceForm(box){box.classList.add('answered');box.querySelectorAll('button,input').forEach(x=>x.disabled=true);}
+function unlockChoiceForm(box){box.classList.remove('answered');box.querySelectorAll('button,input').forEach(x=>x.disabled=false);}
 function renderAttachment(){const box=$('#attachment');box.replaceChildren();box.hidden=!confirmedText;if(confirmedText){box.append(el('span','',`OCR 텍스트 ${confirmedText.length}자 첨부`));const remove=el('button','','×');remove.setAttribute('aria-label','첨부 취소');remove.onclick=()=>{confirmedText='';renderAttachment();};box.append(remove);}}
 $('#attach-button').onclick=()=>$('#image-file').click();
 $('#image-file').addEventListener('change',()=>guard(async()=>{const file=$('#image-file').files[0];if(!file)return;$('#image-file').value='';if(file.size>6000000)throw new Error('이미지는 6MB 이하여야 합니다.');$('#attach-button').disabled=true;toast('OCR 처리 중');try{const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});const result=await api('ocr',{image:data});if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(file);$('#ocr-preview').src=previewUrl;$('#ocr-text').value=result.text;$('#ocr-dialog').showModal();}finally{$('#attach-button').disabled=false;}}));
@@ -124,7 +194,7 @@ $('#price-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
   await api('prices',{item:d.item,price,add_grade:d.add_grade||null,note:d.note||null,source:'user'});
   e.target.reset();await loadPrices();toast('노작값을 저장했습니다.');});};
 function parsePrice(text){
-  if(!text)return null;const c=String(text).replaceAll(',','').trim();let total=0,hit=false;
+  if(!text)return null;let c=String(text).replaceAll(',','').trim().replace(/(\d+(?:\.\d+)?)\s*천/g,(_,n)=>String(parseFloat(n)*1000));let total=0,hit=false;
   [['조',1e12],['억',1e8],['만',1e4]].forEach(([u,scale])=>{
     const m=c.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*'+u));if(m){total+=parseFloat(m[1])*scale;hit=true;}});
   if(hit)return total;

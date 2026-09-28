@@ -11,6 +11,7 @@
 import json
 import re
 
+from .core import AppError
 from .starforce import DISCOUNTS, EVENTS, SAFEGUARD_STARS as SAFEGUARD_RANGE
 
 SETTING = 'enhance_conditions'
@@ -22,7 +23,12 @@ SAFEGUARD_STARS = list(SAFEGUARD_RANGE)
 SAFEGUARD_FROM = SAFEGUARD_STARS[0]
 
 RESET = re.compile(r'(강화\s*)?조건.{0,6}(바꾸|바꿔|바꿀|변경|다시|수정|재설정|초기화)')
-_NO = re.compile(r'안\s*[쓰써씀쓸]|미\s*사용|사용\s*안|없|끄|off|아니|제외|빼')
+_NO = re.compile(r'안\s*[쓰써씀쓸하할함해]|미\s*사용|사용\s*안|못|없|끄|off|아니|제외|빼|x\b', re.I)
+# 안전모드·복구를 가리키는 말. 줄임말(파방)도 받는다.
+_WORDS = {'safeguard': re.compile(r'안전\s*모드|파방|파괴\s*방지'),
+          'use_restore': re.compile(r'복구')}
+# 한 조건에 붙은 말만 보려고 쉼표·마침표나 다른 조건 단어에서 자른다.
+_CLAUSE_END = re.compile(r'[,，.·/\n]|안전\s*모드|파방|파괴\s*방지|복구|샤타|이벤트|mvp|pc방|할인', re.I)
 
 
 def load(store):
@@ -80,31 +86,63 @@ def parse(text):
             found['event'] = '샤타포스'
             hit = True
 
-    picked = [name for name in DISCOUNTS if name.replace(' ', '') in body.replace(' ', '')]
-    if 'pc방' in body.lower().replace(' ', '') and 'PC방' not in picked:
-        picked.append('PC방')
+    squashed = body.lower().replace(' ', '')
+    picked = [name for name in DISCOUNTS if name.lower().replace(' ', '') in squashed]
     if picked:
         found['discounts'] = picked
         hit = True
 
     # 안전모드·복구는 언급 자체를 '쓴다'로 보고, 부정 표현이 붙었을 때만 뒤집는다.
-    for key, word in (('safeguard', '안전모드'), ('use_restore', '복구')):
-        where = body.find(word)
-        if where < 0:
+    for key, word in _WORDS.items():
+        where = word.search(body)
+        if not where:
             continue
         hit = True
-        found[key] = not _NO.search(body[where:where + 18])
+        rest = body[where.end():where.end() + 18]
+        cut = _CLAUSE_END.search(rest)
+        found[key] = not _NO.search(rest[:cut.start()] if cut else rest)
     return found if hit else None
 
 
+def form(current=None):
+    """화면에서 버튼으로 고르게 할 선택지. 값은 저장 형식 그대로다."""
+    now = {**DEFAULTS, **(current or {})}
+    yes_no = lambda value: [{'value': True, 'label': '사용', 'selected': bool(value)},
+                            {'value': False, 'label': '미사용', 'selected': not value}]
+    return {'kind': 'conditions', 'submit': '이 조건으로 계산', 'questions': [
+        {'key': 'event', 'label': '진행 중인 이벤트', 'type': 'single',
+         'options': [{'value': name, 'label': '이벤트 없음' if name == '없음' else name,
+                      'selected': name == now['event']} for name in EVENTS]},
+        {'key': 'safeguard', 'label': '안전모드 (15~17성에만 적용)', 'type': 'single',
+         'options': yes_no(now['safeguard'])},
+        {'key': 'use_restore', 'label': '흔적 복구', 'type': 'single',
+         'options': yes_no(now['use_restore'])},
+        {'key': 'discounts', 'label': '할인 (여러 개 선택 가능)', 'type': 'multi',
+         'options': [{'value': name, 'label': name, 'selected': name in now['discounts']}
+                     for name in DISCOUNTS]},
+    ]}
+
+
+def from_answer(values):
+    """선택창에서 보낸 값을 검사해 저장 형식으로 바꾼다. 목록에 없는 값은 받지 않는다."""
+    if not isinstance(values, dict):
+        raise AppError('강화 조건 선택값이 올바르지 않습니다.')
+    event = values.get('event', '없음')
+    discounts = values.get('discounts') or []
+    if event not in EVENTS:
+        raise AppError('지원하지 않는 이벤트입니다.')
+    if not isinstance(discounts, list) or any(d not in DISCOUNTS for d in discounts):
+        raise AppError('지원하지 않는 할인입니다.')
+    for key in ('safeguard', 'use_restore'):
+        if not isinstance(values.get(key, False), bool):
+            raise AppError('안전모드·흔적 복구는 사용 여부로 골라 주세요.')
+    return {'event': event, 'discounts': [d for d in DISCOUNTS if d in discounts],
+            'safeguard': bool(values.get('safeguard')), 'use_restore': bool(values.get('use_restore'))}
+
+
 def ask_text(conditions=None):
-    events = ' / '.join(name for name in EVENTS if name != '없음')
-    return ('기대값은 조건에 따라 크게 달라져서 먼저 확인합니다. 한 번 답하면 저장해 두고 다시 묻지 않습니다.\n\n'
-            f'1. 진행 중인 이벤트 — {events}\n'
-            '2. 안전모드(파괴 방지) 사용 여부\n'
-            '3. 흔적 복구 사용 여부\n'
-            f"4. 할인 — {' / '.join(DISCOUNTS)}\n\n"
-            '해당 없으면 "기본"이라고만 적어 주세요. 예: 샤타포스, 안전모드 사용, MVP 다이아')
+    return ('기대값은 강화 조건에 따라 크게 달라져서 먼저 확인합니다. 아래에서 골라 주세요.\n'
+            '한 번 고르면 저장해 두고 다시 묻지 않습니다.')
 
 
 def summary(conditions):

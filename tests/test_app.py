@@ -352,7 +352,9 @@ class PriceConversationTests(CharacterAnalysisTests):
         item=first['asked'][0]['item']
         reply=answer(self.store,self.FakeModel('x'),{'message':f'{item} 32억','session_id':first['session_id']},
                      self.FakeNexon(self.PROFILE))
-        self.assertEqual(reply['status'],'price')
+        # 값을 저장하고 원래 질문을 이어서 답한다.
+        self.assertEqual(reply['status'],'analysis')
+        self.assertIn('노작값을 저장했습니다',' '.join(reply['conditions']))
         self.assertEqual(self.store.price_lookup(item)['price'],3_200_000_000)
         again=answer(self.store,self.FakeModel('벨트 관련 서술'),
                      {'message':'벨트 사는 게 나아? 가격 기준으로','session_id':first['session_id']},
@@ -556,18 +558,20 @@ class ConditionConversationTests(CharacterAnalysisTests):
     def test_conditions_are_asked_first(self):
         r,_=self.ask('x','벨트 22성 기대값 얼마야?')
         self.assertEqual(r['status'],'ask_conditions')
-        self.assertIn('이벤트',r['content'])
+        self.assertEqual(r['form']['kind'],'conditions')
+        keys=[q['key'] for q in r['form']['questions']]
+        self.assertEqual(keys,['event','safeguard','use_restore','discounts'])
+        self.assertEqual(r['pending'],'벨트 22성 기대값 얼마야?')
     def test_answer_is_saved_then_price_is_asked(self):
         first,_=self.ask('x','벨트 22성 기대값 얼마야?')
         reply=answer(self.store,self.FakeModel('x'),
                      {'message':'샤타포스, 안전모드 사용','session_id':first['session_id']},
                      self.FakeNexon(self.PROFILE))
-        self.assertEqual(reply['status'],'conditions')
+        # 조건을 저장하고 원래 질문을 이어서 진행해 바로 노작값을 묻는다.
         self.assertEqual(conditions.load(self.store)['event'],'샤타포스')
-        nxt=answer(self.store,self.FakeModel('x'),
-                   {'message':'벨트 22성 기대값 얼마야?','session_id':first['session_id']},
-                   self.FakeNexon(self.PROFILE))
-        self.assertEqual(nxt['status'],'ask_price')
+        self.assertEqual(reply['status'],'ask_price')
+        self.assertEqual(reply['form']['kind'],'price')
+        self.assertEqual(reply['pending'],'벨트 22성 기대값 얼마야?')
     def test_saved_conditions_reach_the_calculation(self):
         conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스','safeguard':True})
         self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
@@ -766,3 +770,69 @@ class CharacterDiscoveryTests(unittest.TestCase):
             with patch.object(Nexon,'get',side_effect=[{'ocid':'abc'},{'character_name':'이름','character_level':260,'character_image':url},{'final_stat':[]}]):
                 data=Nexon(None).character('이름')
             self.assertEqual('image' in data,allowed)
+
+
+class ChoiceAnswerTests(CharacterAnalysisTests):
+    """되묻기를 선택창으로 답하고, 답하면 원래 질문을 이어서 계산한다."""
+    PROFILE=StarforceConversationTests.PROFILE
+    def reply(self,first,message,answer_value=None):
+        data={'message':message,'session_id':first['session_id']}
+        if answer_value is not None:
+            data['answer']=answer_value
+        return answer(self.store,self.FakeModel('x'),data,self.FakeNexon(self.PROFILE))
+    def test_user_reported_conversation(self):
+        """실제로 겪은 문제: 조건을 잘못 읽고, '2천만'을 읽지 못해 보류로 빠졌다."""
+        first,_=self.ask('x','내 벨트 21성 기대값이 얼마야')
+        self.assertEqual(first['status'],'ask_conditions')
+        second=self.reply(first,'지금 샤타고, 파방은 못하고, 복구는 안할거임, mvp 다이아임')
+        self.assertEqual(conditions.load(self.store)['discounts'],['MVP 다이아'])
+        self.assertFalse(conditions.load(self.store)['use_restore'])
+        self.assertFalse(conditions.load(self.store)['safeguard'])
+        self.assertEqual(second['status'],'ask_price')
+        third=self.reply(second,'지금 2천만메소정도')
+        self.assertEqual(third['status'],'analysis')
+        self.assertEqual(self.store.price_lookup('골든 클로버 벨트')['price'],20_000_000)
+        self.assertEqual(third['starforce']['target_star'],21)
+        self.assertEqual(third['starforce']['event'],'샤타포스')
+        self.assertAlmostEqual(third['starforce']['discount_ratio'],0.4)
+    def test_choice_answers_continue_to_calculation(self):
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        second=self.reply(first,'샤타포스 · MVP 다이아',{'kind':'conditions','values':{
+            'event':'샤타포스','safeguard':False,'use_restore':False,'discounts':['MVP 다이아']}})
+        self.assertEqual(second['status'],'ask_price')
+        item=second['form']['fields'][0]['item']
+        third=self.reply(second,f'{item} 2천만',{'kind':'price','values':{item:'2천만'}})
+        self.assertEqual(third['status'],'analysis')
+        self.assertEqual(third['starforce']['spare_cost'],20_000_000)
+        self.assertIn('강화 조건을 저장했습니다',' '.join(second['conditions'] or [])+' '.join(third['conditions']))
+    def test_choice_values_are_validated(self):
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        with self.assertRaises(AppError):
+            self.reply(first,'x',{'kind':'conditions','values':{'event':'없는 이벤트'}})
+        with self.assertRaises(AppError):
+            self.reply(first,'x',{'kind':'price','values':{'골든 클로버 벨트':'1억'}})   # 값을 묻지 않았다
+        with self.assertRaises(AppError):
+            self.reply(first,'x',{'kind':'nope'})
+    def test_price_for_unasked_item_is_refused(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        self.assertEqual(first['status'],'ask_price')
+        with self.assertRaises(AppError):
+            self.reply(first,'x',{'kind':'price','values':{'제네시스 창세검':'1억'}})
+    def test_star_number_is_not_taken_as_price(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        self.reply(first,'22성 기대값')
+        self.assertEqual(self.store.price_count(),0)
+    def test_reset_offers_choices_and_remembers_target(self):
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
+        first,_=self.ask('x','벨트 22성 기대값 얼마야?')
+        self.assertEqual(first['status'],'analysis')
+        reset=self.reply(first,'강화 조건 다시')
+        self.assertEqual(reset['form']['kind'],'conditions')
+        again=self.reply(reset,'샤타포스',{'kind':'conditions','values':{
+            'event':'샤타포스','safeguard':False,'use_restore':False,'discounts':[]}})
+        self.assertEqual(again['status'],'analysis')
+        self.assertEqual(again['starforce']['event'],'샤타포스')
+        self.assertEqual(again['starforce']['target_star'],22)

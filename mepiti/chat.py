@@ -23,6 +23,8 @@ SLOT_WORDS = re.compile('|'.join(sorted(
     (set(context.SLOT_ORDER) | {'장비','템','아이템','방어구','장신구','무기','반지','펜던트'}),
     key=len, reverse=True)))
 # 사용자가 '골든 클로버 벨트 32억' 처럼 알려 주는 형태.
+# 금액으로 볼 만한 표기. 단위가 있거나 10만 이상인 숫자만 값으로 받는다('22성' 같은 숫자를 걸러낸다).
+MONEY = re.compile(r'\d[\d,.]*\s*(?:조|억|천|만)|\d{6,}')
 PRICE_REPLY = re.compile(r'^(?P<item>.+?)\s*[:=]?\s*(?P<price>[\d,.]+\s*(?:조|억|만)?(?:\s*\d+\s*(?:억|만))?)\s*(?:메소)?$')
 
 
@@ -30,35 +32,65 @@ def answer(store, model, data, nexon=None):
     question = data.get('message','')
     if not isinstance(question,str) or not question.strip() or len(question)>12000:
         raise AppError('질문은 1~12,000자로 입력해 주세요.')
-    question = question.strip()
+    question = said = question.strip()
     sid = store.session(data.get('session_id'),question)
     history = store.messages(sid)
+    last = next((m['payload'] for m in reversed(history) if m['role']=='assistant'), None) or {}
+    # 되물었던 원래 질문. 조건·노작값을 답하면 이 질문을 이어서 계산한다.
+    pending = last.get('pending') if last.get('status') in ('ask_conditions','ask_price') else None
+    notes = []
     previous = [m['payload']['content'] for m in history if m['role']=='user'][-2:]
     # Preserve only a short prior topic for explicitly elliptical follow-ups.
     followup = bool(re.match(r'^(그럼|그러면|이벤트 때|그거|그건|같은|이 경우)',question))
     query = '\n'.join(previous+[question]) if followup else question
     result = {'content':'','status':'held','sources':[],'conditions':[],'created_at':now(),'session_id':sid}
-    if conditions.RESET.search(question):
+    structured = data.get('answer')
+    if structured is not None and not isinstance(structured, dict):
+        raise AppError('선택한 답의 형식이 올바르지 않습니다.')
+    kind = (structured or {}).get('kind')
+    if structured is not None and kind not in ('conditions','price'):
+        raise AppError('선택한 답의 종류를 알 수 없습니다.')
+    if not structured and conditions.RESET.search(question):
         conditions.clear(store)
-        result.update(status='ask_conditions', content=conditions.ask_text())
+        result.update(status='ask_conditions', content=conditions.ask_text(),
+                      form=conditions.form(conditions.DEFAULTS))
+        prior = last_starforce(history)
+        if prior:
+            result['pending'] = f"{prior['slot']} {prior['target_star']}성 기대값"
         store.message(sid,'user',{'content':question})
         store.message(sid,'assistant',result)
         return result
-    picked = capture_conditions(store, question, history)
+    if kind == 'conditions':
+        picked = conditions.from_answer(structured.get('values'))
+        conditions.save(store, picked)
+    else:
+        picked = None if structured else capture_conditions(store, question, history)
     if picked:
         prior = last_starforce(history)
-        if prior and nexon:
+        if pending and nexon:
+            # 조건을 묻게 만든 원래 질문을 이어서 계산한다.
+            notes.append('강화 조건을 저장했습니다: ' + conditions.summary(picked)
+                         + '. 바꾸려면 "강화 조건 다시"라고 적어 주세요.')
+            question = pending
+        elif prior and nexon:
             # '샤타포스일때는' 같은 후속 질문. 바뀐 조건으로 직전 계산을 다시 돌린다.
             question = f"{prior['slot']} {prior['target_star']}성 기대값"
         else:
             result.update(status='conditions',content='강화 조건을 저장했습니다. 다음부터는 묻지 않습니다.\n\n'
                           + conditions.summary(picked) + '\n\n바꾸려면 "강화 조건 다시"라고 적어 주세요.')
             result['conditions'] = ['이 조건으로 기대값을 계산합니다. 이벤트는 기간이 지나면 다시 알려 주세요.']
-            store.message(sid,'user',{'content':data.get('message','').strip()})
+            store.message(sid,'user',{'content':said})
             store.message(sid,'assistant',result)
             return result
-    saved_prices = capture_prices(store, question, history)
-    if saved_prices:
+    if kind == 'price':
+        saved_prices = save_price_answer(store, structured.get('values'), last)
+    else:
+        saved_prices = [] if structured or picked else capture_prices(store, question, history)
+    if saved_prices and pending and nexon:
+        notes.append('노작값을 저장했습니다: ' + ', '.join(f"{r['item']} {r['price']:,.0f} 메소" for r in saved_prices)
+                     + '. 사용자가 알려 준 값이며 실제 거래가와 다를 수 있습니다.')
+        question = pending
+    elif saved_prices:
         result.update(status='price',content='노작값을 저장했습니다. 다음부터는 이 값을 씁니다.\n\n'
                       +'\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소" for r in saved_prices))
         result['conditions'] = ['사용자가 알려 준 값입니다. 조회 시점의 실제 거래가와 다를 수 있습니다.']
@@ -123,7 +155,9 @@ def answer(store, model, data, nexon=None):
                     excerpts.append(f"[{ref['citation']}] {p['text']}")
                 result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
                 result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
-    store.message(sid,'user',{'content':question})
+    if notes:
+        result['conditions'] = notes + list(result.get('conditions') or [])
+    store.message(sid,'user',{'content':said})
     store.message(sid,'assistant',result)
     return result
 
@@ -157,7 +191,8 @@ def analyse_character(store, model, nexon, managed, question, history, result):
                                   for r in known))
         # 하나도 모를 때만 멈추고 묻는다. 일부라도 알면 그걸로 답하고 모르는 것은 각주로 남긴다.
         if unknown and not known:
-            result.update(status='ask_price', content=prices.ask_text(unknown))
+            result.update(status='ask_price', content=prices.ask_text(unknown),
+                          form=prices.form(unknown), pending=question)
             result['asked'] = [{'item':r['item']} for r in unknown]
             result['conditions'] = ['값을 모르는 채로 비용을 비교하지 않습니다. 알려 주시면 저장해 두고 다시 묻지 않습니다.',
                                     '경매장 조회가 실패했거나 한도를 넘었습니다.' if prices.status(store)['fetcher']
@@ -236,14 +271,39 @@ def capture_prices(store, question, history):
         if not line:
             continue
         found = PRICE_REPLY.match(line)
-        if not found:
-            continue
-        item = found.group('item').strip()
-        price = prices.parse_price(found.group('price'))
-        match = next((a for a in asked if a == item), None) or \
-                next((a for a in asked if a in item or item in a), None)
+        match = price = None
+        if found:
+            item = found.group('item').strip()
+            price = prices.parse_price(found.group('price'))
+            match = next((a for a in asked if a == item), None) or \
+                    next((a for a in asked if a in item or item in a), None)
+        if not match and len(asked) == 1 and MONEY.search(line):
+            # 한 장비만 물었으면 이름 없이 '2천만 정도'라고만 답해도 그 장비 값으로 본다.
+            match, price = next(iter(asked)), prices.parse_price(line)
         if match and price:
             saved.append(store.price_save({'item':match,'price':price,'source':'user'}))
+    return saved
+
+
+def save_price_answer(store, values, last):
+    """입력칸으로 받은 노작값을 저장한다. 되물었던 장비만 받는다."""
+    if last.get('status') != 'ask_price':
+        raise AppError('노작값을 묻지 않은 상태입니다. 설정 화면에서 직접 입력해 주세요.')
+    if not isinstance(values, dict) or not values:
+        raise AppError('노작값을 입력해 주세요.')
+    asked = {a['item'] for a in last.get('asked') or []}
+    saved = []
+    for item, text in values.items():
+        if item not in asked:
+            raise AppError(f'묻지 않은 장비입니다: {item}')
+        if not str(text or '').strip():
+            continue
+        price = prices.parse_price(str(text))
+        if not price:
+            raise AppError(f"{item} 값을 읽지 못했습니다. '2천만', '32억'처럼 적어 주세요.")
+        saved.append(store.price_save({'item':item,'price':price,'source':'user'}))
+    if not saved:
+        raise AppError('노작값을 하나 이상 입력해 주세요.')
     return saved
 
 
@@ -308,9 +368,9 @@ def starforce_facts(store, profile, question, result):
     되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
     """
     if not conditions.answered(store):
-        result.update(status='ask_conditions', content=conditions.ask_text())
-        result['conditions'] = ['이벤트·안전모드·복구·할인에 따라 기대값이 몇 배씩 달라져 먼저 확인합니다.',
-                                '한 번 답하면 저장해 두고 다시 묻지 않습니다.']
+        result.update(status='ask_conditions', content=conditions.ask_text(),
+                      form=conditions.form(conditions.load(store)), pending=question)
+        result['conditions'] = ['직접 적어도 됩니다. 예: 샤타포스, 안전모드 미사용, MVP 다이아']
         return None
     item = context.starforce_item(profile, question)
     if not item:
@@ -324,7 +384,8 @@ def starforce_facts(store, profile, question, result):
     target = min(targets)
     price = prices.resolve(store, item['name'], (item.get('add_grade') or {}).get('grade'))
     if not price['known']:
-        result.update(status='ask_price', content=prices.ask_text([price]))
+        result.update(status='ask_price', content=prices.ask_text([price]),
+                      form=prices.form([price]), pending=question)
         result['asked'] = [{'item': price['item']}]
         result['conditions'] = [
             f"{item['slot']}({item['name']})을 {current}성에서 {target}성으로 올리는 기대 비용은 "
