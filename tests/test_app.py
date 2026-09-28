@@ -1063,3 +1063,67 @@ class EarningsTests(unittest.TestCase):
         self.assertEqual(earnings.overview(self.store)['hunts'],[])
         with self.assertRaises(AppError): earnings.delete(self.store,r['id'])
 
+
+
+class SchedulerImportTests(unittest.TestCase):
+    """스케줄러로 이번 주에 잡은 보스를 불러온다. 가격·인원은 사용자가 적는다."""
+    class Nexon:
+        def __init__(self,states): self.states=states
+        def scheduler(self,name,day=None):
+            if name not in self.states: raise AppError('조회 실패')
+            return self.states[name]
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
+        state=lambda name,bosses:{'character':name,'bosses':bosses,'weekly_clear':len(bosses),'weekly_limit':14,'level':280,'job':'렌'}
+        boss=lambda n,d,done:{'name':n,'difficulty':d,'cycle':'주간','registered':True,'complete':done}
+        self.nexon=self.Nexon({'본캐':state('본캐',[boss('세렌','하드',True),boss('칼로스','노멀',False)]),
+                                '부캐':state('부캐',[boss('루시드','노멀',True)])})
+    def tearDown(self): self.tmp.cleanup()
+    def test_only_completed_bosses(self):
+        d=earnings.scheduled_bosses(self.store,self.nexon,['본캐','부캐','없는캐'])
+        self.assertEqual([(b['character'],b['boss']) for b in d['bosses']],[('본캐','세렌 (하드)'),('부캐','루시드 (노멀)')])
+        self.assertEqual([b['price'] for b in d['bosses']],[302_000_000,17_800_000])   # 공식 공지 가격
+        self.assertEqual(d['bosses'][0]['price_source'],'official')
+        self.assertEqual(d['characters'][2]['error'],'조회 실패')
+    def test_saved_boss_is_marked_and_not_duplicated(self):
+        b=earnings.scheduled_bosses(self.store,self.nexon,['본캐'])['bosses'][0]
+        earnings.add(self.store,{'kind':'boss','boss':b['boss'],'crystal':'3억 200만','character':'본캐','source_key':b['key']})
+        again=earnings.scheduled_bosses(self.store,self.nexon,['본캐'])['bosses'][0]
+        self.assertTrue(again['recorded'])
+        with self.assertRaises(AppError):
+            earnings.add(self.store,{'kind':'boss','boss':b['boss'],'crystal':'4억','source_key':b['key']})
+    def test_flag_values(self):
+        from mepiti.adapters import flag
+        for v in ('true','Y','1',True,'완료'): self.assertTrue(flag(v))
+        for v in ('false','N','0',None,''): self.assertFalse(flag(v))
+    def test_old_earnings_table_gets_columns(self):
+        import sqlite3
+        with self.store.db() as db:
+            db.execute('DROP TABLE IF EXISTS earnings')
+            db.execute('CREATE TABLE earnings(id TEXT PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL, meso REAL, pieces INTEGER, piece_price REAL, flasks REAL, boss TEXT, crystal REAL, party INTEGER, extra REAL, note TEXT, created_at TEXT NOT NULL)')
+        earnings.add(self.store,{'kind':'boss','boss':'세렌','crystal':'1억','character':'본캐','source_key':'k'})
+        self.assertEqual(earnings.overview(self.store)['bosses'][0]['character'],'본캐')
+
+
+class CrystalPriceTests(unittest.TestCase):
+    """결정석 판매가 — 공식 공지(업데이트 813) 표. 사용자가 붙여 준 내용."""
+    def test_table_values(self):
+        self.assertEqual(len(earnings.CRYSTALS),46)
+        self.assertEqual(earnings.crystal_price('선택받은 세렌','하드'),302_000_000)
+        self.assertEqual(earnings.crystal_price('세렌','하드'),302_000_000)          # 스케줄러의 짧은 이름
+        self.assertEqual(earnings.crystal_price('감시자 칼로스','카오스'),1_230_000_000)
+        self.assertEqual(earnings.crystal_price('자쿰','카오스'),4_040_000)
+        self.assertIsNone(earnings.crystal_price('세렌','카오스'))                   # 없는 난이도
+    def test_black_mage_from_october(self):
+        self.assertEqual(earnings.crystal_price('검은 마법사','익스트림','2026-09-30'),8_740_000_000)
+        self.assertEqual(earnings.crystal_price('검은 마법사','익스트림','2026-10-01'),5_680_000_000)
+    def test_blank_crystal_uses_official_price(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            r=earnings.add(store,{'kind':'boss','boss':'카링 (하드)','party':'2'})
+            self.assertEqual(r['crystal'],1_560_000_000)
+            self.assertEqual(r['total'],780_000_000)
+            self.assertEqual(store.setting(earnings.BOSS_PRICES) or {},{})           # 공식 가격은 따로 기억하지 않는다
+            with self.assertRaises(AppError):
+                earnings.add(store,{'kind':'boss','boss':'모르는 보스'})              # 표에 없으면 가격을 적어야 한다
+

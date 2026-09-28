@@ -608,3 +608,13 @@ node --check mepiti/static/app.js
 - 검증(2026-09-28, 클라우드 컨테이너): 테스트 238개 통과, JS 구문 검사, Chromium에서 재획·주보 기록과 합계 확인.
 - 남은 것: `style.css`에 옛 환산 화면 스타일(`.conversion*`)이 남아 있다(쓰이지 않음).
 
+### 2026-09-28 — 스케줄러 주보 불러오기, 공식 결정석 가격표 (사용자 요청·자료 제공)
+
+- 사용자가 넥슨 스케줄러 API 문서(`/maplestory/v1/scheduler/character-state`)와 업데이트 813 결정석 가격표를 붙여 주었다.
+  이 컨테이너는 `openapi.nexon.com`, `maplestory.nexon.com` 접속이 차단되어 원문을 직접 열지 못했다.
+- 변경: `mepiti/adapters.py`(`scheduler`, `flag`), `mepiti/server.py`(`/api/earnings/scheduler`, 캐시 경유 `scheduler`),
+  `mepiti/earnings.py`(`character`·`source_key` 열, `scheduled_bosses`, `CRYSTALS`·`crystal_price`, 보스 가격 기억),
+  `mepiti/static/*`(불러오기 화면, 보스 목록을 가격표에서 생성), `tests/test_app.py`(`SchedulerImportTests`, `CrystalPriceTests`), `README.md`, `IMPLEMENTATION.md`.
+- 검증: 테스트 245개 통과, Chromium 확인(입력칸 순서 버그 발견·수정).
+- 다음: 실제 계정으로 스케줄러 응답의 보스 이름·난이도 표기가 가격표와 맞는지 확인. 안 맞으면 `crystal_price`의 이름 대조를 고친다.
+

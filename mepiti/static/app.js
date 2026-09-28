@@ -207,7 +207,8 @@ function earningsRow(r,label,detail){
   row.append(left,right,del);return row;
 }
 async function loadEarnings(){
-  const d=await api('earnings');const s=d.summary;
+  const d=await api('earnings');const s=d.summary;bossPrices=d.boss_prices||{};officialPrices=Object.fromEntries((d.crystals||[]).map(c=>[c.label,c.price]));
+  const names=$('#boss-names');if(names&&!names.childElementCount){(d.crystals||[]).forEach(c=>{const o=el('option');o.value=c.label;names.append(o);});}
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
   const box=$('#earnings-summary');box.replaceChildren();
@@ -234,6 +235,42 @@ function earningsForm(id,kind,after){
     after();await loadEarnings();toast('기록을 저장했습니다.');});};
 }
 earningsForm('hunt-form','hunt',huntPreview);earningsForm('boss-form','boss',bossPreview);
+// 보스별로 기억한 결정석 가격을 직접 입력 칸에도 채운다.
+let bossPrices={},officialPrices={};
+$('#boss-form').elements.boss.addEventListener('change',e=>{const f=$('#boss-form').elements;const p=officialPrices[e.target.value.trim()]||bossPrices[e.target.value.trim()];if(p){f.crystal.value=amountText(p);bossPreview();}});
+// 스케줄러(넥슨 Open API)에서 이번 주에 잡은 보스를 불러온다. 결정석 가격·파티 인원만 적으면 된다.
+$('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
+  const box=$('#boss-import');box.hidden=false;box.replaceChildren(el('p','hint','캐릭터별 스케줄러 조회 중'));
+  const d=await api('earnings/scheduler',{});box.replaceChildren();
+  const chips=el('div','boss-import-chars');
+  d.characters.forEach(c=>chips.append(el('span','badge',c.error?`${c.name} · 조회 실패`:`${c.name} · 주보 ${c.weekly_clear??'—'}/${c.weekly_limit??'—'}`)));
+  box.append(chips);
+  const failed=d.characters.filter(c=>c.error);if(failed.length)box.append(el('p','hint',failed.map(c=>`${c.name}: ${c.error}`).join(' / ')));
+  if(!d.bosses.length){box.append(el('p','hint',`${d.week_start} 주에 완료한 보스가 없습니다. 스케줄러는 보스를 잡은 뒤에 갱신됩니다.`));return;}
+  const list=el('div','boss-import-list');
+  d.bosses.forEach(b=>{
+    const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
+    const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;check.setAttribute('aria-label',`${b.character} ${b.boss} 저장`);
+    const name=el('div');name.append(el('strong','',b.boss),el('small','',b.character+(b.cycle?` · ${b.cycle}`:'')+(b.price_source==='official'?' · 공식 가격':b.price_source==='remembered'?' · 지난 입력 가격':'')+(b.recorded?' · 이미 기록함':'')));
+    const price=el('input');price.placeholder='결정석 판매가';price.autocomplete='off';price.setAttribute('aria-label',`${b.boss} 결정석 판매가`);if(b.price)price.value=amountText(b.price);price.disabled=b.recorded;
+    const party=el('input');party.type='number';party.min=1;party.max=6;party.value=1;party.setAttribute('aria-label',`${b.boss} 파티 인원`);party.disabled=b.recorded;
+    row.append(check,name,price,party);row._boss=b;list.append(row);
+  });
+  const head=el('div','boss-import-row boss-import-head');head.append(el('span',''),el('span','','보스'),el('span','','결정석 판매가'),el('span','','인원'));
+  const save=el('button','primary','선택한 보스 저장');save.type='button';
+  save.onclick=()=>task(save,async()=>{
+    const rows=[...list.children].filter(r=>r.querySelector('input[type=checkbox]').checked);
+    if(!rows.length)throw new Error('저장할 보스를 고르세요.');
+    let saved=0;const errors=[];
+    for(const r of rows){const [,price,party]=r.querySelectorAll('input');const b=r._boss;
+      try{await api('earnings',{kind:'boss',boss:b.boss,crystal:price.value,party:party.value,character:b.character,source_key:b.key,day:todayText()});saved++;
+        r.classList.add('recorded');r.querySelectorAll('input').forEach(i=>i.disabled=true);r.querySelector('input[type=checkbox]').checked=false;}
+      catch(err){errors.push(`${b.character} ${b.boss}: ${err.message}`);}}
+    await loadEarnings();
+    if(errors.length)toast(`${saved}건 저장, ${errors.length}건 실패 — ${errors[0]}`,true);else toast(`${saved}건 저장했습니다.`);
+  });
+  box.append(head,list,save);
+});
 
 async function loadDocuments(){const docs=await api('documents');$('#doc-count').textContent=docs.length;const list=$('#document-list');list.replaceChildren();if(!docs.length)list.append(el('div','empty-state','등록된 자료 없음.\n원문과 적용 조건을 등록하세요.'));docs.forEach(d=>{const m=d.metadata;const details=el('details','panel document-card');const summary=el('summary','',d.title);summary.append(el('span','badge',m.verification_status==='reviewed'?'검토 완료':'검토 대기'));details.append(summary,sourceLink(m.source_url,m.source_url),el('div','doc-meta',`출처 ${m.source_type==='official'?'공식':'커뮤니티'} · ${m.region}/${m.server_type} · 버전 ${m.version||'미확인'}\n적용 ${m.effective_from||'미확인'} ~ ${m.effective_to||'종료 미지정'} · 재검토 ${m.valid_until||'미지정'}\n발행 ${m.published_at||'미확인'} · 수정 ${m.modified_at||'미확인'} · 수집 ${m.retrieved_at}\n주제 ${m.topic||'미지정'} · SHA-256 ${m.content_hash}`),el('pre','',d.body));const approved=m.verification_status==='reviewed';const approve=el('button','primary',approved?'승인 취소':'검토 완료로 승인');approve.onclick=()=>task(approve,async()=>{await api('documents/review',{id:d.id,approve:!approved});await loadDocuments();toast(approved?'검색에서 제외했습니다.':'승인했습니다. 유효 기간에만 검색됩니다.');});const del=el('button','secondary','삭제');del.onclick=()=>guard(async()=>{if(!confirm('이 자료를 삭제합니다.'))return;await api('documents/delete',{id:d.id});await loadDocuments();});details.append(approve,del);list.append(details);});}
 $('#document-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const data=formData(e.target);const {title,body,...metadata}=data;await api('documents',{title,body,metadata});e.target.reset();toast('검토 대기로 저장했습니다.');await loadDocuments();});};

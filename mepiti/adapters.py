@@ -70,6 +70,13 @@ def static_icon(url):
         return url
     return None
 
+def flag(value):
+    """스케줄러의 등록·완료 표시. 문서에 값 형식이 없어 흔한 표기를 모두 받는다."""
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in ('true', 'y', 'yes', '1', 'complete', 'completed', '완료')
+
+
 def extra_slot(slot, name, icon, description=None):
     """장비창에 자리는 있으나 item_equipment에 들어오지 않는 칸(칭호·안드로이드)."""
     return {'slot':slot,'part':slot,'name':name,'icon':static_icon(icon),
@@ -177,7 +184,7 @@ class Nexon:
         self.vault = vault
 
     def get(self, path, query):
-        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider'):
+        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state'):
             raise AppError('허용되지 않은 API입니다.')
         key = self.vault.get()
         if not key:
@@ -306,6 +313,31 @@ class Nexon:
         except AppError as e:
             data['warnings'].append('유니온 공격대 조회: '+str(e))
         return data
+
+    def scheduler(self, name, day=None):
+        """스케줄러 수행 현황. 보스는 완료 시에 갱신된다. 자기 계정 캐릭터만, 최대 14일 전까지."""
+        identity = self.get('id',{'character_name':name})
+        ocid = identity.get('ocid')
+        if not ocid:
+            raise AppError('캐릭터 식별자를 확인하지 못했습니다.',502)
+        query = {'ocid':ocid, **({'date':day} if day else {})}
+        state = self.get('scheduler/character-state', query)
+        if not isinstance(state, dict):
+            raise AppError('스케줄러 응답 형식을 확인할 수 없습니다.',502)
+        bosses = []
+        for b in state.get('boss_contents') or []:
+            if not isinstance(b, dict) or not isinstance(b.get('content_name'), str):
+                continue
+            bosses.append({'name':b['content_name'][:40],
+                           'difficulty':str(b.get('difficulty') or '')[:10] or None,
+                           'cycle':str(b.get('cycle') or '')[:10] or None,
+                           'registered':flag(b.get('registration_flag')),
+                           'complete':flag(b.get('complete_flag'))})
+        return {'character':state.get('character_name') or name, 'world':state.get('world_name'),
+                'level':integer(state.get('character_level')), 'job':state.get('character_class'),
+                'date':state.get('date'), 'bosses':bosses,
+                'weekly_clear':integer(state.get('weekly_boss_clear_count')),
+                'weekly_limit':integer(state.get('weekly_boss_clear_limit_count'))}
 
     @staticmethod
     def equipment_item(item, main_stat):

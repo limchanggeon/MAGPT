@@ -52,6 +52,9 @@ class CachedNexon:
     def union(self, name):
         return self._cached(('union', name), lambda: self.nexon.union(name))
 
+    def scheduler(self, name, day=None):
+        return self.nexon.scheduler(name, day)
+
     def _cached(self, key, fetch):
         with self.lock:
             hit = self.cache.get(key)
@@ -124,6 +127,10 @@ class Application:
                 return {'ok':True}
             if path == '/api/earnings': return earnings.add(s, data)
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
+            if path == '/api/earnings/scheduler':
+                names = [c['name'] for c in s.characters()]
+                if not names: raise AppError('캐릭터 화면에서 관리할 캐릭터를 먼저 등록하세요.')
+                return earnings.scheduled_bosses(s, self.nexon, names[:20])
             if path == '/api/starforce': return starforce.expected(data)
             if path == '/api/prices': return s.price_save(data)
             if path == '/api/prices/delete':

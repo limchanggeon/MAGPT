@@ -49,9 +49,9 @@
 <button class="primary" type="submit">재획 기록 저장</button></form>
 <form id="boss-form" class="panel earnings-form"><h2>주보 기록</h2><p class="muted">결정석 판매가를 파티 인원으로 나눈 내 몫과 추가 드롭 수익을 합산합니다. 주간 합계는 목요일 초기화 기준입니다.</p>
 <label>날짜<input name="day" type="date"></label>
-<label>보스<input name="boss" list="boss-names" maxlength="30" autocomplete="off" required placeholder="예: 하드 세렌"></label>
-<datalist id="boss-names"><option value="하드 스우"><option value="하드 데미안"><option value="카오스 가디언 엔젤 슬라임"><option value="노멀 루시드"><option value="하드 루시드"><option value="노멀 윌"><option value="하드 윌"><option value="카오스 더스크"><option value="노멀 듄켈"><option value="하드 듄켈"><option value="하드 진 힐라"><option value="노멀 세렌"><option value="하드 세렌"><option value="노멀 칼로스"><option value="카오스 칼로스"><option value="노멀 카링"><option value="하드 카링"><option value="검은 마법사"></datalist>
-<div class="form-pair"><label>결정석 판매가<input name="crystal" inputmode="text" autocomplete="off" placeholder="예: 3억 8000만"></label>
+<label>보스<input name="boss" list="boss-names" maxlength="30" autocomplete="off" required placeholder="예: 선택받은 세렌 (하드)"></label>
+<datalist id="boss-names"></datalist>
+<div class="form-pair"><label>결정석 판매가<input name="crystal" inputmode="text" autocomplete="off" placeholder="비우면 공식 공지 가격"></label>
 <label>파티 인원<input name="party" type="number" min="1" max="6" step="1" value="1"></label></div>
 <label>추가 드롭 수익 (선택)<input name="extra" inputmode="text" autocomplete="off" placeholder="예: 판매한 드롭템 금액"></label>
 <label>메모 (선택)<input name="note" maxlength="200" autocomplete="off"></label>
@@ -59,7 +59,7 @@
 <button class="primary" type="submit">주보 기록 저장</button></form>
 </div>
 <div class="two-columns earnings-lists"><section class="panel"><h2>재획 기록</h2><div id="hunt-list" class="earnings-list"></div></section>
-<section class="panel"><h2>주보 기록</h2><div id="boss-weeks" class="earnings-weeks"></div><div id="boss-list" class="earnings-list"></div></section></div>
+<section class="panel"><div class="earnings-head"><h2>주보 기록</h2><button type="button" id="boss-import-button" class="secondary">이번 주 주보 불러오기</button></div><div id="boss-import" class="boss-import" hidden></div><div id="boss-weeks" class="earnings-weeks"></div><div id="boss-list" class="earnings-list"></div></section></div>
 </section>
 
 <section id="view-library" class="view content-view" hidden><div class="page-heading"><h1>자료</h1></div><div class="notice">등록한 문서는 검토 대기 상태로 저장된다. 승인한 문서만 검색에 쓰이며, 재검토 기한이 지나면 제외된다.</div><div id="document-list"></div><details class="panel" open><summary>자료 등록</summary><form id="document-form" class="form-grid"><label>제목<input name="title" required maxlength="200"></label><label>출처 URL<input name="source_url" type="url" placeholder="https://maplestory.nexon.com/..." required></label><label>종류<select name="source_type"><option value="official">공식</option><option value="community">커뮤니티 · 유저 실험</option></select></label><label>주제 식별자<input name="topic" required placeholder="예: 제논-스킬-변경"></label><label>적용 시작일<input name="effective_from" type="date" required></label><label>적용 종료일 (선택)<input name="effective_to" type="date"></label><label>발행일 (선택)<input name="published_at" type="date"></label><label>수정일 (선택)<input name="modified_at" type="date"></label><label>적용 버전<input name="version" placeholder="검토한 패치 버전" required></label><label>재검토 기한<input name="valid_until" type="date" required></label><label>지역<select name="region"><option value="KR">한국</option><option value="other">해외 (답변 제외)</option></select></label><label>서버<select name="server_type"><option value="live">본서버</option><option value="test">테스트월드 (답변 제외)</option></select></label><label class="full">본문<textarea name="body" rows="7" required maxlength="100000" placeholder="메뉴·푸터를 제외한 원문. 적용 조건이 다르면 별도 문서로 등록."></textarea></label><div class="full"><button type="submit" class="primary">검토 대기로 저장</button></div></form></details></section>
