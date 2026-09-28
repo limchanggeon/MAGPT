@@ -394,7 +394,7 @@ def starforce_facts(store, profile, question, result):
     if not conditions.answered(store):
         result.update(status='ask_conditions', content=conditions.ask_text(),
                       form=conditions.form(conditions.load(store)), pending=question)
-        result['conditions'] = ['직접 적어도 됩니다. 예: 샤타포스, 안전모드 미사용, MVP 다이아']
+        result['conditions'] = ['직접 적어도 됩니다. 예: 샤타포스, 파괴방지 미사용, MVP 다이아']
         return None
     item = context.starforce_item(profile, question)
     if not item:

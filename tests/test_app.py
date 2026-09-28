@@ -557,6 +557,10 @@ class ConditionTests(unittest.TestCase):
         """후속 수정에서 말하지 않은 조건이 초기화되면 안 된다."""
         self.assertEqual(conditions.parse('샤타포스'),{'event':'샤타포스'})
         self.assertEqual(conditions.parse('안전모드도 쓸래'),{'safeguard':True})
+        self.assertEqual(conditions.parse('파괴방지 사용'),{'safeguard':True})
+        self.assertEqual(conditions.parse('파괴 방지는 안 씀'),{'safeguard':False})
+        self.assertIn('파괴방지',conditions.summary(conditions.DEFAULTS))
+        self.assertNotIn('안전모드',conditions.summary(conditions.DEFAULTS))
         # 이벤트 이름 속 '복구'는 흔적 복구 사용으로 읽지 않는다.
         self.assertEqual(conditions.parse('샤타포스(+흔적 복구 비용 20% 할인)'),
                          {'event':'샤타포스(+흔적 복구 비용 20% 할인)'})

@@ -98,7 +98,7 @@ function collectChoices(box,form){
     if(g.dataset.type==='multi'){values[g.dataset.key]=picked.map(b=>JSON.parse(b.dataset.value));parts.push('할인 '+(label.join(', ')||'없음'));}
     else{
       values[g.dataset.key]=picked.length?JSON.parse(picked[0].dataset.value):null;
-      const name={safeguard:'안전모드 ',use_restore:'흔적 복구 '}[g.dataset.key]||'';
+      const name={safeguard:'파괴방지 ',use_restore:'흔적 복구 '}[g.dataset.key]||'';
       parts.push(name+(label[0]||''));
     }
   });
