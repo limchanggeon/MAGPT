@@ -62,8 +62,20 @@ function renderChoiceForm(form){
       label.append(el('span','',f.item),input);box.append(label);
     });
   }
+  const actions=el('div','choice-actions');
   const submit=el('button','primary choice-submit',form.submit||'확인');submit.type='submit';
-  box.append(submit);
+  actions.append(submit);
+  if(form.kind==='price'&&form.skippable){
+    // 시세 비교용 질문이면 값을 몰라도 넘어갈 수 있다.
+    const skip=el('button','secondary choice-skip','모르는 값은 건너뛰기');skip.type='button';
+    skip.onclick=()=>{if(busy||box.classList.contains('answered'))return;guard(async()=>{
+      lockChoiceForm(box);
+      try{await sendChat('노작값 없이 진행',{kind:'price',values:{},skip:true});}
+      catch(err){unlockChoiceForm(box);throw err;}
+    });};
+    actions.append(skip);
+  }
+  box.append(actions);
   box.onsubmit=e=>{e.preventDefault();if(busy||box.classList.contains('answered'))return;guard(async()=>{
     const {values,summary}=collectChoices(box,form);
     lockChoiceForm(box);

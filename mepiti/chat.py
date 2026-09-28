@@ -15,6 +15,10 @@ UNIT_SCALE = {'조':1_0000_0000_0000,'억':1_0000_0000,'만':1_0000,None:1}
 # 값을 따져야 답할 수 있는 질문. 노작값을 모르면 지어내지 말고 되물어야 한다.
 PRICE_INTENT = re.compile(r'노작|시세|가격|얼마|값이|사는\s*게|살까|구매|바꾸는\s*게|'
                           r'가성비|예산|이득|싸[냐게]|비싸')
+# 장비 값 자체를 묻는 표현. '기대값이 얼마야'의 '얼마'는 여기에 들지 않는다.
+ITEM_PRICE = re.compile(r'노작|시세|가격|사는\s*게|살까|구매|바꾸는\s*게|가성비|이득|싸[냐게]|비싸')
+# 되물은 노작값을 건너뛰겠다는 답.
+PRICE_SKIP = re.compile(r'없어도|필요\s*없|몰라도|상관\s*없|괜찮|넘어가|건너뛰|스킵|skip|패스|몰라|모름|모르겠', re.I)
 # 강화 기대값 질문. 목표 성을 함께 찾는다.
 STARFORCE_INTENT = re.compile(r'기대\s*값|기댓값|강화\s*비용|몇\s*번|스타포스|(\d+)\s*성')
 TARGET_STAR = re.compile(r'(\d{1,2})\s*성')
@@ -82,10 +86,27 @@ def answer(store, model, data, nexon=None):
             store.message(sid,'user',{'content':said})
             store.message(sid,'assistant',result)
             return result
-    if kind == 'price':
+    skip_prices = False
+    if last.get('status') == 'ask_price' and pending and nexon and not picked and (
+            (kind == 'price' and structured.get('skip'))
+            or (not structured and PRICE_SKIP.search(question) and not MONEY.search(question))):
+        if not (last.get('form') or {}).get('skippable'):
+            # 강화 기대값의 스페어 값은 계산에 꼭 필요해 건너뛸 수 없다. 같은 입력칸을 다시 보여 준다.
+            result.update(status='ask_price', form=last.get('form'), asked=last.get('asked'), pending=pending,
+                          content='이 값은 건너뛸 수 없습니다. 강화 중 장비가 파괴되면 같은 장비를 하나 더 마련해야 해서, '
+                                  '그 값이 없으면 기대 비용을 계산할 수 없습니다.\n'
+                                  '정확하지 않아도 괜찮습니다. 대략적인 값을 적어 주세요.')
+            result['conditions'] = ['예: 2천만, 1억 5천만, 32억']
+            store.message(sid,'user',{'content':said})
+            store.message(sid,'assistant',result)
+            return result
+        skip_prices = True
+        notes.append('노작값 없이 진행했습니다. 값을 모르는 장비는 값을 따지지 않았습니다.')
+        question = pending
+    if kind == 'price' and not skip_prices:
         saved_prices = save_price_answer(store, structured.get('values'), last)
     else:
-        saved_prices = [] if structured or picked else capture_prices(store, question, history)
+        saved_prices = [] if structured or picked or skip_prices else capture_prices(store, question, history)
     if saved_prices and pending and nexon:
         notes.append('노작값을 저장했습니다: ' + ', '.join(f"{r['item']} {r['price']:,.0f} 메소" for r in saved_prices)
                      + '. 사용자가 알려 준 값이며 실제 거래가와 다를 수 있습니다.')
@@ -111,7 +132,7 @@ def answer(store, model, data, nexon=None):
         elif not nexon:
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
-            analyse_character(store, model, nexon, main, question, history, result)
+            analyse_character(store, model, nexon, main, question, history, result, skip_prices)
     elif terms and any(k in question for k in ('뜻','뭐','무엇','의미')):
         result.update(status='term',content='\n'.join(t['meaning'] for t in terms))
         result['conditions'] = ['용어 설명은 요구사항 v0.1 기준입니다. 게임별 확률과 비용을 뜻하지 않습니다.']
@@ -162,7 +183,7 @@ def answer(store, model, data, nexon=None):
     return result
 
 
-def analyse_character(store, model, nexon, managed, question, history, result):
+def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False):
     """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다."""
     try:
         profile = nexon.character(managed['name'], details=True)
@@ -181,7 +202,10 @@ def analyse_character(store, model, nexon, managed, question, history, result):
             return
         text += computed
     # 값을 따져야 하는 질문이면 노작값부터 확보한다. 모르면 지어내지 않고 되묻는다.
-    if PRICE_INTENT.search(question):
+    # 강화 기대값 질문의 '얼마'는 기대 비용을 묻는 말이라, 장비 값을 직접 물을 때만 시세를 챙긴다.
+    asks_price = PRICE_INTENT.search(question) and (
+        not STARFORCE_INTENT.search(question) or ITEM_PRICE.search(question))
+    if asks_price:
         resolved = prices.resolve_many(store, price_targets(facts, question))
         known = [r for r in resolved if r['known']]
         unknown = [r for r in resolved if not r['known']]
@@ -190,9 +214,9 @@ def analyse_character(store, model, nexon, managed, question, history, result):
                      + '\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소 ({r['source']}, {r['recorded_at'][:10]})"
                                   for r in known))
         # 하나도 모를 때만 멈추고 묻는다. 일부라도 알면 그걸로 답하고 모르는 것은 각주로 남긴다.
-        if unknown and not known:
+        if unknown and not known and not skip_prices:
             result.update(status='ask_price', content=prices.ask_text(unknown),
-                          form=prices.form(unknown), pending=question)
+                          form=prices.form(unknown, skippable=True), pending=question)
             result['asked'] = [{'item':r['item']} for r in unknown]
             result['conditions'] = ['값을 모르는 채로 비용을 비교하지 않습니다. 알려 주시면 저장해 두고 다시 묻지 않습니다.',
                                     '경매장 조회가 실패했거나 한도를 넘었습니다.' if prices.status(store)['fetcher']

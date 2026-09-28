@@ -97,9 +97,13 @@ def ask_text(unknown):
     return f'{head} 값을 알려주시면 저장해 두고 다음부터는 묻지 않습니다.'
 
 
-def form(unknown):
-    """화면에서 장비별로 값을 적게 할 입력칸."""
-    return {'kind': 'price', 'submit': '저장하고 계속',
+def form(unknown, skippable=False):
+    """화면에서 장비별로 값을 적게 할 입력칸.
+
+    `skippable`이면 값을 몰라도 넘어갈 수 있다(시세 비교용). 강화 기대값의 스페어 값처럼
+    계산에 꼭 필요한 값은 건너뛸 수 없다.
+    """
+    return {'kind': 'price', 'submit': '저장하고 계속', 'skippable': bool(skippable),
             'fields': [{'item': u['item'], 'placeholder': '예: 2천만, 32억'} for u in unknown[:8]]}
 
 

@@ -836,3 +836,57 @@ class ChoiceAnswerTests(CharacterAnalysisTests):
         self.assertEqual(again['status'],'analysis')
         self.assertEqual(again['starforce']['event'],'샤타포스')
         self.assertEqual(again['starforce']['target_star'],22)
+
+
+class PriceScopeTests(CharacterAnalysisTests):
+    """기대값 질문에서 상관없는 장비 값을 묻지 않고, 건너뛰겠다는 답을 알아듣는다."""
+    PROFILE=dict(StarforceConversationTests.PROFILE)
+    PROFILE['equipment']=[dict(e) for e in StarforceConversationTests.PROFILE['equipment']]+[
+        {'slot':'모자','name':'에테르넬 나이트헬름','starforce':18,'scroll_upgrade':12,'equip_level':250,
+         'potential_grade':'레전드리','potential':[],'additional_grade':None,'additional_potential':[],
+         'add_grade':{'tier':None,'grade':183,'label':'183급'}}]+[
+        {'slot':slot,'name':f'잡템{i}','starforce':0,'scroll_upgrade':0,'equip_level':160,
+         'potential_grade':None,'potential':[],'additional_grade':None,'additional_potential':[],
+         'add_grade':{'tier':None,'grade':20,'label':'20급'}} for i,slot in enumerate(('상의','하의','망토','장갑'))]
+    def setUp(self):
+        super().setUp()
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+    def reply(self,first,message,answer_value=None):
+        data={'message':message,'session_id':first['session_id']}
+        if answer_value is not None: data['answer']=answer_value
+        return answer(self.store,self.FakeModel('x'),data,self.FakeNexon(self.PROFILE))
+    def test_expected_value_does_not_ask_unrelated_prices(self):
+        """실제로 겪은 문제: 모자 값을 넣자 상의·하의 등 상관없는 장비 값을 되물었다."""
+        first,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
+        self.assertEqual(first['status'],'ask_price')
+        self.assertEqual([a['item'] for a in first['asked']],['에테르넬 나이트헬름'])
+        self.assertFalse(first['form']['skippable'])      # 스페어 값은 건너뛸 수 없다
+        done=self.reply(first,'에테르넬 나이트헬름 2천만')
+        self.assertEqual(done['status'],'analysis')
+        self.assertEqual(done['starforce']['item'],'에테르넬 나이트헬름')
+        self.assertIn('기대 비용',done['content'])
+        again,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
+        self.assertEqual(again['status'],'analysis')        # 다시 물어도 다른 장비 값을 묻지 않는다
+    def test_spare_price_cannot_be_skipped(self):
+        first,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
+        r=self.reply(first,'그건 없어도 됨')
+        self.assertEqual(r['status'],'ask_price')
+        self.assertIn('건너뛸 수 없습니다',r['content'])
+        self.assertEqual(r['pending'],first['pending'])
+        done=self.reply(r,'2천만')                          # 다시 보여 준 칸에 답하면 이어서 계산
+        self.assertEqual(done['status'],'analysis')
+    def test_comparison_prices_can_be_skipped(self):
+        first,_=self.ask('x','상의 바꾸는 게 이득이야? 노작값 기준으로')
+        self.assertEqual(first['status'],'ask_price')
+        self.assertTrue(first['form']['skippable'])
+        r=self.reply(first,'그건 없어도 됨')
+        self.assertEqual(r['status'],'analysis')
+        self.assertIn('노작값 없이 진행',' '.join(r['conditions']))
+        self.assertEqual(self.store.price_count(),0)
+    def test_skip_button(self):
+        first,_=self.ask('x','상의 바꾸는 게 이득이야? 노작값 기준으로')
+        r=self.reply(first,'노작값 없이 진행',{'kind':'price','values':{},'skip':True})
+        self.assertEqual(r['status'],'analysis')
+    def test_item_price_question_still_asks(self):
+        r,_=self.ask('x','모자 21성이면 시세 얼마야')
+        self.assertEqual(r['status'],'ask_price')
