@@ -8,9 +8,12 @@ CHARACTER_INTENT = re.compile(
     r'내\s*예산|제\s*예산|뭘\s*올|어디를?\s*올|어느\s*부위|다음\s*단계|스펙업|약한\s*부위|'
     r'추옵\s*(?:상태|등급)|보완|우선순위')
 # 게임 규칙은 검토된 자료에서만 나와야 한다. 확률 관련 표현은 문구 자체로 막는다.
-FABRICATION = re.compile(r'\d+\s*%\s*(?:확률|성공|파괴)|성공\s*확률\s*\d|파괴\s*확률')
+# '성공 확률: 38.5%', '파괴 확률은 3%'처럼 사이에 기호나 조사가 끼어도 잡는다.
+# 크리티컬 확률처럼 캐릭터 능력치에 있는 확률은 대상이 아니다.
+FABRICATION = re.compile(r'\d+\s*%\s*(?:확률|성공|파괴)|(?:성공|파괴|강화|큐브|등급\s*업)\s*확률[^\n\d]{0,8}\d|파괴\s*확률')
 # 금액·수치를 찾는 패턴. 서술에 나온 값은 모두 넘겨준 사실 안에 있어야 한다.
 AMOUNT = re.compile(r'(\d[\d,]*(?:\.\d+)?)\s*(조|억|만)?')
+PERCENT = re.compile(r'(\d+(?:\.\d+)?)\s*%')
 UNIT_SCALE = {'조':1_0000_0000_0000,'억':1_0000_0000,'만':1_0000,None:1}
 # 값을 따져야 답할 수 있는 질문. 노작값을 모르면 지어내지 말고 되물어야 한다.
 PRICE_INTENT = re.compile(r'노작|시세|가격|얼마|값이|사는\s*게|살까|구매|바꾸는\s*게|'
@@ -495,13 +498,14 @@ def numbers_in(text):
 
 
 def unsupported_numbers(written, facts_text, floor=1000):
-    """서술에 있으나 넘겨준 사실에는 없는 큰 수치. 지어낸 금액을 잡아내는 용도다.
+    """서술에 있으나 넘겨준 사실에는 없는 수치. 지어낸 금액·퍼센트를 잡아내는 용도다.
 
-    작은 수(등급·성·퍼센트 등)는 모델이 합산하거나 세는 과정에서 나올 수 있어 통과시킨다.
-    금액 규모의 수치만 사실과 대조한다.
+    작은 정수(등급·성 등)는 모델이 세는 과정에서 나올 수 있어 통과시키고, 금액 규모의 수치와
+    퍼센트만 사실과 대조한다. 퍼센트는 작은 모델이 '성공 확률: 38.5%'처럼 지어내는 일이 잦다.
     """
     known = numbers_in(facts_text)
-    bad = []
+    known_percent = {float(p) for p in PERCENT.findall(facts_text or '')}
+    bad = [f'{p}%' for p in PERCENT.findall(written or '') if float(p) not in known_percent]
     for digits, unit in AMOUNT.findall(written or ''):
         try:
             value = float(digits.replace(',', ''))

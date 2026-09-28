@@ -672,6 +672,46 @@ class ConditionConversationTests(CharacterAnalysisTests):
         self.assertEqual(r['status'],'ask_conditions')
         self.assertFalse(conditions.answered(self.store))
 
+class FabricationFilterTests(unittest.TestCase):
+    """모델 평가에서 실제로 나온 지어낸 확률. 기존 필터는 사이에 ':'나 조사가 끼면 놓쳤다."""
+    FACTS='모자: 에테르넬 나이트헬름 / 18성 / 잠재 · STR +10% · 올스탯 +7%\n- 크리티컬 확률: 124'
+    def rejected(self,text):
+        from mepiti.chat import FABRICATION,unsupported_numbers
+        return bool(FABRICATION.search(text) or unsupported_numbers(text,self.FACTS))
+    def test_invented_probabilities_are_caught(self):
+        for text in ('모자의 22성 성공 확률: 38.5%','**확률:** 0%','파괴 확률은 3% 정도입니다',
+                     '강화 확률 은 12%','큐브 확률: 1.8%'):
+            with self.subTest(text=text): self.assertTrue(self.rejected(text))
+    def test_percent_from_facts_is_allowed(self):
+        for text in ('STR +10%와 올스탯 +7%가 붙어 있습니다.','크리티컬 확률은 124입니다.'):
+            with self.subTest(text=text): self.assertFalse(self.rejected(text))
+
+class OllamaSwitchTests(unittest.TestCase):
+    """생각 모드가 기본으로 켜진 모델(Qwen3·3.5)은 끈다. 켜 두면 추론에 토큰을 다 써서 답이 빈다."""
+    def calls(self, capabilities):
+        sent=[]
+        def fake(url,payload=None,headers=None,timeout=15):
+            sent.append((url,payload))
+            if url.endswith('/api/show'):
+                if capabilities is None: raise AppError('연결 실패',503)
+                return {'capabilities':capabilities}
+            return {'message':{'content':'{"ids": []}'}}
+        with patch('mepiti.adapters.request_json',side_effect=fake):
+            model=Ollama()
+            model.select('m','질문',[{'id':0,'text':'근거'}])
+            model.select('m','질문',[{'id':0,'text':'근거'}])
+        return [p for u,p in sent if u.endswith('/api/chat')],[u for u,p in sent if u.endswith('/api/show')]
+    def test_thinking_model_gets_think_false(self):
+        chats,shows=self.calls(['completion','thinking'])
+        self.assertTrue(all(c.get('think') is False for c in chats))
+        self.assertEqual(len(shows),1)            # 기능 목록은 한 번만 묻는다
+    def test_plain_model_gets_no_switch(self):
+        chats,_=self.calls(['completion'])
+        self.assertTrue(all('think' not in c for c in chats))
+    def test_show_failure_sends_no_switch(self):
+        chats,_=self.calls(None)
+        self.assertTrue(all('think' not in c for c in chats))
+
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
