@@ -597,3 +597,14 @@ node --check mepiti/static/app.js
 - 변경(`mepiti/static/style.css`만): 캐릭터 외형 150→240px(중간 폭 190px), 외형 칸 200→300px, 장비 칸 52→84px, 장비 아이콘 30→48px,
   칸 안 ★·주문서 8→12px, 추옵 급 8→13px(굵게), 잠재 등급 점 4→8px, 이름 15→19px, 레벨 16→22px.
 - 검증(2026-09-28, 클라우드 컨테이너): Chromium 1440·1000·420px 폭에서 가로 넘침 없음 확인(휴대폰 폭은 기존대로 칸이 화면에 맞춰 줄어든다).
+
+### 2026-09-28 — 계산 탭을 수익 탭으로 교체 (사용자 요청)
+
+- 사용자 요청: 계산 탭은 전부 지우고, 재획 수익·조각 기록(조각 가격 입력 시 이번 재획 총수익)과 주보 수익 기록으로 바꿀 것.
+- 변경: `mepiti/earnings.py`(신규), `mepiti/server.py`(`/api/earnings` GET·POST, `/api/earnings/delete`), `mepiti/core.py`(`calculate` 삭제),
+  `mepiti/static/index.html`·`app.js`·`style.css`(수익 화면), `tests/test_app.py`(`EarningsTests`), `README.md`, `IMPLEMENTATION.md`.
+  삭제: `mepiti/conversion.py`, `mepiti/jobdata.py`와 계산·환산 테스트. 주스탯 환산을 다시 쓰려면 git 기록에서 되살려야 한다.
+- 화면 id는 호환을 위해 `view-calculator`·`data-view="calculator"`를 그대로 두고 표시 이름만 '수익'으로 바꿨다.
+- 검증(2026-09-28, 클라우드 컨테이너): 테스트 238개 통과, JS 구문 검사, Chromium에서 재획·주보 기록과 합계 확인.
+- 남은 것: `style.css`에 옛 환산 화면 스타일(`.conversion*`)이 남아 있다(쓰이지 않음).
+

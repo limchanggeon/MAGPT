@@ -14,9 +14,8 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__
 from .adapters import Nexon, Ollama, Vault, recognize, system_info
 from .chat import answer
-from .conversion import convert, cooldowns, jobs
-from .core import AppError, Store, calculate, identifier, now, required
-from . import prices, starforce
+from .core import AppError, Store, identifier, now, required
+from . import earnings, prices, starforce
 
 STATIC = Path(__file__).parent/'static'
 
@@ -93,7 +92,7 @@ class Application:
             if path == '/api/characters': return s.characters()
             if path == '/api/documents': return s.documents()
             if path == '/api/download': return dict(self.download)
-            if path == '/api/conversion': return {'jobs':jobs(),'cooldowns':cooldowns()}
+            if path == '/api/earnings': return earnings.overview(s)
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
         if method == 'POST':
             if path == '/api/chat':
@@ -123,8 +122,8 @@ class Application:
                 with s.db() as db:
                     db.execute('DELETE FROM sessions WHERE id=?',(required(data,'id',100),))
                 return {'ok':True}
-            if path == '/api/calculate': return calculate(data)
-            if path == '/api/conversion': return convert(data)
+            if path == '/api/earnings': return earnings.add(s, data)
+            if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
             if path == '/api/starforce': return starforce.expected(data)
             if path == '/api/prices': return s.price_save(data)
             if path == '/api/prices/delete':

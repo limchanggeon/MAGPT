@@ -12,9 +12,8 @@ from urllib.request import Request, urlopen
 
 from mepiti.adapters import Nexon, Ollama, Vault, recognize
 from mepiti.chat import answer
-from mepiti import conditions, context, prices, starforce, union
-from mepiti.conversion import convert, cooldowns, jobs
-from mepiti.core import AppError, KST, Store, calculate, identifier, now
+from mepiti import conditions, context, earnings, prices, starforce, union
+from mepiti.core import AppError, KST, Store, identifier, now
 from mepiti.server import Application, make_server
 from pathlib import Path
 
@@ -88,23 +87,6 @@ class StoreTests(unittest.TestCase):
         self.store.character_save({'name':'둘','budget':0,'main':True})
         with self.assertRaises(AppError): self.store.character_save({'name':'하나','budget':0,'main':True})
         self.assertEqual(self.store.characters()[0]['name'],'둘')
-
-class CalculationTests(unittest.TestCase):
-    def test_probability(self):
-        r=calculate({'kind':'probability','probability':10,'cost':100,'trials':10})
-        self.assertEqual(r['expected_trials'],10);self.assertEqual(r['expected_cost'],1000)
-        self.assertAlmostEqual(r['success_probability'],1-.9**10);self.assertEqual(r['median_trials'],7)
-    def test_boundaries(self):
-        for trials,expected in [(0,0),(1,1)]:
-            r=calculate({'kind':'probability','probability':100,'cost':0,'trials':trials})
-            self.assertEqual(r['success_probability'],expected)
-        for p in [0,-1,101,'NaN',float('inf'),True]:
-            with self.assertRaises(AppError):calculate({'kind':'probability','probability':p,'cost':0,'trials':10})
-        with self.assertRaises(AppError): calculate({'kind':'probability','probability':10,'cost':0,'trials':1.1})
-    def test_growth(self):
-        self.assertEqual(calculate({'kind':'growth','current':100,'target':151,'daily':10})['days'],6)
-        self.assertEqual(calculate({'kind':'growth','current':100,'target':50,'daily':10})['days'],0)
-        with self.assertRaises(AppError):calculate({'kind':'growth','current':0,'target':100,'daily':0})
 
 class AdapterTests(unittest.TestCase):
     def test_nexon_fields_and_no_key_in_snapshot(self):
@@ -690,56 +672,6 @@ class ConditionConversationTests(CharacterAnalysisTests):
         self.assertEqual(r['status'],'ask_conditions')
         self.assertFalse(conditions.answered(self.store))
 
-class ConversionTests(unittest.TestCase):
-    """원본 엑셀 계산기가 계산해 둔 값과 대조한다.
-
-    아델은 워크북에 저장된 값, 나머지 다섯 직업은 같은 입력으로 직업만 바꿔
-    LibreOffice로 재계산해 얻은 값이다. 팔라딘(메용 0.16)과 카데나(부스탯2)는
-    예외 분기를 지나므로 함께 고정한다.
-    """
-    SAMPLE = {'level':275,'buffed_stat':55784,'plain_stat':54277,'sub_stat':8395,'sub_stat2':0,
-              'stat_attack':46760060,'damage':67,'boss_damage':398,'defense_ignore':89.03,
-              'critical_damage':82,'item_attack_percent':99,'arcane_stat':13200,
-              'authentic_stat':1300,'hyper_stat':150,'union_stat':240,'cooldown':'4초'}
-    EXPECTED = {'아델':56554,'히어로':42212,'메르세데스':53390,'아크':53451,'카데나':66558,'팔라딘':54641}
-    def result(self,job,**over):
-        return convert({**self.SAMPLE,'job':job,**over})
-    def broken(self,over):
-        return convert({**self.SAMPLE,'job':'아델',**over})
-    def test_matches_original_workbook(self):
-        for job,expected in self.EXPECTED.items():
-            with self.subTest(job=job):
-                self.assertEqual(self.result(job)['converted_stat'],expected)
-    def test_intermediate_values_match(self):
-        r=self.result('아델')
-        self.assertEqual(r['shard_damage'],547994677)
-        self.assertEqual(r['score'],54.79)
-        self.assertEqual(r['derived']['stat_percent'],6.25)
-        self.assertEqual(r['derived']['pure_stat'],5433)
-        self.assertEqual(r['derived']['attack'],2978)
-        self.assertEqual(r['stat_sheet_ratio'],0.0347)
-    def test_grade_and_benchmarks(self):
-        r=self.result('아델')
-        self.assertEqual(r['grade'],{'name':'적정','gap':770})
-        self.assertEqual([(b['name'],b['ratio']) for b in r['benchmarks']],
-                         [('레전둘둘',0.0589),('노해방 초고스펙',-0.1956)])
-    def test_result_is_marked_unofficial(self):
-        r=self.result('아델')
-        self.assertFalse(r['source']['official'])
-        self.assertTrue(any('공식' in a for a in r['assumptions']))
-    def test_sub_stat2_only_for_three_jobs(self):
-        with_second=self.result('카데나',sub_stat2=5000)['converted_stat']
-        self.assertNotEqual(with_second,self.EXPECTED['카데나'])
-        self.assertEqual(self.result('아델',sub_stat2=5000)['converted_stat'],self.EXPECTED['아델'])
-    def test_rejects_bad_input(self):
-        for bad in [{'job':'없는직업'},{'cooldown':'9초'},{'buffed_stat':100,'plain_stat':200},
-                    {'level':1},{'damage':'abc'},{'arcane_stat':999999}]:
-            with self.subTest(bad=bad):
-                with self.assertRaises(AppError): self.broken(bad)
-    def test_metadata_lists(self):
-        self.assertIn('아델',jobs());self.assertEqual(len(jobs()),43)
-        self.assertIn('노쿨감',cooldowns())
-
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -763,7 +695,7 @@ class HTTPTests(unittest.TestCase):
         with self.request('/api/characters',{'name':'HTTP테스트','budget':100}) as r:self.assertEqual(r.status,200)
         with self.request('/api/characters') as r:self.assertIn('HTTP테스트',r.read().decode())
     def test_validation_error_not_server_error(self):
-        with self.assertRaises(HTTPError) as e:self.request('/api/calculate',{'kind':'growth','current':0,'target':10,'daily':0})
+        with self.assertRaises(HTTPError) as e:self.request('/api/earnings',{'kind':'hunt','meso':'abc'})
         self.assertEqual(e.exception.code,400)
 
 if __name__=='__main__':unittest.main()
@@ -1088,3 +1020,46 @@ class UnionTests(CharacterAnalysisTests):
                  self.UnionNexon(self.PROFILE))
         self.assertNotIn('99999999',r['content'])
         self.assertIn('다음에 키우면 좋은 공격대원',r['content'])
+
+
+class EarningsTests(unittest.TestCase):
+    """재획·주보 수익 기록. 금액은 사용자가 적은 값만 쓴다."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def test_hunt_total_is_meso_plus_pieces(self):
+        r=earnings.add(self.store,{'kind':'hunt','meso':'12억 3500만','pieces':'42','piece_price':'650만','flasks':'2'})
+        self.assertEqual(r['total'],1_235_000_000+42*6_500_000)
+        self.assertEqual(self.store.setting(earnings.PIECE_PRICE),6_500_000)   # 다음 기록 기본값
+        o=earnings.overview(self.store)
+        self.assertEqual(o['summary']['hunt']['all']['total'],r['total'])
+        self.assertEqual(o['summary']['hunt']['pieces'],42)
+        self.assertEqual(o['summary']['hunt']['per_flask'],r['total']/2)
+    def test_boss_share_split_by_party(self):
+        r=earnings.add(self.store,{'kind':'boss','boss':'하드 세렌','crystal':'6억','party':'3','extra':'1000만'})
+        self.assertEqual(r['total'],200_000_000+10_000_000)
+        o=earnings.overview(self.store)
+        self.assertEqual(o['boss_weeks'][0]['total'],r['total'])
+        self.assertEqual(o['summary']['all']['all'],r['total'])
+    def test_week_starts_on_thursday(self):
+        from datetime import date
+        self.assertEqual(earnings.week_start(date(2026,9,28)),date(2026,9,24))   # 월 -> 직전 목
+        self.assertEqual(earnings.week_start(date(2026,9,24)),date(2026,9,24))   # 목 -> 그날
+        self.assertEqual(earnings.week_start(date(2026,9,23)),date(2026,9,17))   # 수 -> 전주 목
+    def test_old_records_leave_this_week(self):
+        earnings.add(self.store,{'kind':'boss','boss':'노멀 루시드','crystal':'1억','day':'2026-01-01'})
+        o=earnings.overview(self.store)
+        self.assertEqual(o['summary']['boss']['all']['count'],1)
+        self.assertEqual(o['summary']['boss']['week']['count'],0)
+    def test_validation(self):
+        for bad in [{'kind':'x'},{'kind':'hunt'},{'kind':'hunt','meso':'abc'},{'kind':'hunt','pieces':5},
+                    {'kind':'hunt','meso':'1억','day':'2999-01-01'},{'kind':'boss','crystal':'1억'},
+                    {'kind':'boss','boss':'세렌','crystal':'1억','party':9},{'kind':'boss','boss':'세렌'}]:
+            with self.subTest(bad=bad):
+                with self.assertRaises(AppError): earnings.add(self.store,bad)
+    def test_delete(self):
+        r=earnings.add(self.store,{'kind':'hunt','meso':'1억'})
+        earnings.delete(self.store,r['id'])
+        self.assertEqual(earnings.overview(self.store)['hunts'],[])
+        with self.assertRaises(AppError): earnings.delete(self.store,r['id'])
+

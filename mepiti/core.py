@@ -286,19 +286,3 @@ class Store:
         with self.db() as db:
             db.execute('INSERT INTO messages VALUES(?,?,?,?,?)', (identifier(),sid,role,json.dumps(payload,ensure_ascii=False),now()))
 
-def calculate(data):
-    kind = data.get('kind')
-    if kind == 'probability':
-        p = number(data,'probability',1e-9,100)/100
-        cost = number(data,'cost')
-        trials = number(data,'trials',0,1e9)
-        if not trials.is_integer():
-            raise AppError('시도 횟수는 정수여야 합니다.')
-        cumulative = 1 if p == 1 and trials > 0 else (0 if trials == 0 else -math.expm1(trials*math.log1p(-p)))
-        median = 1 if p == 1 else math.ceil(math.log(.5)/math.log1p(-p))
-        return {'kind':kind, 'expected_trials':1/p,'expected_cost':cost/p,'median_trials':median,'success_probability':cumulative, 'assumptions':['사용자가 입력한 확률과 비용입니다. 메이플 공식 강화 규칙이 아닙니다.','매 시도는 독립이며 성공확률과 비용이 일정하고, 실패 시 상태 변화가 없습니다.','기대 비용은 성공 보장 금액이나 50% 달성 예산이 아닙니다.'], 'version':'independent-trials-v1'}
-    if kind == 'growth':
-        current, target, daily = number(data,'current'),number(data,'target'),number(data,'daily',1e-9)
-        remaining = max(0,target-current)
-        return {'kind':kind,'remaining':remaining,'days':math.ceil(remaining/daily),'assumptions':['사용자 입력 기준으로 하루 획득량이 일정하다고 가정합니다.','게임별 소모량·이벤트·주간 제한은 자동 반영하지 않습니다.'],'version':'linear-growth-v1'}
-    raise AppError('지원하지 않는 계산입니다.')
