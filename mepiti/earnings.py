@@ -195,7 +195,8 @@ def overview(store, limit=200):
             'boss_weeks': sorted(weeks.values(), key=lambda w: w['week_start'], reverse=True)[:26],
             'summary': summary, 'piece_price': store.setting(PIECE_PRICE) or None,
             'boss_prices': store.setting(BOSS_PRICES) or {},
-            'crystals': [{'label': crystal_label(b, d), 'price': crystal_price(b, d)} for b, d, _, _ in CRYSTALS],
+            'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
+                         for b, d, _, _ in CRYSTALS],
             'crystal_source': CRYSTAL_SOURCE}
 
 

@@ -47,16 +47,17 @@
 <label>메모 (선택)<input name="note" maxlength="200" autocomplete="off" placeholder="예: 아르테리아, 펫 3마리"></label>
 <p id="hunt-preview" class="earnings-preview" aria-live="polite"></p>
 <button class="primary" type="submit">재획 기록 저장</button></form>
-<form id="boss-form" class="panel earnings-form"><h2>주보 기록</h2><p class="muted">결정석 판매가를 파티 인원으로 나눈 내 몫과 추가 드롭 수익을 합산합니다. 주간 합계는 목요일 초기화 기준입니다.</p>
+<form id="boss-form" class="panel earnings-form"><h2>주보 기록</h2><p class="muted">잡은 보스를 체크하세요. 결정석은 공식 공지 판매가를 파티 인원으로 나눠 계산합니다. 한 보스는 한 난이도만 고를 수 있습니다.</p>
 <label>날짜<input name="day" type="date"></label>
-<label>보스<input name="boss" list="boss-names" maxlength="30" autocomplete="off" required placeholder="예: 선택받은 세렌 (하드)"></label>
-<datalist id="boss-names"></datalist>
-<div class="form-pair"><label>결정석 판매가<input name="crystal" inputmode="text" autocomplete="off" placeholder="비우면 공식 공지 가격"></label>
-<label>파티 인원<input name="party" type="number" min="1" max="6" step="1" value="1"></label></div>
+<div id="boss-checklist" class="boss-checklist" role="group" aria-label="잡은 보스"></div>
+<details class="boss-custom"><summary>목록에 없는 보스 직접 적기</summary>
+<div class="form-pair"><label>보스<input name="boss" maxlength="30" autocomplete="off" placeholder="보스 이름"></label>
+<label>결정석 판매가<input name="crystal" inputmode="text" autocomplete="off" placeholder="예: 3억 8000만"></label></div>
+<label>파티 인원<input name="party" type="number" min="1" max="6" step="1" value="1"></label></details>
 <label>추가 드롭 수익 (선택)<input name="extra" inputmode="text" autocomplete="off" placeholder="예: 판매한 드롭템 금액"></label>
 <label>메모 (선택)<input name="note" maxlength="200" autocomplete="off"></label>
 <p id="boss-preview" class="earnings-preview" aria-live="polite"></p>
-<button class="primary" type="submit">주보 기록 저장</button></form>
+<button class="primary" type="submit">체크한 보스 저장</button></form>
 </div>
 <div class="two-columns earnings-lists"><section class="panel"><h2>재획 기록</h2><div id="hunt-list" class="earnings-list"></div></section>
 <section class="panel"><div class="earnings-head"><h2>주보 기록</h2><button type="button" id="boss-import-button" class="secondary">이번 주 주보 불러오기</button></div><div id="boss-import" class="boss-import" hidden></div><div id="boss-weeks" class="earnings-weeks"></div><div id="boss-list" class="earnings-list"></div></section></div>

@@ -188,15 +188,6 @@ function huntPreview(){
   if(!m&&!n){box.textContent='';return;}
   box.textContent=`이번 재획 총수익 ${mesoText(m+n*price)}`+(n?` (메소 ${mesoText(m)} + 조각 ${fmt(n)}개 × ${mesoText(price)})`:'');
 }
-function bossPreview(){
-  const f=$('#boss-form').elements;const c=readAmount(f.crystal.value),x=readAmount(f.extra.value),party=Math.max(1,Number(f.party.value||1));
-  const box=$('#boss-preview');
-  if(c==null||x==null){box.textContent="금액은 '3억 8000만'처럼 적어 주세요.";return;}
-  if(!c&&!x){box.textContent='';return;}
-  box.textContent=`내 몫 ${mesoText(c/party+x)}`+(party>1?` (결정석 ${mesoText(c)} ÷ ${party}명`+(x?` + 드롭 ${mesoText(x)})`:')'):'');
-}
-['meso','pieces','piece_price'].forEach(k=>$('#hunt-form').elements[k].addEventListener('input',huntPreview));
-['crystal','party','extra'].forEach(k=>$('#boss-form').elements[k].addEventListener('input',bossPreview));
 function todayText(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 function earningsRow(r,label,detail){
   const row=el('div','earnings-row');const left=el('div');
@@ -207,8 +198,7 @@ function earningsRow(r,label,detail){
   row.append(left,right,del);return row;
 }
 async function loadEarnings(){
-  const d=await api('earnings');const s=d.summary;bossPrices=d.boss_prices||{};officialPrices=Object.fromEntries((d.crystals||[]).map(c=>[c.label,c.price]));
-  const names=$('#boss-names');if(names&&!names.childElementCount){(d.crystals||[]).forEach(c=>{const o=el('option');o.value=c.label;names.append(o);});}
+  const d=await api('earnings');const s=d.summary;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
   const box=$('#earnings-summary');box.replaceChildren();
@@ -234,10 +224,55 @@ function earningsForm(id,kind,after){
     e.target.reset();Object.entries(keep).forEach(([k,v])=>{if(e.target.elements[k]&&v)e.target.elements[k].value=v;});
     after();await loadEarnings();toast('기록을 저장했습니다.');});};
 }
-earningsForm('hunt-form','hunt',huntPreview);earningsForm('boss-form','boss',bossPreview);
+earningsForm('hunt-form','hunt',huntPreview);
 // 보스별로 기억한 결정석 가격을 직접 입력 칸에도 채운다.
-let bossPrices={},officialPrices={};
-$('#boss-form').elements.boss.addEventListener('change',e=>{const f=$('#boss-form').elements;const p=officialPrices[e.target.value.trim()]||bossPrices[e.target.value.trim()];if(p){f.crystal.value=amountText(p);bossPreview();}});
+let bossPrices={};
+// 주보 체크리스트 — 보스 이름별 한 줄, 난이도마다 체크박스. 같은 보스는 한 난이도만 고른다.
+function renderBossChecklist(crystals){
+  const box=$('#boss-checklist');if(box.childElementCount)return;
+  const groups=new Map();crystals.forEach(c=>{if(!groups.has(c.name))groups.set(c.name,[]);groups.get(c.name).push(c);});
+  [...groups.entries()].sort((a,b)=>Math.max(...b[1].map(c=>c.price))-Math.max(...a[1].map(c=>c.price))).forEach(([name,list])=>{
+    const row=el('div','boss-row');row.append(el('span','boss-name',name));
+    const options=el('div','boss-options');
+    list.sort((a,b)=>a.price-b.price).forEach(c=>{
+      const label=el('label','boss-check');const input=el('input');input.type='checkbox';input.value=c.label;input.dataset.price=c.price;
+      input.onchange=()=>{if(input.checked)options.querySelectorAll('input').forEach(x=>{if(x!==input)x.checked=false;});
+        row.classList.toggle('picked',!!options.querySelector('input:checked'));bossPreview();};
+      label.append(input,el('span','',c.difficulty),el('small','',amountText(c.price)));options.append(label);
+    });
+    const party=el('select','boss-party');party.setAttribute('aria-label',name+' 파티 인원');
+    [1,2,3,4,5,6].forEach(n=>{const o=el('option','',n===1?'솔로':`${n}인`);o.value=n;party.append(o);});party.onchange=bossPreview;
+    row.append(options,party);box.append(row);
+  });
+}
+function checkedBosses(){
+  return [...$('#boss-checklist').querySelectorAll('input:checked')].map(i=>({boss:i.value,price:Number(i.dataset.price),
+    party:Number(i.closest('.boss-row').querySelector('.boss-party').value)}));
+}
+function bossPreview(){
+  const f=$('#boss-form').elements,box=$('#boss-preview');
+  const picked=checkedBosses();const x=readAmount(f.extra.value),c=readAmount(f.crystal.value),party=Math.max(1,Number(f.party.value||1));
+  if(x==null||c==null){box.textContent="금액은 '3억 8000만'처럼 적어 주세요.";return;}
+  const custom=f.boss.value.trim()&&c?c/party:0;
+  const sum=picked.reduce((s,b)=>s+b.price/b.party,0)+custom+x;
+  const count=picked.length+(custom?1:0);
+  box.textContent=count||x?`${count}개 보스 · 내 몫 합계 ${mesoText(sum)}`:'';
+}
+['crystal','party','extra','boss'].forEach(k=>$('#boss-form').elements[k].addEventListener('input',bossPreview));
+$('#boss-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
+  const f=e.target.elements;const day=f.day.value,note=f.note.value,extra=f.extra.value.trim();
+  const entries=checkedBosses().map(b=>({boss:b.boss,party:b.party}));
+  if(f.boss.value.trim())entries.push({boss:f.boss.value.trim(),crystal:f.crystal.value,party:f.party.value});
+  if(!entries.length&&!extra)throw new Error('잡은 보스를 체크하거나 직접 적어 주세요.');
+  if(!entries.length)entries.push({boss:'추가 드롭'});
+  if(extra)entries[0].extra=extra;
+  let saved=0;const errors=[];
+  for(const entry of entries){try{await api('earnings',{kind:'boss',day,note,...entry});saved++;}catch(err){errors.push(`${entry.boss}: ${err.message}`);}}
+  $('#boss-checklist').querySelectorAll('input:checked').forEach(i=>{i.checked=false;i.closest('.boss-row').classList.remove('picked');});
+  ['boss','crystal','extra','note'].forEach(k=>f[k].value='');f.party.value=1;bossPreview();
+  await loadEarnings();
+  if(errors.length)toast(`${saved}건 저장, ${errors.length}건 실패 — ${errors[0]}`,true);else toast(`${saved}건 저장했습니다.`);
+});};
 // 스케줄러(넥슨 Open API)에서 이번 주에 잡은 보스를 불러온다. 결정석 가격·파티 인원만 적으면 된다.
 $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
   const box=$('#boss-import');box.hidden=false;box.replaceChildren(el('p','hint','캐릭터별 스케줄러 조회 중'));
