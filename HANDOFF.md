@@ -575,3 +575,10 @@ node --check mepiti/static/app.js
   이 컨테이너는 키체인 라이브러리(`cryptography`)가 충돌해, 브라우저 시험 서버에서는 키 저장소도 가짜로 바꿨다(앱 코드 변경 아님).
 - 다음 후보(미구현, 사용자와 정할 것): 장비 카드에서 바로 단계별 기대값 표, 장비 비교(현재 vs 목표), 캐릭터 전체 요약 대화, 스냅샷 간 장비 변화 알림.
 
+### 2026-09-28 — 장비 프리셋 1~3 (사용자 요청)
+
+- 변경: `mepiti/adapters.py`(`equipment_item`, `equipment_presets`), `mepiti/chat.py`(주제 프리셋 검증·적용, `topic_notes`로 안내 전달),
+  `mepiti/static/characters.js`·`app.js`·`index.html`·`style.css`(프리셋 탭), `tests/test_app.py`(`PresetTests` 3개), `README.md`, `IMPLEMENTATION.md`.
+- 검증(2026-09-28, 클라우드 컨테이너): 테스트 224개 통과, JS 구문 검사, Chromium 확인. 실제 계정 응답은 미확인.
+- 사용자 질문(유니온·다음 육성 추천)은 답변만 했고 구현하지 않았다. 다음 작업 후보로 남긴다.
+

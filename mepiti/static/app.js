@@ -30,7 +30,7 @@ async function sendChat(message,answer){
   renderMessage('user',{content:message});
   const thinking=el('div','thinking','근거 확인 중…');$('#messages').append(thinking);scrollBottom();
   try{
-    const topic=!sessionId&&chatTopic?{topic:{slot:chatTopic.slot,name:chatTopic.name,...(chatTopic.character?{character:chatTopic.character}:{})}}:{};
+    const topic=!sessionId&&chatTopic?{topic:{slot:chatTopic.slot,name:chatTopic.name,...(chatTopic.character?{character:chatTopic.character}:{}),...(chatTopic.preset?{preset:chatTopic.preset}:{})}}:{};
     const result=await api('chat',{message,session_id:sessionId,...(answer?{answer}:{}),...topic});
     sessionId=result.session_id;thinking.remove();
     if(chatTopic&&result.topic_item){chatTopic={...chatTopic,...result.topic_item};renderTopicCard();}
@@ -59,7 +59,7 @@ function renderTopicCard(){
   if(!chatTopic)return;
   $('#welcome').hidden=true;
   const head=el('div','topic-head');head.append(nexonImage(chatTopic.icon,chatTopic.name,'topic-icon'));
-  const names=el('div','topic-names');names.append(el('span','topic-slot',`${chatTopic.slot} · 대화 주제`+(chatTopic.character?` · ${chatTopic.character}`:'')),el('strong','',chatTopic.name));
+  const names=el('div','topic-names');names.append(el('span','topic-slot',`${chatTopic.slot} · 대화 주제`+(chatTopic.character?` · ${chatTopic.character}`:'')+(chatTopic.preset?` · 프리셋 ${chatTopic.preset}`:'')),el('strong','',chatTopic.name));
   const line=topicLine(chatTopic);if(line)names.append(el('span','topic-line',line));
   const close=el('button','topic-close','×');close.type='button';close.setAttribute('aria-label','장비 주제 없이 새 대화');close.onclick=newChat;
   head.append(names,close);box.append(head);
@@ -67,7 +67,7 @@ function renderTopicCard(){
   topicPrompts(chatTopic).forEach(([label,question])=>{const b=el('button','choice',label);b.type='button';b.onclick=()=>{if(!busy)guard(()=>sendChat(question));};chips.append(b);});
   box.append(chips);
 }
-function startItemChat(item,character){newChat();chatTopic={...itemSummary(item),...(character?{character}:{})};renderTopicCard();switchView('chat');$('#message').focus();}
+function startItemChat(item,character,preset){newChat();chatTopic={...itemSummary(item),...(character?{character}:{}),...(preset?{preset:String(preset)}:{})};renderTopicCard();switchView('chat');$('#message').focus();}
 // 착용 장비를 골라 대화 주제로 삼는다. 캐릭터 화면에서 보고 있는 캐릭터, 없으면 대표 캐릭터 기준.
 async function openItemPicker(){
   const dialog=$('#item-dialog'),list=$('#item-picker'),status=$('#item-dialog-status');
@@ -79,14 +79,22 @@ async function openItemPicker(){
     const cached=profileCache.get(name);
     const data=cached&&Date.now()-cached.at<5*60*1000?cached.data:await api('characters/profile',{name});
     profileCache.set(name,{data,at:Date.now()});
-    const order=EQUIPMENT_LAYOUT.flat().filter(Boolean);
-    const items=(data.equipment||[]).filter(i=>i.slot&&i.name).sort((a,b)=>(order.indexOf(a.slot)+99)%99-(order.indexOf(b.slot)+99)%99);
-    status.textContent=`${name} · 착용 장비 ${items.length}개. 고르면 그 장비를 주제로 새 대화를 엽니다.`;
-    items.forEach(item=>{
-      const b=el('button','picker-item');b.type='button';b.append(nexonImage(item.icon,item.name,'picker-icon'));
-      const text=el('span','picker-text');text.append(el('small','',item.slot+(item.starforce?` · ★${item.starforce}`:'')),el('strong','',item.name));
-      b.append(text);b.onclick=()=>{dialog.close();startItemChat(item,name);};list.append(b);
-    });
+    const order=EQUIPMENT_LAYOUT.flat().filter(Boolean);const rank=slot=>{const i=order.indexOf(slot);return i<0?99:i;};
+    const presets=data.equipment_presets||{},current=data.equipment_preset!=null?String(data.equipment_preset):null;
+    const draw=no=>{
+      list.replaceChildren();const rows=(no&&presets[no]?presets[no]:data.equipment||[]).filter(i=>i.slot&&i.name).sort((a,b)=>rank(a.slot)-rank(b.slot));
+      status.textContent=`${name} · ${no?'프리셋 '+no:'착용 장비'} ${rows.length}개. 고르면 그 장비를 주제로 새 대화를 엽니다.`;
+      tabs.querySelectorAll('button').forEach(b=>{const on=b.dataset.preset===String(no);b.classList.toggle('selected',on);b.setAttribute('aria-pressed',String(on));});
+      rows.forEach(item=>{
+        const b=el('button','picker-item');b.type='button';b.append(nexonImage(item.icon,item.name,'picker-icon'));
+        const text=el('span','picker-text');text.append(el('small','',item.slot+(item.starforce?` · ★${item.starforce}`:'')),el('strong','',item.name));
+        b.append(text);b.onclick=()=>{dialog.close();startItemChat(item,name,no);};list.append(b);
+      });
+    };
+    const tabs=$('#item-presets');tabs.replaceChildren();
+    ['1','2','3'].forEach(no=>{const b=el('button','choice',`프리셋 ${no}`+(no===current?' · 적용 중':''));b.type='button';b.dataset.preset=no;b.disabled=!presets[no];b.onclick=()=>draw(no);tabs.append(b);});
+    tabs.hidden=!Object.keys(presets).length;
+    draw(current&&presets[current]?current:null);
   }catch(e){status.textContent='장비를 불러오지 못했습니다: '+e.message;}
 }
 $('#item-button').onclick=()=>guard(openItemPicker);

@@ -243,6 +243,7 @@ class Nexon:
             data['warnings'].append(data['warning'])
         if details:
             data['equipment'] = []
+            data['equipment_presets'] = {}
             data['equipment_status'] = 'unavailable'
             main_stat = main_stat_key(data['stats'])
             data['main_stat'] = main_stat.upper()
@@ -252,42 +253,56 @@ class Nexon:
                     raise AppError('장비 응답 형식을 확인할 수 없습니다.',502)
                 data['equipment_preset'] = equipped.get('preset_no')
                 data['equipment_api_date'] = equipped.get('date')
-                for item in equipped['item_equipment']:
-                    if not isinstance(item,dict) or not item.get('item_name'):
-                        raise AppError('장비 이름을 확인할 수 없습니다.',502)
-                    icon = static_icon(item.get('item_icon'))
-                    options = item.get('item_total_option') or {}
-                    allowed_options = ('str','dex','int','luk','max_hp','max_mp','attack_power','magic_power','armor','boss_damage','ignore_monster_armor','all_stat','damage')
-                    slot = item.get('item_equipment_slot')
-                    add = item.get('item_add_option') or {}
-                    grade = add_option_grade(item, slot, main_stat)
-                    data['equipment'].append({
-                        'slot':slot,'part':item.get('item_equipment_part'),
-                        'name':item['item_name'],'icon':icon,'starforce':integer(item.get('starforce')),
-                        'equip_level':integer((item.get('item_base_option') or {}).get('base_equipment_level')),
-                        'scroll_upgrade':integer(item.get('scroll_upgrade')),
-                        'potential_grade':item.get('potential_option_grade'),
-                        'additional_grade':item.get('additional_potential_option_grade'),
-                        'potential':[item.get('potential_option_'+str(i)) for i in range(1,4) if item.get('potential_option_'+str(i))],
-                        'additional_potential':[item.get('additional_potential_option_'+str(i)) for i in range(1,4) if item.get('additional_potential_option_'+str(i))],
-                        'options':{k:str(options[k]) for k in allowed_options if k in options and options[k] is not None},
-                        'add_options':{k:str(add[k]) for k in ADD_OPTION_KEYS if k in add and integer(add.get(k))},
-                        'add_grade':grade
-                    })
+                data['equipment'] = [self.equipment_item(item, main_stat) for item in equipped['item_equipment']]
+                # 프리셋 1~3의 장비 목록. 비어 있는 프리셋은 넣지 않는다.
+                presets = {}
+                for no in (1, 2, 3):
+                    rows = equipped.get(f'item_equipment_preset_{no}')
+                    if isinstance(rows, list) and rows:
+                        presets[str(no)] = [self.equipment_item(item, main_stat) for item in rows]
+                data['equipment_presets'] = presets
+                # 칭호·안드로이드는 프리셋과 상관없이 같으므로 모든 목록에 붙인다.
+                extras = []
                 title = equipped.get('title')
                 if isinstance(title,dict) and title.get('title_name'):
-                    data['equipment'].append(extra_slot('칭호',title['title_name'],title.get('title_icon'),title.get('title_description')))
+                    extras.append(extra_slot('칭호',title['title_name'],title.get('title_icon'),title.get('title_description')))
                 try:
                     android = self.get('character/android-equipment',{'ocid':ocid})
                     if isinstance(android,dict) and android.get('android_name'):
-                        data['equipment'].append(extra_slot('안드로이드',android['android_name'],android.get('android_icon'),android.get('android_description')))
+                        extras.append(extra_slot('안드로이드',android['android_name'],android.get('android_icon'),android.get('android_description')))
                 except AppError as e:
                     data['warnings'].append('안드로이드 조회: '+str(e))
+                data['equipment'] += extras
+                for rows in data['equipment_presets'].values():
+                    rows += [dict(x) for x in extras]
                 data['equipment_status'] = 'available'
             except AppError as e:
                 data['equipment'] = []
                 data['warnings'].append('장비 조회: '+str(e))
         return data
+
+    @staticmethod
+    def equipment_item(item, main_stat):
+        """item-equipment 응답의 장비 한 개를 화면·계산에 쓰는 형태로 바꾼다."""
+        if not isinstance(item,dict) or not item.get('item_name'):
+            raise AppError('장비 이름을 확인할 수 없습니다.',502)
+        options = item.get('item_total_option') or {}
+        allowed_options = ('str','dex','int','luk','max_hp','max_mp','attack_power','magic_power','armor','boss_damage','ignore_monster_armor','all_stat','damage')
+        slot = item.get('item_equipment_slot')
+        add = item.get('item_add_option') or {}
+        return {
+            'slot':slot,'part':item.get('item_equipment_part'),
+            'name':item['item_name'],'icon':static_icon(item.get('item_icon')),'starforce':integer(item.get('starforce')),
+            'equip_level':integer((item.get('item_base_option') or {}).get('base_equipment_level')),
+            'scroll_upgrade':integer(item.get('scroll_upgrade')),
+            'potential_grade':item.get('potential_option_grade'),
+            'additional_grade':item.get('additional_potential_option_grade'),
+            'potential':[item.get('potential_option_'+str(i)) for i in range(1,4) if item.get('potential_option_'+str(i))],
+            'additional_potential':[item.get('additional_potential_option_'+str(i)) for i in range(1,4) if item.get('additional_potential_option_'+str(i))],
+            'options':{k:str(options[k]) for k in allowed_options if k in options and options[k] is not None},
+            'add_options':{k:str(add[k]) for k in ADD_OPTION_KEYS if k in add and integer(add.get(k))},
+            'add_grade':add_option_grade(item, slot, main_stat)
+        }
 
 class Ollama:
     BASE = 'http://127.0.0.1:11434'

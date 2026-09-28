@@ -1001,3 +1001,38 @@ class ItemTopicTests(CharacterAnalysisTests):
             store=Store(folder)
             self.assertEqual(store.sessions()[0]['title'],'옛 대화')
             self.assertIsNone(store.session_topic('old'))
+
+
+class PresetTests(CharacterAnalysisTests):
+    """장비 프리셋 1~3. 넥슨 item-equipment 응답의 item_equipment_preset_N을 읽는다."""
+    def test_adapter_reads_presets(self):
+        class TestVault:
+            def get(self):return 'k'
+        hat=lambda name,star:{'item_equipment_slot':'모자','item_equipment_part':'모자','item_name':name,'starforce':str(star),
+                              'item_base_option':{'base_equipment_level':'250'}}
+        equipment={'preset_no':1,'date':None,'item_equipment':[hat('현재 모자',18)],
+                   'item_equipment_preset_1':[hat('현재 모자',18)],'item_equipment_preset_2':[hat('보스용 모자',22)],
+                   'item_equipment_preset_3':[],'title':{'title_name':'시험 칭호'}}
+        replies=[{'ocid':'a'},{'character_name':'테스트','character_level':285},{'final_stat':[]},equipment,{}]
+        with patch('mepiti.adapters.request_json',side_effect=replies):
+            snap=Nexon(TestVault()).character('테스트',details=True)
+        self.assertEqual(sorted(snap['equipment_presets']),['1','2'])       # 빈 프리셋 3은 뺀다
+        self.assertEqual(snap['equipment_presets']['2'][0]['name'],'보스용 모자')
+        self.assertEqual(snap['equipment_presets']['2'][0]['starforce'],22)
+        self.assertIn('칭호',[i['slot'] for i in snap['equipment_presets']['2']])   # 칭호는 모든 프리셋에
+    def test_topic_uses_chosen_preset(self):
+        profile=dict(PriceScopeTests.PROFILE); profile['equipment_preset']=1
+        boss=dict(next(i for i in profile['equipment'] if i['slot']=='모자'),name='보스용 모자',starforce=20)
+        profile['equipment_presets']={'1':profile['equipment'],'2':[boss]}
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'보스용 모자','price':1e8,'source':'user'})
+        r=answer(self.store,self.FakeModel('x'),{'message':'22성 기대값',
+                 'topic':{'slot':'모자','name':'보스용 모자','preset':2}},self.FakeNexon(profile))
+        self.assertEqual(r['starforce']['item'],'보스용 모자')
+        self.assertEqual(r['starforce']['current_star'],20)
+        self.assertIn('프리셋 2번 기준',' '.join(r['conditions']))
+        self.assertEqual(self.store.session_topic(r['session_id'])['preset'],'2')
+    def test_invalid_preset_is_refused(self):
+        with self.assertRaises(AppError):
+            answer(self.store,self.FakeModel('x'),{'message':'x','topic':{'slot':'모자','name':'a','preset':7}},
+                   self.FakeNexon(self.PROFILE))

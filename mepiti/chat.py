@@ -186,6 +186,7 @@ def answer(store, model, data, nexon=None):
                     excerpts.append(f"[{ref['citation']}] {p['text']}")
                 result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
                 result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
+    notes += result.pop('topic_notes', None) or []
     if notes:
         result['conditions'] = notes + list(result.get('conditions') or [])
     store.message(sid,'user',{'content':said})
@@ -200,8 +201,23 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     except AppError as e:
         result.update(status='clarify',content=f"{managed['name']} 조회에 실패해 답변을 보류합니다. {e}")
         return
+    preset_note = None
+    if topic and topic.get('preset'):
+        # 다른 프리셋의 장비를 골랐으면 그 프리셋 장비 기준으로 계산·서술한다.
+        rows = (profile.get('equipment_presets') or {}).get(topic['preset'])
+        if rows:
+            profile = {**profile, 'equipment': rows}
+            if str(profile.get('equipment_preset')) != topic['preset']:
+                preset_note = (f"장비 프리셋 {topic['preset']}번 기준으로 답했습니다. "
+                               f"지금 게임에서 적용 중인 프리셋은 {profile.get('equipment_preset') or '확인 불가'}번입니다.")
+        else:
+            preset_note = f"장비 프리셋 {topic['preset']}번을 조회하지 못해 현재 착용 장비 기준으로 답했습니다."
     facts = context.build(profile, managed)
     text = context.as_text(facts)
+    # 어느 경로로 끝나든(모델 없음·실패·거절) 사용자에게 보여야 하는 안내. answer()가 조건 줄 맨 앞에 붙인다.
+    result['topic_notes'] = [preset_note] if preset_note else []
+    if preset_note:
+        text = f"[장비 프리셋] {preset_note}\n" + text
     missing_note = None
     if topic:
         item = context.find_item(profile, topic)
@@ -209,10 +225,10 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
             text = context.item_text(item) + '\n\n' + text
             result['topic_item'] = context.item_summary(item)
             if item.get('name') != topic['name']:
-                missing_note = (f"대화 주제였던 {topic['name']}은(는) 지금 착용하고 있지 않아, "
+                result['topic_notes'].append(f"대화 주제였던 {topic['name']}은(는) 지금 착용하고 있지 않아, "
                                 f"같은 부위에 착용한 {item.get('name')} 기준으로 답했습니다.")
         else:
-            missing_note = f"대화 주제인 {topic['slot']} {topic['name']}을(를) 지금은 착용하고 있지 않습니다."
+            result['topic_notes'].append(f"대화 주제인 {topic['slot']} {topic['name']}을(를) 지금은 착용하고 있지 않습니다.")
             text = f"[대화 주제 장비] {topic['slot']} {topic['name']} — 지금은 착용하지 않아 상세를 알 수 없다.\n\n" + text
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
@@ -282,7 +298,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     block = result.pop('starforce_text', None)
     result.update(status='analysis', content=(block + '\n\n' + written) if block else written)
     result['facts'] = text
-    result['conditions'] = ([missing_note] if missing_note else []) + [
+    result['conditions'] = [
         f"넥슨 Open API로 {facts['retrieved_at']}에 조회한 이 캐릭터의 실제 값만 근거로 삼았습니다.",
         '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.',
         '추가옵션 등급(급·n추)은 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아닙니다.',
@@ -297,9 +313,13 @@ def clean_topic(topic):
         raise AppError('대화 주제 장비 형식이 올바르지 않습니다.')
     slot, name = str(topic.get('slot') or '').strip(), str(topic.get('name') or '').strip()
     character = str(topic.get('character') or '').strip()
+    preset = topic.get('preset')
     if not slot or not name or len(slot) > 20 or len(name) > 60 or len(character) > 30:
         raise AppError('대화 주제 장비의 부위와 이름을 확인해 주세요.')
-    return {'slot': slot, 'name': name, **({'character': character} if character else {})}
+    if preset is not None and str(preset) not in ('1', '2', '3'):
+        raise AppError('장비 프리셋은 1~3번만 고를 수 있습니다.')
+    return {'slot': slot, 'name': name, **({'character': character} if character else {}),
+            **({'preset': str(preset)} if preset is not None else {})}
 
 
 def fix_name(text, name):

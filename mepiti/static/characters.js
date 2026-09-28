@@ -9,7 +9,7 @@ const EQUIPMENT_LAYOUT=[
   ['포켓 아이템','벨트','하의','장갑','망토'],
   ['칭호',null,'신발','안드로이드','기계 심장']
 ];
-let selectedCharacterName = '', profileRequest = 0;
+let selectedCharacterName = '', profileRequest = 0, shownPreset = null;
 const profileCache = new Map();
 function nexonImage(url,alt,cls){
   if(!url)return el('span','image-unavailable','이미지 없음');
@@ -72,7 +72,27 @@ function renderCharacterProfile(data){
   const equipmentGrid=el('div','equipment-grid');const itemDetail=el('section','item-detail');itemDetail.setAttribute('aria-live','polite');
   if(data.equipment_status!=='available'){inventory.append(el('p','empty-state','장비 조회 실패'));itemDetail.append(el('p','hint','다시 조회하면 장비도 재조회합니다.'));}
   else if(!data.equipment.length){inventory.append(el('p','empty-state','착용 장비 없음'));itemDetail.append(el('p','hint','표시할 장비 없음'));}
-  else{const extras=el('div','equipment-extra');const firstItem=renderEquipmentBoard(equipmentGrid,extras,itemDetail,data);inventory.append(equipmentGrid);if(extras.childElementCount)inventory.append(el('p','hint','배치표에 자리가 없는 장비'),extras);renderEquipmentDetail(itemDetail,firstItem||data.equipment[0]);}
+  else{
+    // 프리셋 1~3. 누르면 그 프리셋의 장비로 장비창을 다시 그린다. 지금 게임에서 적용 중인 프리셋에 표시한다.
+    const presets=data.equipment_presets||{};const current=data.equipment_preset!=null?String(data.equipment_preset):null;
+    const extras=el('div','equipment-extra');const extraHint=el('p','hint','배치표에 자리가 없는 장비');
+    const show=no=>{
+      shownPreset=no;const rows=no&&presets[no]?presets[no]:data.equipment;
+      equipmentGrid.replaceChildren();extras.replaceChildren();
+      const firstItem=renderEquipmentBoard(equipmentGrid,extras,itemDetail,{...data,equipment:rows});
+      extraHint.hidden=extras.hidden=!extras.childElementCount;
+      renderEquipmentDetail(itemDetail,firstItem||rows[0]);
+      tabs.querySelectorAll('button').forEach(b=>{const on=b.dataset.preset===String(no);b.classList.toggle('selected',on);b.setAttribute('aria-pressed',String(on));});
+    };
+    const tabs=el('div','preset-tabs');tabs.setAttribute('role','group');tabs.setAttribute('aria-label','장비 프리셋');
+    ['1','2','3'].forEach(no=>{
+      const b=el('button','choice',`프리셋 ${no}`+(no===current?' · 적용 중':''));b.type='button';b.dataset.preset=no;
+      b.disabled=!presets[no];if(!presets[no])b.title='비어 있는 프리셋';b.onclick=()=>show(no);tabs.append(b);
+    });
+    if(Object.keys(presets).length)inventory.append(tabs);
+    inventory.append(equipmentGrid,extraHint,extras);
+    show(current&&presets[current]?current:null);
+  }
   lower.append(inventory,itemDetail);root.append(lower);
   const allStats=el('details','panel all-stats');allStats.append(el('summary','','전체 능력치'));const statGrid=el('div','all-stats-grid');(data.stats||[]).forEach(s=>{const row=el('div');row.append(el('span','',s.name),el('strong','',numericText(s.value)));statGrid.append(row);});if(!data.stats?.length)statGrid.append(el('p','hint','능력치 조회 실패'));allStats.append(statGrid);root.append(allStats);
   const provenance=el('div','profile-provenance');provenance.append(el('span','',`조회 ${data.retrieved_at} · 기본 ${data.api_date||'미제공'} · 장비 ${data.equipment_api_date||'미제공'}`),sourceLink('https://openapi.nexon.com/ko/game/maplestory/?id=14','넥슨 Open API ↗'));root.append(provenance);
@@ -114,7 +134,7 @@ function gradeClass(grade){return {'레전드리':'grade-legendary','유니크':
 function renderEquipmentDetail(box,item){
   box.replaceChildren();const head=el('div','item-detail-head');head.append(nexonImage(item.icon,item.name,'item-detail-icon'));const names=el('div');names.append(el('span','item-category',item.slot||item.part||'장비'),el('h3','',item.name),el('span','item-starforce',(item.starforce==null?'—':`★${item.starforce}`)+(item.scroll_upgrade?` · 주문서 +${item.scroll_upgrade}`:'')));head.append(names);box.append(head);
   // 이 장비를 주제로 채팅을 연다. 부위를 말하지 않아도 이 장비 이야기로 알아듣는다.
-  const talk=el('button','primary item-talk','이 장비로 대화');talk.type='button';talk.onclick=()=>startItemChat(item,selectedCharacterName);box.append(talk);
+  const talk=el('button','primary item-talk','이 장비로 대화');talk.type='button';talk.onclick=()=>startItemChat(item,selectedCharacterName,shownPreset);box.append(talk);
   const labels={str:'STR',dex:'DEX',int:'INT',luk:'LUK',max_hp:'HP',max_mp:'MP',attack_power:'공격력',magic_power:'마력',armor:'방어력',boss_damage:'보스 데미지 (%)',ignore_monster_armor:'방어율 무시 (%)',all_stat:'올스탯 (%)',damage:'데미지 (%)'};
   const options=el('div','item-options');Object.entries(item.options||{}).filter(([,v])=>Number(v)!==0).forEach(([k,v])=>{const row=el('div');row.append(el('span','',labels[k]||k),el('strong','',numericText(v)));options.append(row);});box.append(options);
   if(item.description){const info=el('div','item-info');item.description.split('\n').filter(line=>line.trim()).forEach(line=>info.append(el('p','',line.trim())));box.append(info);}

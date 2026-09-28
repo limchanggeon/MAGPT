@@ -205,6 +205,8 @@ main{margin-left:200px;width:calc(100% - 200px)}
 .topic-close:hover{color:var(--ink);background:var(--inset)}
 .topic-prompts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .item-talk{margin:10px 0 4px}
+.preset-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 10px}
+.preset-tabs .choice:disabled{opacity:.4;cursor:not-allowed}
 .item-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;max-height:60vh;overflow:auto;margin-top:10px}
 .picker-item{display:flex;gap:9px;align-items:center;text-align:left;padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--inset);color:var(--ink)}
 .picker-item:hover{border-color:var(--gold-dim)}
