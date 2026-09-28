@@ -1,5 +1,5 @@
 import re
-from . import conditions, context, prices, starforce, union
+from . import conditions, context, notices, prices, starforce, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -18,6 +18,9 @@ PRICE_INTENT = re.compile(r'노작|시세|가격|얼마|값이|사는\s*게|살�
 # 유니온·다음 육성 질문. 계정 캐릭터 목록과 공격대원 효과 표로 앱이 직접 추천한다.
 UNION_INTENT = re.compile(r'유니온|공격대원|뭐\s*키우|뭘\s*키우|뭐\s*키울|뭘\s*키울|다음에?\s*(?:뭐|뭘|어떤)\s*(?:캐릭|직업)|'
                           r'키울\s*(?:캐릭|직업)|육성\s*추천|부캐\s*(?:추천|뭐)')
+# 진행 중 이벤트 질문. 넥슨 공지(진행 중 이벤트 목록)로 답한다.
+EVENT_INTENT = re.compile(r'진행\s*중인?\s*이벤트|이벤트\s*(?:뭐|뭣|언제|기간|목록|있|하)|샤타\s*(?:언제|하[나냐니는]|해\?|기간|중)|'
+                          r'샤이닝|썬데이\s*메이플|이번\s*주\s*이벤트')
 # 장비 값 자체를 묻는 표현. '기대값이 얼마야'의 '얼마'는 여기에 들지 않는다.
 ITEM_PRICE = re.compile(r'노작|시세|가격|사는\s*게|살까|구매|바꾸는\s*게|가성비|이득|싸[냐게]|비싸')
 # 되물은 노작값을 건너뛰겠다는 답.
@@ -131,6 +134,16 @@ def answer(store, model, data, nexon=None):
     if terms and any(t['term'] in ('환산','대장장이') for t in terms):
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
+    elif not topic and nexon and EVENT_INTENT.search(question):
+        try:
+            notices.sync(store, nexon)
+        except AppError as e:
+            result['conditions'] = [f'공지를 새로 받지 못해 저장된 목록으로 답합니다. {e}']
+        events = notices.active_events(store)
+        result.update(status='evidence' if events else 'held', content=notices.events_text(store),
+                      links=[{'title': e['title'], 'url': e['url']} for e in events if e.get('url')])
+        result['conditions'] = (result.get('conditions') or []) + [
+            '넥슨 Open API의 진행 중 이벤트 목록(최근 20개) 기준입니다. 세부 조건은 공지 링크에서 확인하세요.']
     elif not topic and UNION_INTENT.search(question):
         chars = store.characters()
         main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
@@ -161,6 +174,11 @@ def answer(store, model, data, nexon=None):
     elif any(k in question for k in ('기대값','기댓값','강화 비용','확률 계산')):
         result.update(status='clarify',content='어떤 장비·현재 단계·목표 단계·이벤트 조건으로 계산할까요?\n\n현재 승인된 메이플 강화 확률·비용표가 없어 게임 강화 기대값은 보류합니다. 계산 도구에서는 직접 입력한 고정 확률·비용의 독립 시행과 일정한 일일 획득량만 계산할 수 있습니다.')
     else:
+        if nexon and notices.stale(store):
+            try:
+                notices.sync(store, nexon)       # 최신 공지 본문을 근거 문서로 넣어 둔다.
+            except AppError:
+                pass
         docs, conflict = store.search(query)
         if conflict:
             result['content'] = '같은 주제에 서로 다른 적용 버전의 자료가 검색되었습니다. 후속 수정과 실제 적용 시점을 검토하기 전까지 답변을 보류합니다.'
@@ -503,9 +521,15 @@ def starforce_facts(store, profile, question, result):
     되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
     """
     if not conditions.answered(store):
+        now_conditions = conditions.load(store)
+        suggested, event = notices.suggested_event(store)
+        if suggested and now_conditions.get('event') in (None, '없음'):
+            now_conditions['event'] = suggested
         result.update(status='ask_conditions', content=conditions.ask_text(),
-                      form=conditions.form(conditions.load(store)), pending=question)
+                      form=conditions.form(now_conditions), pending=question)
         result['conditions'] = ['직접 적어도 됩니다. 예: 샤타포스, 파괴방지 미사용, MVP 다이아']
+        if event:
+            result['conditions'].insert(0, f"넥슨 공지 기준 지금 '{event['title']}' 진행 중이라 샤타포스를 미리 골라 두었습니다.")
         return None
     item = context.starforce_item(profile, question)
     if not item:

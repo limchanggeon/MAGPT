@@ -15,7 +15,7 @@ from . import __version__
 from .adapters import Nexon, Ollama, Vault, recognize, system_info
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import earnings, history, prices, starforce
+from . import earnings, history, notices, prices, starforce
 
 STATIC = Path(__file__).parent/'static'
 
@@ -58,6 +58,12 @@ class CachedNexon:
     def starforce_history(self, day):
         return self.nexon.starforce_history(day)
 
+    def notices(self, kind):
+        return self._cached(('notices', kind), lambda: self.nexon.notices(kind))
+
+    def notice_detail(self, kind, notice_id):
+        return self.nexon.notice_detail(kind, notice_id)
+
     def _cached(self, key, fetch):
         with self.lock:
             hit = self.cache.get(key)
@@ -98,6 +104,8 @@ class Application:
             if path == '/api/characters': return s.characters()
             if path == '/api/download': return dict(self.download)
             if path == '/api/history/starforce': return history.overview(s)
+            if path == '/api/notices': return {'events': notices.active_events(s), 'updates': s.setting(notices.UPDATES) or [],
+                                               'alert': s.setting(notices.ALERT) or None, 'synced_at': s.setting(notices.SYNCED) or None}
             if path == '/api/earnings': return earnings.overview(s)
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
         if method == 'POST':
@@ -144,6 +152,7 @@ class Application:
                 s.set_setting(prices.FETCH_SETTING,'1' if data.get('enabled') else '0')
                 return prices.status(s)
             if path == '/api/ocr': return recognize(required(data,'image',8_100_000))
+            if path == '/api/notices/sync': return notices.sync(s, self.nexon, force=True)
             if path == '/api/history/starforce/fetch': return history.fetch(s, self.nexon, data.get('days') or 14)
             if path == '/api/history/starforce/level': return history.set_level(s, data.get('item'), data.get('level'))
             if path == '/api/settings/key':

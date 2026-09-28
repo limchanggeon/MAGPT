@@ -22,14 +22,24 @@ SCHEMA = '''
 CREATE TABLE IF NOT EXISTS starforce_history(
   id TEXT PRIMARY KEY, character TEXT, world TEXT, item TEXT NOT NULL,
   before INTEGER NOT NULL, after INTEGER NOT NULL, result TEXT, starcatch TEXT,
-  safeguard INTEGER, created TEXT NOT NULL, events TEXT);
+  safeguard INTEGER, created TEXT NOT NULL, events TEXT, superior INTEGER);
 CREATE INDEX IF NOT EXISTS starforce_history_item ON starforce_history(character, item);
 '''
+
+
+# 이름만으로 장비 레벨이 확실한 세트. 착용하지 않은 장비도 계산할 수 있게 한다.
+NAME_LEVELS = (('에테르넬', 250), ('아케인셰이드', 200), ('제네시스', 200), ('앱솔랩스', 160))
+
+
+def guess_level(item):
+    return next((level for word, level in NAME_LEVELS if word in (item or '')), None)
 
 
 def ensure(store):
     with store.db() as db:
         db.executescript(SCHEMA)
+        if 'superior' not in [r['name'] for r in db.execute('PRAGMA table_info(starforce_history)')]:
+            db.execute('ALTER TABLE starforce_history ADD COLUMN superior INTEGER')
 
 
 def destroyed(row):
@@ -61,10 +71,12 @@ def fetch(store, nexon, days=14):
             continue
         with store.db() as db:
             for r in rows:
-                added += db.execute('INSERT OR IGNORE INTO starforce_history VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                added += db.execute('INSERT OR IGNORE INTO starforce_history(id,character,world,item,before,after,result,'
+                                    'starcatch,safeguard,created,events,superior) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                                     (r['id'], r['character'], r['world'], r['item'], r['before'], r['after'],
                                      r['result'], r['starcatch'], int(bool(r['safeguard'])), r['created'],
-                                     json.dumps(r.get('events') or [], ensure_ascii=False))).rowcount
+                                     json.dumps(r.get('events') or [], ensure_ascii=False),
+                                     int(bool(r.get('superior'))))).rowcount
         fetched.add(key)
     store.set_setting(FETCHED, sorted(fetched)[-400:])
     resolve_levels(store, nexon)
@@ -165,15 +177,23 @@ def analyse(store, character, item, rows, picked, levels):
     counts = {'attempts': len(rows), 'success': sum(r['after'] > r['before'] for r in rows),
               'destroy': sum(destroyed(r) for r in rows), 'safeguard': sum(bool(r['safeguard']) for r in rows)}
     counts['fail'] = counts['attempts'] - counts['success'] - counts['destroy']
-    level = levels.get(item)
+    level = levels.get(item) or guess_level(item)
     spare = prices.resolve(store, item)
     group = {'character': character, 'item': item, 'level': level, 'start': start, 'reached': reached, 'end': end,
              'first': rows[0]['created'][:10], 'last': rows[-1]['created'][:10], **counts,
              'spare_price': spare['price'] if spare['known'] else None,
-             'actual': None, 'expected': None, 'notes': []}
-    if not level or level > 300 or max(r['before'] for r in rows) >= 30:
-        group['notes'].append('장비 레벨을 몰라 비용을 계산하지 않았습니다. 레벨을 적어 주세요.')
+             'actual': None, 'expected': None, 'notes': [], 'missing': None,
+             'level_guessed': bool(level and item not in levels)}
+    if any(r.get('superior') for r in rows):
+        group['missing'] = 'superior'
+        group['notes'].append('슈페리얼 장비는 강화 확률·비용 규칙이 달라 계산하지 않았습니다.')
         return group
+    if not level or level > 300 or max(r['before'] for r in rows) >= 30:
+        group['missing'] = 'level'
+        group['notes'].append('장비 레벨을 몰라 이득·손해를 계산하지 못했습니다. 아래에서 장비 레벨을 골라 주세요.')
+        return group
+    if group['level_guessed']:
+        group['notes'].append(f'장비 레벨 {level}은 이름으로 추정했습니다.')
     spent = [attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r))
              + (group['spare_price'] or 0 if destroyed(r) else 0) for r in rows]
     attempts_cost = sum(attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r)) for r in rows)
@@ -221,6 +241,7 @@ def overview(store):
     groups.sort(key=lambda g: g['last'], reverse=True)
     fetched = store.setting(FETCHED) or []
     return {'groups': groups, 'conditions': conditions.summary(picked), 'fetched_days': len(fetched),
+            'missing_level': sum(g['missing'] == 'level' for g in groups),
             'latest_day': fetched[-1] if fetched else None,
             'notes': ['쓴 메소는 넥슨 기록에 없어, 시도마다 그 성의 강화 비용을 비용식(mesulive 이식, 비공식)으로 다시 계산했습니다.',
                       '이벤트 할인은 기록에 남은 강화 당시 이벤트를 썼습니다. MVP·PC방 할인은 기록에 없어 저장한 강화 조건을 썼습니다.',

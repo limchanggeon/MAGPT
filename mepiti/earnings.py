@@ -197,7 +197,8 @@ def overview(store, limit=200):
             'boss_prices': store.setting(BOSS_PRICES) or {},
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],
-            'crystal_source': CRYSTAL_SOURCE}
+            'crystal_source': CRYSTAL_SOURCE,
+            'crystal_alert': store.setting('crystal_price_alert') or None}
 
 
 def boss_label(boss):

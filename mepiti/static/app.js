@@ -16,7 +16,7 @@ function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
-function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
+function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,el('div','message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.links?.length){const links=el('div','sources');payload.links.forEach(l=>{const a=sourceLink(l.url,l.title);a.className='source';links.append(a);});block.append(links);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
 async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);const latest=[...messages].reverse().find(m=>m.payload?.topic_item)?.payload.topic_item;chatTopic=s.topic?{...s.topic,...(latest||{})}:null;renderTopicCard();messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
 function newChat(){if(busy)return;sessionId=null;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
 $('#new-chat').addEventListener('click',newChat);
@@ -202,6 +202,8 @@ async function loadEarnings(){
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
   const box=$('#earnings-summary');box.replaceChildren();
+  const alertBox=$('#crystal-alert');if(alertBox){alertBox.replaceChildren();alertBox.hidden=!d.crystal_alert;
+    if(d.crystal_alert){alertBox.append(el('span','',`새 업데이트에 결정석 판매가 이야기가 있습니다: ${d.crystal_alert.title}. 앱의 결정석 가격표(업데이트 813 기준)가 바뀌었을 수 있으니 확인해 주세요. `),sourceLink(d.crystal_alert.url,'공지 보기'));}}
   [['이번 주',s.all.week,`목요일(${s.week_start}) 기준 · 재획 ${fmt(s.hunt.week.count)}회 · 주보 ${fmt(s.boss.week.count)}건`],
    ['이번 달',s.all.month,`재획 ${mesoText(s.hunt.month.total)} · 주보 ${mesoText(s.boss.month.total)}`],
    ['전체',s.all.all,`조각 ${fmt(s.hunt.pieces)}개 · 재획 평균 ${mesoText(s.hunt.average)}`+(s.hunt.per_flask?` · 재획비 1개당 ${mesoText(s.hunt.per_flask)}`:'')]]
@@ -312,6 +314,7 @@ async function loadForgeHistory(){
   const d=await api('history/starforce');
   $('#history-status').textContent=d.fetched_days?`받아 둔 날짜 ${fmt(d.fetched_days)}일 · 최근 ${d.latest_day} · 강화 조건(MVP 할인) ${d.conditions}`:'아직 불러온 기록이 없습니다.';
   const list=$('#history-list');list.replaceChildren();
+  if(d.missing_level)list.append(el('div','notice history-missing',`장비 레벨을 몰라 이득·손해를 계산하지 못한 장비가 ${fmt(d.missing_level)}개 있습니다. 카드에서 장비 레벨을 눌러 주세요.`));
   if(!d.groups.length)list.append(el('div','empty-state','강화 기록이 없습니다.\n기간을 고르고 기록 불러오기를 누르세요.'));
   d.groups.forEach(g=>list.append(historyCard(g)));
   const notes=$('#history-notes');notes.replaceChildren();d.notes.forEach(n=>notes.append(el('p','',n)));
@@ -342,6 +345,12 @@ function historyCard(g){
   card.append(stats);
   if(a&&a.after_attempts)card.append(el('p','history-after',
     `★${g.reached} 달성 이후 추가 도전 ${fmt(a.after_attempts)}회 · 파괴 ${fmt(a.after_destroys)}회 · ${mesoText(a.after)} (기대값 비교에서 제외)`));
+  if(g.missing==='level'){
+    const quick=el('div','history-levels');quick.append(el('strong','','장비 레벨을 골라 주세요'));
+    [140,150,160,200,250].forEach(lv=>{const b=el('button','choice',`${lv}레벨`);b.type='button';
+      b.onclick=()=>task(b,async()=>{await api('history/starforce/level',{item:g.item,level:lv});await loadForgeHistory();});quick.append(b);});
+    card.append(quick);
+  }
   if(!g.level||(g.destroy&&g.spare_price==null)){
     const fix=el('form','history-fix');
     if(!g.level){const l=el('label','','장비 레벨');const i=el('input');i.name='level';i.type='number';i.min=1;i.max=300;i.placeholder='예: 250';l.append(i);fix.append(l);}

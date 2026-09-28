@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from mepiti.adapters import Nexon, Ollama, Vault, recognize
 from mepiti.chat import answer
-from mepiti import conditions, context, earnings, history, prices, starforce, union
+from mepiti import conditions, context, earnings, history, notices, prices, starforce, union
 from mepiti.core import AppError, KST, Store, identifier, now
 from mepiti.server import Application, make_server
 from pathlib import Path
@@ -1200,9 +1200,92 @@ class StarforceHistoryTests(unittest.TestCase):
     def test_unknown_level_asks_and_can_be_set(self):
         with self.store.db() as db:
             history.ensure(self.store)
-            db.execute("INSERT INTO starforce_history VALUES('z','본캐',null,'모르는 모자',15,16,'성공',null,0,'2026-09-27',null)")
-        g=history.overview(self.store)['groups'][0]
-        self.assertIsNone(g['actual']); self.assertIn('장비 레벨',' '.join(g['notes']))
+            db.execute("INSERT INTO starforce_history VALUES('z','본캐',null,'모르는 모자',15,16,'성공',null,0,'2026-09-27',null,0)")
+        o=history.overview(self.store); g=o['groups'][0]
+        self.assertIsNone(g['actual']); self.assertEqual(g['missing'],'level'); self.assertEqual(o['missing_level'],1)
         history.set_level(self.store,'모르는 모자',200)
         self.assertIsNotNone(history.overview(self.store)['groups'][0]['actual'])
         with self.assertRaises(AppError): history.set_level(self.store,'모르는 모자',999)
+    def test_known_set_level_and_superior(self):
+        history.ensure(self.store)
+        with self.store.db() as db:
+            db.execute("INSERT INTO starforce_history VALUES('a','본캐',null,'아케인셰이드 나이트햇',16,17,'성공',null,0,'2026-09-27',null,0)")
+            db.execute("INSERT INTO starforce_history VALUES('b','본캐',null,'타일런트 히아데스 부츠',5,6,'성공',null,0,'2026-09-27',null,1)")
+        groups={g['item']:g for g in history.overview(self.store)['groups']}
+        arcane=groups['아케인셰이드 나이트햇']
+        self.assertEqual((arcane['level'],arcane['level_guessed']),(200,True))
+        self.assertIsNotNone(arcane['expected'])                        # 착용하지 않아도 이름으로 계산
+        self.assertEqual(groups['타일런트 히아데스 부츠']['missing'],'superior')
+
+
+
+class NoticeTests(unittest.TestCase):
+    """넥슨 공지 — 필드는 사용자가 붙여 준 문서 기준(notice/notice-update/notice-event)."""
+    class N:
+        def __init__(s,end='2099-10-12T23:59+09:00',day='2026-09-20T10:00+09:00'):
+            s.calls=[]; s.day=day
+            s.lists={'notice-update':[{'kind':'notice-update','id':'900','title':'보스 결정 판매 가격 변경','url':'https://maplestory.nexon.com/news/update/900',
+                                       'date':day,'start':None,'end':None}],
+                     'notice-event':[{'kind':'notice-event','id':'77','title':'샤이닝 스타포스 타임','url':'https://maplestory.nexon.com/news/event/77',
+                                      'date':'2026-09-24T10:00+09:00','start':'2026-09-24T10:00+09:00','end':end}],
+                     'notice':[]}
+        def notices(s,kind): s.calls.append(kind); return s.lists[kind]
+        def notice_detail(s,kind,nid):
+            s.calls.append(f'{kind}/{nid}')
+            if kind=='notice-update':
+                return {'title':'보스 결정 판매 가격 변경','url':'https://maplestory.nexon.com/news/update/900','date':s.day,
+                        'contents':'<p>강렬한 힘의 결정 판매 가격이 조정됩니다.</p><table><tr><td>보스</td><td>가격</td></tr><tr><td>카링 (하드)</td><td>1,560,000,000</td></tr></table>'}
+            return {'title':'샤이닝 스타포스 타임','url':'https://maplestory.nexon.com/news/event/77','date':'2026-09-24T10:00+09:00',
+                    'contents':'<p>샤이닝 스타포스 기간 동안 강화 비용 30% 할인</p>','start':'2026-09-24T10:00+09:00','end':'2099-10-12T23:59+09:00'}
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.store=Store(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def test_html_to_text(self):
+        text=notices.text_of('<p>가&amp;나<br>다</p><table><tr><td>A</td><td>B</td></tr></table><script>x()</script>')
+        self.assertEqual(text,'가&나\n다\nA | B')
+    def test_sync_imports_reviewed_official_documents(self):
+        n=self.N(); r=notices.sync(self.store,n)
+        self.assertEqual(r['added'],2)
+        docs=self.store.documents()
+        self.assertTrue(all(d['metadata']['verification_status']=='reviewed' and d['metadata']['source_type']=='official' for d in docs))
+        found,conflict=self.store.search('결정 판매 가격')
+        self.assertFalse(conflict); self.assertIn('카링 (하드) | 1,560,000,000',found[0]['body'])
+        again=notices.sync(self.store,n)                 # 30분 안에는 다시 받지 않는다
+        self.assertTrue(again['skipped'])
+        notices.sync(self.store,n,force=True)
+        self.assertEqual(len(self.store.documents()),2)  # 이미 넣은 글은 다시 넣지 않는다
+    def test_events_and_suggestion(self):
+        notices.sync(self.store,self.N())
+        self.assertEqual([e['title'] for e in notices.active_events(self.store)],['샤이닝 스타포스 타임'])
+        self.assertEqual(notices.suggested_event(self.store)[0],'샤타포스')
+        self.assertIn('10/12',notices.events_text(self.store))
+    def test_ended_event_is_not_active(self):
+        notices.sync(self.store,self.N(end='2026-01-01T00:00+09:00'))
+        self.assertEqual(notices.active_events(self.store),[])
+        self.assertIsNone(notices.suggested_event(self.store)[0])
+    def test_crystal_alert(self):
+        notices.sync(self.store,self.N())
+        self.assertIsNone(earnings.overview(self.store)['crystal_alert'])   # 가격표를 넣기 전 공지는 알리지 않는다
+        with patch('mepiti.notices.CRYSTAL_TABLE_DAY','2026-09-01'):
+            notices.sync(self.store,self.N(),force=True)
+        self.store.set_setting(notices.IMPORTED,{})
+        with patch('mepiti.notices.CRYSTAL_TABLE_DAY','2026-09-01'):
+            notices.sync(self.store,self.N(),force=True)
+        self.assertEqual(earnings.overview(self.store)['crystal_alert']['title'],'보스 결정 판매 가격 변경')
+    def test_chat_event_question(self):
+        class Nexon(self.N):
+            def character(s,name,details=False): return {}
+        r=answer(self.store,CharacterAnalysisTests.FakeModel('x'),{'message':'지금 진행 중인 이벤트 뭐 있어?'},Nexon())
+        self.assertEqual(r['status'],'evidence')
+        self.assertIn('샤이닝 스타포스 타임',r['content'])
+        self.assertEqual(r['links'][0]['url'],'https://maplestory.nexon.com/news/event/77')
+    def test_condition_form_suggests_shining(self):
+        notices.sync(self.store,self.N())
+        self.store.character_save({'name':'테스트','budget':0,'main':True}); self.store.set_setting('model','m')
+        class Nexon(self.N):
+            def character(s,name,details=False): return StarforceConversationTests.PROFILE
+        r=answer(self.store,CharacterAnalysisTests.FakeModel('x'),{'message':'벨트 22성 기대값 얼마야?'},Nexon())
+        self.assertEqual(r['status'],'ask_conditions')
+        event=next(q for q in r['form']['questions'] if q['key']=='event')
+        self.assertEqual(next(o['value'] for o in event['options'] if o['selected']),'샤타포스')
+        self.assertIn('진행 중이라 샤타포스',' '.join(r['conditions']))

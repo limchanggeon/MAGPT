@@ -218,7 +218,9 @@ class Nexon:
         self.vault = vault
 
     def get(self, path, query):
-        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce'):
+        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce',
+                        'notice','notice/detail','notice-update','notice-update/detail',
+                        'notice-event','notice-event/detail','notice-cashshop','notice-cashshop/detail'):
             raise AppError('허용되지 않은 API입니다.')
         key = self.vault.get()
         if not key:
@@ -398,6 +400,7 @@ class Nexon:
                              'result': str(r.get('item_upgrade_result') or '')[:20],
                              'starcatch': str(r.get('starcatch_result') or '')[:20] or None,
                              'safeguard': applied(r.get('destroy_defence', r.get('destroy_defense'))),
+                             'superior': flag(r.get('superior_item_flag')) or '슈페리얼' in str(r.get('superior_item_flag') or ''),
                              'created': str(r.get('date_create') or day)[:32],
                              'events': [starforce_event(e) for e in (r.get('starforce_event_list') or [])
                                         if isinstance(e, dict)][:5]})
@@ -405,6 +408,35 @@ class Nexon:
             if not cursor:
                 break
         return rows
+
+    NOTICE_KEYS = {'notice': 'notice', 'notice-update': 'update_notice',
+                   'notice-event': 'event_notice', 'notice-cashshop': 'cashshop_notice'}
+
+    def notices(self, kind):
+        """공지 종류별 최근 20개(공지·업데이트·진행 중 이벤트·캐시샵)."""
+        if kind not in self.NOTICE_KEYS:
+            raise AppError('지원하지 않는 공지 종류입니다.')
+        data = self.get(kind, {})
+        rows = []
+        for n in (data.get(self.NOTICE_KEYS[kind]) or []) if isinstance(data, dict) else []:
+            if not isinstance(n, dict) or not n.get('title') or n.get('notice_id') is None:
+                continue
+            rows.append({'kind': kind, 'id': str(n['notice_id'])[:20], 'title': str(n['title'])[:200],
+                         'url': str(n.get('url') or '')[:500], 'date': str(n.get('date') or '')[:32],
+                         'start': str(n.get('date_event_start') or n.get('date_sale_start') or '')[:32] or None,
+                         'end': str(n.get('date_event_end') or n.get('date_sale_end') or '')[:32] or None})
+        return rows
+
+    def notice_detail(self, kind, notice_id):
+        if kind not in self.NOTICE_KEYS:
+            raise AppError('지원하지 않는 공지 종류입니다.')
+        data = self.get(kind + '/detail', {'notice_id': notice_id})
+        if not isinstance(data, dict) or not data.get('title'):
+            raise AppError('공지 상세 응답 형식을 확인할 수 없습니다.',502)
+        return {'title': str(data['title'])[:200], 'url': str(data.get('url') or '')[:500],
+                'contents': str(data.get('contents') or ''), 'date': str(data.get('date') or '')[:32],
+                'start': data.get('date_event_start') or data.get('date_sale_start'),
+                'end': data.get('date_event_end') or data.get('date_sale_end')}
 
     @staticmethod
     def equipment_item(item, main_stat):
