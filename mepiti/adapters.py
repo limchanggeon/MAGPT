@@ -177,7 +177,7 @@ class Nexon:
         self.vault = vault
 
     def get(self, path, query):
-        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment'):
+        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider'):
             raise AppError('허용되지 않은 API입니다.')
         key = self.vault.get()
         if not key:
@@ -279,6 +279,32 @@ class Nexon:
             except AppError as e:
                 data['equipment'] = []
                 data['warnings'].append('장비 조회: '+str(e))
+        return data
+
+    def union(self, name):
+        """캐릭터가 속한 월드의 유니온 정보와 배치된 공격대원."""
+        identity = self.get('id',{'character_name':name})
+        ocid = identity.get('ocid')
+        if not ocid:
+            raise AppError('캐릭터 식별자를 확인하지 못했습니다.',502)
+        data = {'level':None,'grade':None,'artifact_level':None,'placed':[],'raider_stats':[],
+                'warnings':[],'retrieved_at':now(),'api_date':None}
+        try:
+            info = self.get('user/union',{'ocid':ocid})
+            data['level'] = integer(info.get('union_level'))
+            data['grade'] = info.get('union_grade') if isinstance(info.get('union_grade'),str) else None
+            data['artifact_level'] = integer(info.get('union_artifact_level'))
+            data['api_date'] = info.get('date')
+        except AppError as e:
+            data['warnings'].append('유니온 정보 조회: '+str(e))
+        try:
+            raider = self.get('user/union-raider',{'ocid':ocid})
+            for block in raider.get('union_block') or []:
+                if isinstance(block,dict) and isinstance(block.get('block_class'),str):
+                    data['placed'].append({'job':block['block_class'],'level':integer(block.get('block_level'))})
+            data['raider_stats'] = [x for x in raider.get('union_raider_stat') or [] if isinstance(x,str)][:60]
+        except AppError as e:
+            data['warnings'].append('유니온 공격대 조회: '+str(e))
         return data
 
     @staticmethod

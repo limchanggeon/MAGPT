@@ -582,3 +582,11 @@ node --check mepiti/static/app.js
 - 검증(2026-09-28, 클라우드 컨테이너): 테스트 224개 통과, JS 구문 검사, Chromium 확인. 실제 계정 응답은 미확인.
 - 사용자 질문(유니온·다음 육성 추천)은 답변만 했고 구현하지 않았다. 다음 작업 후보로 남긴다.
 
+### 2026-09-28 — 유니온 공격대원 추천 (사용자 요청, 효과 표 제공)
+
+- 사용자가 커뮤니티 위키의 공격대원 효과 표를 붙여 주었다. 이 표를 출처로 표시해 `mepiti/union.py`에 옮겼다(비공식).
+- 변경: `mepiti/union.py`(신규: 효과·직업·평가·추천), `mepiti/adapters.py`(`union`, 허용 경로에 `user/union`·`user/union-raider`),
+  `mepiti/server.py`(캐릭터 목록·유니온 캐시), `mepiti/chat.py`(`UNION_INTENT`, `union_answer`), `tests/test_app.py`(`UnionTests`), `README.md`, `IMPLEMENTATION.md`.
+- 주의: `CachedNexon.characters()`도 180초 캐시를 쓴다. 캐릭터 화면의 목록 새로고침도 3분 안에는 같은 결과를 보여 준다.
+- 한계·미검증: 실제 계정의 유니온 API 응답, 공격대원 배치 수 제한, 메이플스토리M, 제로 시작 레벨.
+

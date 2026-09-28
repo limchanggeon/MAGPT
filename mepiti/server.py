@@ -48,7 +48,20 @@ class CachedNexon:
         return data
 
     def characters(self):
-        return self.nexon.characters()
+        return self._cached(('list',), self.nexon.characters)
+
+    def union(self, name):
+        return self._cached(('union', name), lambda: self.nexon.union(name))
+
+    def _cached(self, key, fetch):
+        with self.lock:
+            hit = self.cache.get(key)
+            if hit and time.monotonic() - hit[0] < self.TTL:
+                return hit[1]
+        data = fetch()
+        with self.lock:
+            self.cache[key] = (time.monotonic(), data)
+        return data
 
 
 class Application:

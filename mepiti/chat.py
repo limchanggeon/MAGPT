@@ -1,5 +1,5 @@
 import re
-from . import conditions, context, prices, starforce
+from . import conditions, context, prices, starforce, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -15,6 +15,9 @@ UNIT_SCALE = {'조':1_0000_0000_0000,'억':1_0000_0000,'만':1_0000,None:1}
 # 값을 따져야 답할 수 있는 질문. 노작값을 모르면 지어내지 말고 되물어야 한다.
 PRICE_INTENT = re.compile(r'노작|시세|가격|얼마|값이|사는\s*게|살까|구매|바꾸는\s*게|'
                           r'가성비|예산|이득|싸[냐게]|비싸')
+# 유니온·다음 육성 질문. 계정 캐릭터 목록과 공격대원 효과 표로 앱이 직접 추천한다.
+UNION_INTENT = re.compile(r'유니온|공격대원|뭐\s*키우|뭘\s*키우|뭐\s*키울|뭘\s*키울|다음에?\s*(?:뭐|뭘|어떤)\s*(?:캐릭|직업)|'
+                          r'키울\s*(?:캐릭|직업)|육성\s*추천|부캐\s*(?:추천|뭐)')
 # 장비 값 자체를 묻는 표현. '기대값이 얼마야'의 '얼마'는 여기에 들지 않는다.
 ITEM_PRICE = re.compile(r'노작|시세|가격|사는\s*게|살까|구매|바꾸는\s*게|가성비|이득|싸[냐게]|비싸')
 # 되물은 노작값을 건너뛰겠다는 답.
@@ -128,6 +131,15 @@ def answer(store, model, data, nexon=None):
     if terms and any(t['term'] in ('환산','대장장이') for t in terms):
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
+    elif not topic and UNION_INTENT.search(question):
+        chars = store.characters()
+        main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
+        if not main:
+            result.update(status='clarify',content='캐릭터 화면에서 대표 캐릭터를 먼저 등록하세요. 그 캐릭터 기준으로 공격대원을 추천합니다.')
+        elif not nexon:
+            result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
+        else:
+            union_answer(store, model, nexon, main, question, history, result)
     elif (topic or CHARACTER_INTENT.search(question)
           or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
               and SLOT_WORDS.search(question))):
@@ -303,6 +315,51 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         '강화 확률·비용·시세·패치 내용은 근거가 없어 서술에서 제외했습니다. 해당 질문은 자료실에 자료를 등록해야 답변합니다.',
         '추가옵션 등급(급·n추)은 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아닙니다.',
     ]
+
+
+def union_answer(store, model, nexon, managed, question, history, result):
+    """대표 캐릭터 기준으로 다음에 키울 공격대원을 추천한다. 목록과 수치는 앱이 쓴다."""
+    try:
+        profile = nexon.character(managed['name'], details=True)
+        roster = nexon.characters().get('characters') or []
+    except AppError as e:
+        result.update(status='clarify', content=f"캐릭터 목록을 조회하지 못해 추천을 보류합니다. {e}")
+        return
+    try:
+        info = nexon.union(managed['name'])
+    except AppError as e:
+        info = {'warnings': [f'유니온 조회: {e}'], 'placed': None}
+    placed = {union.canonical(p['job']) for p in info.get('placed') or []} if info.get('placed') is not None else None
+    if placed is not None and not placed and info.get('warnings'):
+        placed = None      # 공격대 조회에 실패했으면 배치 여부를 모른다고 둔다.
+    try:
+        rows = union.recommend(roster, profile.get('job'), profile.get('main_stat'), profile.get('world'), placed)
+    except AppError as e:
+        result.update(status='clarify', content=str(e))
+        return
+    block = union.as_text(rows, profile.get('job'), profile.get('main_stat'), info)
+    result['union'] = {'rows': rows, 'level': info.get('level'), 'grade': info.get('grade')}
+    notes = [f"효과 수치와 평가(S~F)는 {union.SOURCE['name']}를 옮긴 것으로, 넥슨 공식 수치와 대조하지 않은 커뮤니티 평가입니다.",
+             '등급 기준: 공격대원 레벨 60 B · 100 A · 140 S · 200 SS · 250 SSS. 같은 월드 캐릭터만 셉니다.',
+             '배치할 수 있는 공격대원 수는 유니온 등급에 따라 제한됩니다. 미배치 캐릭터는 효과가 없습니다.',
+             '메이플스토리M 공격대원(공격력/마력, S)은 넥슨 Open API로 확인할 수 없어 목록에서 뺐습니다.']
+    notes += info.get('warnings') or []
+    selected_model = store.setting('model')
+    if selected_model:
+        previous = [{'role':m['role'],'content':m['payload']['content']}
+                    for m in history[-4:] if m['payload'].get('content')]
+        facts = ('[유니온 공격대원 추천] 앱이 계산해 사용자에게 이미 보여 준 목록이다. 수치를 다시 나열하지 말고, '
+                 '왜 이 순서인지 한두 줄만 덧붙여라.\n' + block)
+        try:
+            written, metrics = model.analyse(selected_model, facts, question, previous, numbers_shown=True)
+            written = fix_name(written, profile.get('name'))
+            if not FABRICATION.search(written) and not unsupported_numbers(written, facts):
+                result['metrics'] = metrics
+                result.update(status='analysis', content=block + '\n\n' + written, conditions=notes)
+                return
+        except AppError:
+            pass
+    result.update(status='context', content=block, conditions=notes)
 
 
 def clean_topic(topic):

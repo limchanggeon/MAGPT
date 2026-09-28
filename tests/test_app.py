@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from mepiti.adapters import Nexon, Ollama, Vault, recognize
 from mepiti.chat import answer
-from mepiti import conditions, context, prices, starforce
+from mepiti import conditions, context, prices, starforce, union
 from mepiti.conversion import convert, cooldowns, jobs
 from mepiti.core import AppError, KST, Store, calculate, identifier, now
 from mepiti.server import Application, make_server
@@ -1036,3 +1036,55 @@ class PresetTests(CharacterAnalysisTests):
         with self.assertRaises(AppError):
             answer(self.store,self.FakeModel('x'),{'message':'x','topic':{'slot':'모자','name':'a','preset':7}},
                    self.FakeNexon(self.PROFILE))
+
+
+class UnionTests(CharacterAnalysisTests):
+    """유니온 공격대원 추천. 효과 표는 사용자 제공 커뮤니티 표(비공식)."""
+    ROSTER=[{'name':'테스트','world':'크로아','job':'렌','level':291},
+            {'name':'은월부캐','world':'크로아','job':'은월','level':210},
+            {'name':'메르','world':'크로아','job':'메르세데스','level':120},
+            {'name':'히어로부캐','world':'크로아','job':'히어로','level':250},
+            {'name':'딴월드','world':'스카니아','job':'나이트로드','level':260},
+            {'name':'캐슈','world':'크로아','job':'캐논슈터','level':150}]
+    class UnionNexon(CharacterAnalysisTests.FakeNexon):
+        def characters(self): return {'characters':UnionTests.ROSTER}
+        def union(self,name): return {'level':9000,'grade':'그랜드 마스터 1','placed':[{'job':'은월','level':210}],'warnings':[]}
+    def rows(self,job='렌',stat='STR'):
+        return {r['job']:r for r in union.recommend(self.ROSTER,job,stat,'크로아',{'은월'},limit=99)}
+    def test_grades_and_next_level(self):
+        self.assertEqual(union.grade_index(59),None); self.assertEqual(union.grade_index(60),0)
+        self.assertEqual(union.grade_index(249),3); self.assertEqual(union.grade_index(250),4)
+        r=self.rows()['메르세데스']
+        self.assertEqual((r['grade'],r['next_grade'],r['levels_left']),('A','S',20))
+        self.assertEqual(r['next_effect'],'스킬 재사용 대기시간 감소 +4%')
+    def test_world_sss_self_and_useless_are_excluded(self):
+        rows=self.rows()
+        self.assertNotIn('렌',rows)                        # 대표 캐릭터 자신
+        self.assertNotIn('히어로',rows)                    # 이미 SSS
+        self.assertEqual(rows['나이트로드']['level'],0)     # 다른 월드 캐릭터는 세지 않는다
+        self.assertNotIn('비숍',rows)                      # STR 캐릭터에게 INT는 F
+        self.assertTrue(rows['은월']['placed']); self.assertFalse(rows['메르세데스']['placed'])
+    def test_rating_follows_main_stat(self):
+        self.assertEqual(union.rating('STR','히어로','STR'),'A')
+        self.assertEqual(union.rating('DEX','히어로','STR'),'C')
+        self.assertEqual(union.rating('INT','비숍','INT'),'A')
+        self.assertEqual(union.rating('LUK','비숍','INT'),'C')     # 마법사 부스탯은 LUK
+        self.assertEqual(union.rating('STR','비숍','INT'),'F')
+        self.assertEqual(union.rating('buff','다크나이트','STR'),'S')
+        self.assertEqual(union.rating('speed','배틀메이지','INT'),'D')
+        self.assertEqual(union.rating('hp_pct','데몬어벤져','HP'),'S')
+    def test_alias_job_names(self):
+        self.assertEqual(self.rows()['캐논마스터']['level'],150)   # 표의 '캐논슈터'도 같은 직업
+    def test_chat_recommends(self):
+        self.store.set_setting('model','')
+        r=answer(self.store,self.FakeModel('x'),{'message':'다음에 뭐 키우는 게 좋을까?'},self.UnionNexon(self.PROFILE))
+        self.assertEqual(r['status'],'context')
+        self.assertIn('다음에 키우면 좋은 공격대원',r['content'])
+        self.assertIn('메르세데스',r['content'])
+        self.assertIn('커뮤니티 평가',' '.join(r['conditions']))
+        self.assertEqual(r['union']['level'],9000)
+    def test_model_text_with_invented_numbers_is_dropped(self):
+        r=answer(self.store,self.FakeModel('메르세데스를 99999999 메소 들여 키우세요'),{'message':'유니온 뭐 키울까'},
+                 self.UnionNexon(self.PROFILE))
+        self.assertNotIn('99999999',r['content'])
+        self.assertIn('다음에 키우면 좋은 공격대원',r['content'])
