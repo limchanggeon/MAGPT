@@ -80,6 +80,8 @@ def parse(text):
         if name != '없음' and name.replace(' ', '') in body.replace(' ', ''):
             found['event'] = name
             hit = True
+            # 이벤트 이름 속 '복구' 같은 말이 아래에서 다시 걸리지 않게 지운다.
+            body = re.sub(r'\s*'.join(map(re.escape, name.replace(' ', ''))), ' ', body)
             break
     else:
         if '샤타' in body:

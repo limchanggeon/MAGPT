@@ -434,11 +434,11 @@ class StarforceTests(unittest.TestCase):
         # 파괴 30% 감소: 파괴 횟수만 줄고 비용 할인은 없다
         reduced=starforce.expected({**base,'event':'21성 이하 파괴 30% 감소'})
         self.assertLess(reduced['expected_destroys'],plain['expected_destroys'])
-        self.assertAlmostEqual(reduced['discount_ratio'],0.0)
+        self.assertAlmostEqual(reduced['event_discount'],0.0)
         # 샤타포스 = 파괴 감소 + 30% 할인
         shining=starforce.expected({**base,'event':'샤타포스'})
         self.assertAlmostEqual(shining['expected_destroys'],reduced['expected_destroys'],places=3)
-        self.assertAlmostEqual(shining['discount_ratio'],0.3)
+        self.assertAlmostEqual(shining['event_discount'],0.3)
         self.assertLess(shining['expected_cost'],reduced['expected_cost'])
     def test_discounts_apply_to_attempt_cost_only(self):
         base=dict(level=250,current_star=18,target_star=22,spare_cost=4.5e9)
@@ -447,6 +447,31 @@ class StarforceTests(unittest.TestCase):
         spare_loss=plain['expected_destroys']*4.5e9
         attempts_only=plain['expected_cost']-spare_loss
         self.assertAlmostEqual(cut['expected_cost'],attempts_only*0.7+spare_loss,delta=2e7)
+    def test_mvp_discount_stops_at_16_and_multiplies_with_event(self):
+        # mesulive: MVP·PC방은 16성 이하에만, 이벤트 30%는 그 위에 곱한다.
+        base=starforce.attempt_costs(250)
+        at16=starforce.expected({'level':250,'current_star':16,'target_star':17,'spare_cost':0,
+                                 'event':'샤타포스','discounts':['MVP 다이아'],'safeguard':[16]})
+        self.assertEqual(at16['attempt_cost_at_current'],round(base[16]*0.9*0.7))
+        at18=starforce.expected({'level':250,'current_star':18,'target_star':19,'spare_cost':0,
+                                 'event':'샤타포스','discounts':['MVP 다이아']})
+        self.assertEqual(at18['attempt_cost_at_current'],round(base[18]*0.7))
+    def test_matches_reported_simulation(self):
+        # 사용자가 보여 준 다른 계산기의 시뮬레이션 평균(샤타포스·MVP 다이아·스페어 2천만) 152억 811만.
+        r=starforce.expected({'level':250,'current_star':18,'target_star':21,'spare_cost':2e7,
+                              'event':'샤타포스','discounts':['MVP 다이아']})
+        self.assertAlmostEqual(r['expected_cost'],15_208_113_892,delta=15_208_113_892*0.005)
+    def test_restore_above_22_goes_to_22(self):
+        r=starforce.expected({'level':250,'current_star':22,'target_star':24,'spare_cost':2e7,'use_restore':True})
+        self.assertEqual(max(r['restore_stars']),22)          # 23성 파괴도 22성 복구로 계산한다
+        no23=starforce.expected({'level':250,'current_star':22,'target_star':24,'spare_cost':2e7,'use_restore':False})
+        self.assertLess(r['expected_attempts'],no23['expected_attempts'])
+    def test_restore_meso_discount_event(self):
+        base=dict(level=250,current_star=18,target_star=22,spare_cost=2e7,use_restore=True)
+        plain=starforce.expected({**base,'event':'샤타포스'})
+        cut=starforce.expected({**base,'event':'샤타포스(+흔적 복구 비용 20% 할인)'})
+        self.assertLess(cut['expected_cost'],plain['expected_cost'])
+        self.assertEqual(cut['expected_attempts'],plain['expected_attempts'])
     def test_mvp_and_pcroom_discounts_add_up(self):
         base=dict(level=250,current_star=18,target_star=22,spare_cost=4.5e9)
         r=starforce.expected({**base,'discounts':['MVP 다이아','PC방']})
@@ -532,6 +557,9 @@ class ConditionTests(unittest.TestCase):
         """후속 수정에서 말하지 않은 조건이 초기화되면 안 된다."""
         self.assertEqual(conditions.parse('샤타포스'),{'event':'샤타포스'})
         self.assertEqual(conditions.parse('안전모드도 쓸래'),{'safeguard':True})
+        # 이벤트 이름 속 '복구'는 흔적 복구 사용으로 읽지 않는다.
+        self.assertEqual(conditions.parse('샤타포스(+흔적 복구 비용 20% 할인)'),
+                         {'event':'샤타포스(+흔적 복구 비용 20% 할인)'})
         self.assertEqual(conditions.parse('MVP 다이아'),{'discounts':['MVP 다이아']})
     def test_basic_answer_accepted(self):
         self.assertEqual(conditions.parse('기본'),dict(conditions.DEFAULTS))
@@ -794,7 +822,8 @@ class ChoiceAnswerTests(CharacterAnalysisTests):
         self.assertEqual(self.store.price_lookup('골든 클로버 벨트')['price'],20_000_000)
         self.assertEqual(third['starforce']['target_star'],21)
         self.assertEqual(third['starforce']['event'],'샤타포스')
-        self.assertAlmostEqual(third['starforce']['discount_ratio'],0.4)
+        self.assertAlmostEqual(third['starforce']['discount_ratio'],0.1)    # MVP 다이아
+        self.assertAlmostEqual(third['starforce']['event_discount'],0.3)    # 샤타포스
     def test_choice_answers_continue_to_calculation(self):
         first,_=self.ask('x','벨트 22성 기대값 얼마야?')
         second=self.reply(first,'샤타포스 · MVP 다이아',{'kind':'conditions','values':{
@@ -890,3 +919,17 @@ class PriceScopeTests(CharacterAnalysisTests):
     def test_item_price_question_still_asks(self):
         r,_=self.ask('x','모자 21성이면 시세 얼마야')
         self.assertEqual(r['status'],'ask_price')
+
+
+class RestoreCompareTests(CharacterAnalysisTests):
+    PROFILE=PriceScopeTests.PROFILE
+    def test_restore_result_shows_cost_without_restore(self):
+        """실제로 겪은 문제: 잘못 저장된 '흔적 복구 사용'으로 기대값이 크게 나와도 알아챌 수 없었다."""
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스','use_restore':True})
+        self.store.price_save({'item':'에테르넬 나이트헬름','price':2e7,'source':'user'})
+        r,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
+        self.assertIn('흔적 복구를 안 쓰면',r['content'])
+        self.assertLess(r['starforce']['without_restore'],r['starforce']['expected_cost'])
+        conditions.save(self.store,{**conditions.DEFAULTS,'event':'샤타포스'})
+        plain,_=self.ask('x','내 모자 21성가는 기대값이 얼마야')
+        self.assertNotIn('흔적 복구를 안 쓰면',plain['content'])

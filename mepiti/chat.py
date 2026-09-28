@@ -424,13 +424,23 @@ def starforce_facts(store, profile, question, result):
     except AppError as e:
         return f"\n\n[강화 기대값] 계산하지 못했다: {e}"
     result['starforce'] = {**calc, 'slot': item['slot'], 'item': item['name']}
+    # 흔적 복구는 스페어가 쌀 때 오히려 훨씬 비싸다. 판단할 수 있게 복구 없이 계산한 값도 보여 준다.
+    compare = ''
+    if calc['restore_stars']:
+        alt = starforce.expected({'level': item['equip_level'], 'current_star': current,
+                                  'target_star': target, 'spare_cost': price['price'],
+                                  **conditions.to_arguments({**picked, 'use_restore': False}, current, target)})
+        compare = (f"\n- 흔적 복구를 안 쓰면: {alt['expected_cost']:,} 메소 "
+                   f"(시도 {alt['expected_attempts']}회, 파괴 {alt['expected_destroys']}회)")
+        result['starforce']['without_restore'] = alt['expected_cost']
     result['starforce_text'] = (
         f"**{item['slot']} {item['name']}** {current}성 → {target}성\n\n"
         f"- 기대 비용: **{calc['expected_cost']:,} 메소**\n"
         f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
         f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
         f"- 적용 조건: {conditions.summary(picked)}\n"
-        f"- 스페어 장비 값: {price['price']:,.0f} 메소 (파괴 시 1개 소모로 계산)")
+        f"- 스페어 장비 값: {price['price']:,.0f} 메소 (파괴 시 1개 소모로 계산)"
+        + compare)
     return (f"\n\n[강화 기대값] 앱이 이미 계산해 사용자에게 그대로 보여 준 값이다.\n"
             f"계산할 수 없다고 쓰지 말 것. 아래 수치를 다시 나열하지도 말 것.\n"
             f"필요하면 이 수치가 무엇을 뜻하는지 한두 줄만 덧붙여라.\n"
@@ -439,7 +449,7 @@ def starforce_facts(store, profile, question, result):
             f"- 기대 비용: {calc['expected_cost']:,} 메소\n"
             f"- 기대 시도 횟수: {calc['expected_attempts']}회\n"
             f"- 기대 파괴 횟수: {calc['expected_destroys']}회\n"
-            f"- 적용 조건: {conditions.summary(picked)}\n"
+            f"- 적용 조건: {conditions.summary(picked)}{compare}\n"
             f"- 확률표 출처: {calc['source']['name']} (넥슨 공시와 대조하지 않은 커뮤니티 값, 스타캐치 반영)")
 
 

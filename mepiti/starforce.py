@@ -47,21 +47,32 @@ SOURCE = {'name': 'mesulive', 'url': 'https://github.com/kurateh/mesulive',
           'official': False, 'star_catch': True}
 
 # 이벤트. mesulive의 eventSchema를 그대로 옮겼다.
+# discount: 모든 성의 시도 비용에 곱하는 할인, restore_discount: 흔적 복구 비용 중 메소 부분 할인.
+def _event(destroy=1.0, guaranteed=(), discount=0.0, one_plus_one=False, restore_discount=0.0):
+    return {'destroy': destroy, 'guaranteed': guaranteed, 'discount': discount,
+            'one_plus_one': one_plus_one, 'restore_discount': restore_discount}
+
+
 EVENTS = {
-    '없음':            {'destroy': 1.0, 'guaranteed': (),      'discount': 0.0, 'one_plus_one': False},
-    '10성 이하 1+1':   {'destroy': 1.0, 'guaranteed': (),      'discount': 0.0, 'one_plus_one': True},
-    '30% 할인':        {'destroy': 1.0, 'guaranteed': (),      'discount': 0.3, 'one_plus_one': False},
-    '5/10/15성 100%':  {'destroy': 1.0, 'guaranteed': (5,10,15), 'discount': 0.0, 'one_plus_one': False},
-    '21성 이하 파괴 30% 감소': {'destroy': 0.7, 'guaranteed': (), 'discount': 0.0, 'one_plus_one': False},
-    '샤타포스':        {'destroy': 0.7, 'guaranteed': (),      'discount': 0.3, 'one_plus_one': False},
-    '샤타포스(15 16 포함)': {'destroy': 0.7, 'guaranteed': (5,10,15), 'discount': 0.3, 'one_plus_one': False},
+    '없음': _event(),
+    '10성 이하 1+1': _event(one_plus_one=True),
+    '30% 할인': _event(discount=0.3),
+    '흔적 복구 비용 20% 할인': _event(restore_discount=0.2),
+    '5/10/15성 100%': _event(guaranteed=(5, 10, 15)),
+    '21성 이하 파괴 30% 감소': _event(destroy=0.7),
+    '샤타포스': _event(destroy=0.7, discount=0.3),
+    '샤타포스(+흔적 복구 비용 20% 할인)': _event(destroy=0.7, discount=0.3, restore_discount=0.2),
+    '샤타포스(15 16 포함)': _event(destroy=0.7, guaranteed=(5, 10, 15), discount=0.3),
 }
 DESTROY_REDUCTION_MAX_STAR = 22   # 파괴 확률 감소는 21성 이하(표 인덱스 0~21)에만 붙는다.
 # 안전모드(파괴방지)는 15·16·17성 시도에서만 고를 수 있다(mesulive safeGuardRecordAtom).
 SAFEGUARD_STARS = (15, 16, 17)
 
-# 할인. 여러 개를 함께 쓰면 비율을 더한다.
+# 할인. 여러 개를 함께 쓰면 비율을 더하고, 16성 이하 시도에만 붙는다(mesulive: index < 17).
+# 이벤트 할인은 그 위에 곱한다. 예: 16성 MVP 다이아+샤타포스 = 기본 x 0.9 x 0.7.
 DISCOUNTS = {'MVP 실버': 0.03, 'MVP 골드': 0.05, 'MVP 다이아': 0.10, 'PC방': 0.05}
+DISCOUNT_MAX_STAR = 17
+RESTORE_MAX_STAR = 22             # 23성 이상에서 파괴되면 22성으로 복구한다.
 
 # 흔적 복구: 레벨별 (성 -> [필요 스페어 개수, 복구 비용(억)])
 RESTORE_TABLE = {
@@ -74,7 +85,6 @@ RESTORE_TABLE = {
     200: {15:[1,4.33],16:[1,10.44],17:[1,17.64],18:[1,40.05],19:[2,66.44],20:[2,117.06],21:[3,147.09],22:[4,241.68]},
     250: {15:[1,8.46],16:[1,20.39],17:[1,34.46],18:[1,78.21],19:[2,129.77],20:[2,228.63],21:[3,287.28],22:[4,472.04]},
 }
-RESTORE_MESO_DISCOUNT_EVENTS = ('흔적 복구 비용 20% 할인',)
 
 
 def restore_cost(level, star, spare_cost, meso_discount=0.0):
@@ -173,12 +183,13 @@ def expected(data):
         raise AppError('지원하지 않는 이벤트입니다. ' + ', '.join(EVENTS))
     event = EVENTS[event_name]
     picked = [d for d in (data.get('discounts') or []) if d in DISCOUNTS]
-    discount = event['discount'] + sum(DISCOUNTS[d] for d in picked)
+    discount = sum(DISCOUNTS[d] for d in picked)
     use_restore = bool(data.get('use_restore'))
-    meso_discount = 0.2 if data.get('restore_discount') else 0.0
+    meso_discount = max(event['restore_discount'], 0.2 if data.get('restore_discount') else 0.0)
 
     base_costs = attempt_costs(level)
-    costs = [round(c * (1 - discount)) for c in base_costs]
+    costs = [round(c * (1 - discount if star < DISCOUNT_MAX_STAR else 1) * (1 - event['discount']))
+             for star, c in enumerate(base_costs)]
     table, adjusted = normalised_table()
     requested = set(int(s) for s in (data.get('safeguard') or []) if str(s).isdigit())
     safeguard = requested & set(SAFEGUARD_STARS)
@@ -216,10 +227,11 @@ def expected(data):
         # 흔적 복구를 쓰면 파괴돼도 그 성으로 돌아온다. 아니면 12성으로 떨어진다.
         back, penalty = DESTROY_FALLBACK_STAR, spare_cost
         if destroy and use_restore:
-            recovered = restore_cost(level, star, spare_cost, meso_discount)
+            to = min(star, RESTORE_MAX_STAR)
+            recovered = restore_cost(level, to, spare_cost, meso_discount)
             if recovered is not None:
-                back, penalty = star, recovered
-                restore_used.append(star)
+                back, penalty = to, recovered
+                restore_used.append(to)
         for row, rhs, own_cost, own_destroy in ((matrix, vector, attempt, 0.0),
                                                 (attempts, attempt_vec, 1.0, 0.0),
                                                 (destroys, destroy_vec, 0.0, 1.0)):
@@ -238,7 +250,8 @@ def expected(data):
         'level': level, 'current_star': current, 'target_star': target,
         'spare_cost': spare_cost, 'spare_cost_known': bool(spare_cost),
         'adjusted_rows': adjusted, 'event': event_name, 'discounts': picked,
-        'discount_ratio': round(discount, 4), 'use_restore': use_restore,
+        'discount_ratio': round(discount, 4), 'event_discount': event['discount'],
+        'use_restore': use_restore, 'restore_meso_discount': meso_discount,
         'restore_stars': sorted(set(restore_used)),
         'expected_cost': round(cost),
         'expected_attempts': round(tries, 2),
@@ -250,7 +263,7 @@ def expected(data):
         'assumptions': [
             '확률표·비용식은 오픈소스 계산기 mesulive에서 가져왔습니다. 넥슨 공시와 이 앱이 대조한 값이 아닙니다.',
             '확률표에는 스타캐치(성공확률 x1.05)가 이미 반영되어 있습니다.',
-            f'파괴되면 {DESTROY_FALLBACK_STAR}성으로 떨어지고 스페어 장비 비용을 치르는 것으로 계산했습니다. 흔적 복구는 반영하지 않았습니다.',
+            f'흔적 복구를 쓰지 않은 파괴는 {DESTROY_FALLBACK_STAR}성으로 떨어지고 스페어 장비 1개 값을 치르는 것으로 계산했습니다.',
             ('**스페어 비용을 모릅니다.** 파괴되면 어느 쪽으로 처리하든 같은 장비가 한 개 이상 필요하므로, '
              '아래 총비용에는 파괴 손실이 빠져 있습니다. 노작값을 알려주면 다시 계산합니다.'
              if not spare_cost else f'파괴 1회당 스페어 장비 값 {spare_cost:,.0f} 메소로 계산했습니다.'),
@@ -258,7 +271,10 @@ def expected(data):
             (f"안전모드 적용 구간 {', '.join(str(x)+'성' for x in safeguard_used)}. "
              '안전모드는 파괴를 막는 대신 할인 없는 기본 비용의 2배를 추가로 냅니다.'
              if safeguard_used else '안전모드는 쓰지 않는 것으로 계산했습니다.'),
-            (f"할인 {round(discount*100,1)}% 적용 ({', '.join(picked) or '이벤트 할인'})" if discount else '할인 없음.'),
+            (f"{', '.join(picked)} 할인 {round(discount*100,1)}%는 16성 이하 시도에만 적용했습니다."
+             if discount else 'MVP·PC방 할인 없음.'),
+            (f"이벤트 비용 할인 {round(event['discount']*100)}%를 모든 시도에 곱해 적용했습니다."
+             if event['discount'] else '이벤트 비용 할인 없음.'),
             (f"흔적 복구를 쓰는 것으로 계산했습니다(적용 구간 {', '.join(str(x)+'성' for x in sorted(set(restore_used)))})."
              if restore_used else '흔적 복구는 쓰지 않는 것으로 계산했습니다. 파괴 시 12성으로 떨어집니다.'),
         ] + ([f"안전모드는 15~17성에서만 쓸 수 있어 {', '.join(str(x)+'성' for x in ignored_safeguard)} 요청은 반영하지 않았습니다."]
