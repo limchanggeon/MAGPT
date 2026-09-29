@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.3 릴리스(수익 대시보드, 업데이트 시 자동 백업). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.4 릴리스(자동 업데이트·업데이터 분리, 수익 캐릭터 목록). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1164,3 +1164,11 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   0.3.5로 켜서 기록(7억) 그대로, 버전 백업 `v0.3.4-to-v0.3.5` 생성. 데모+WebKit으로 알림·설정 버전 줄 확인.
 - 주의: **0.3.3 이하에는 업데이터가 없어** 0.3.4로는 한 번 직접 설치해야 한다(릴리스 설명에 적을 것). 버전은 아직 0.3.3(릴리스 전).
 - 미검증: Windows 실제 업데이트(파일 잠금 재시도 포함), 업데이트 뒤 `open`으로 다시 켜기(시험 때 기존 메피티와 포트가 겹쳐 확인 못 함), GitHub API 한도(시간당 60회, 켤 때 한 번이라 충분할 것).
+
+### 2026-09-29 — 릴리스 v0.3.4 (사용자: "ㅇㅇㅇ")
+
+- 버전 0.3.4(`cc20a39`), 브랜치 CI 두 OS 통과 후 `main` 빨리감기(`fda3de6..cc20a39`), 태그, 릴리스 작업 성공.
+  파일 5개: `Mepiti-Windows-Setup.exe`(30.0MB)·`Mepiti-macOS.dmg`(33.7MB)·`Mepiti-Windows-update.zip`(34.6MB)·`Mepiti-macOS-update.zip`(30.0MB)·`SHA256SUMS.txt`.
+  GitHub API `releases/latest`가 v0.3.4와 5개 파일을 돌려줌(앱의 확인 경로). mac update.zip을 받아 SHA256이 SHA256SUMS와 일치.
+  릴리스 설명에 업데이트 방법(0.3.3 이하는 한 번 직접 설치) 적음. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.4
+- 다음 릴리스(0.3.5)가 실제 자동 업데이트의 첫 실전이다. 그때 Windows·Mac에서 알림 → 업데이트 → 재실행을 확인할 것.
