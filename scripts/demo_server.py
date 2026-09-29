@@ -7,6 +7,7 @@ AI 답변은 로컬 Ollama를 그대로 쓴다.
 예:
   .venv/bin/python scripts/demo_server.py --port 8790
   .venv/bin/python scripts/demo_server.py --port 8791 --first-run   # 모델을 고르지 않은 첫 실행 화면
+  .venv/bin/python scripts/demo_server.py --port 8791 --first-run --no-key   # API 키도 없는 첫 실행 화면
 """
 import argparse
 import json
@@ -21,9 +22,11 @@ from mepiti.core import AppError, now  # noqa: E402
 
 
 class FakeVault:
-    def get(self): return 'demo-key'
-    def save(self, key): pass
-    def delete(self): pass
+    """키는 메모리에만 둔다. 실제 키체인을 건드리지 않는다."""
+    key = 'demo-key'
+    def get(self): return type(self).key
+    def save(self, key): type(self).key = key
+    def delete(self): type(self).key = None
 
 
 class FakeNexon:
@@ -35,6 +38,8 @@ class FakeNexon:
         return dict(self.profile, retrieved_at=now())
 
     def characters(self):
+        if FakeVault.key == 'bad':          # 첫 실행 화면에서 잘못된 키를 시험할 때
+            raise AppError('API 키 인증에 실패했습니다.', 401)
         p = self.profile
         return {'characters': [{'name': p['name'], 'world': p.get('world'), 'job': p.get('job'), 'level': p.get('level')}],
                 'retrieved_at': now(), 'source_url': 'demo'}
@@ -51,11 +56,14 @@ def main():
     parser.add_argument('--port', type=int, default=8790)
     parser.add_argument('--model', default='qwen3.5:2b')
     parser.add_argument('--first-run', action='store_true', help='모델을 고르지 않은 상태로 띄운다')
+    parser.add_argument('--no-key', action='store_true', help='API 키가 없는 상태로 띄운다(키 bad는 인증 실패로 응답)')
     args = parser.parse_args()
 
     profile = json.loads(Path(args.profile).read_text(encoding='utf-8'))
     folder = tempfile.mkdtemp(prefix='mepiti-demo-')
     server.Vault = FakeVault
+    if args.no_key:
+        FakeVault.key = None
     app = server.Application(folder)
     app.vault = FakeVault()
     app.nexon = FakeNexon(profile)

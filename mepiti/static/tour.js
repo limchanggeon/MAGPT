@@ -117,9 +117,9 @@ function tourEnd(done){
   if(done)guard(()=>api('tour',{done:true}));
 }
 
-// 처음 실행하면 한 번 보여 준다. AI 모델 준비 카드가 떠 있는 동안은 그것부터 끝내게 기다린다.
+// 처음 실행하면 한 번 보여 준다. API 키 연결·AI 모델 준비 카드가 떠 있는 동안은 그것부터 끝내게 기다린다.
 function maybeStartTour(status){
-  if(tour.started||status.tour_done||!$('#setup-card').hidden)return;
+  if(tour.started||status.tour_done||!$('#key-card').hidden||!$('#setup-card').hidden)return;
   tour.started=true;setTimeout(()=>{tour.started=false;tourStart();},450);
 }
 
