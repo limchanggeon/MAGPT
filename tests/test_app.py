@@ -213,7 +213,9 @@ class CharacterAnalysisTests(unittest.TestCase):
         facts=context.as_text(context.build(self.PROFILE,{'goal':'세렌','budget':100}))
         self.assertIn('제네시스 창세검',facts)
         self.assertIn('1추',facts);self.assertIn('98급',facts)
-        self.assertIn('반지2: 0성',facts)          # 스타포스가 낮은 부위로 추려진다
+        gaps=facts.split('[스타포스가 낮은 부위]')[1]
+        self.assertIn('성 (',gaps)                   # 스타포스가 낮은 부위로 추려진다
+        self.assertNotIn('이터널 플레임 링',gaps)  # 스타포스를 못 올리는 반지라 '낮은 부위'가 아니다
         self.assertIn('세렌',facts)
     def test_analysis_uses_model_text(self):
         r,model=self.ask('반지2가 0성이라 먼저 올릴 자리입니다.')
@@ -507,6 +509,26 @@ class StarforceConversationTests(CharacterAnalysisTests):
         self.assertEqual(r['starforce']['target_star'],22)
         self.assertEqual(r['starforce']['current_star'],18)
         self.assertEqual(r['starforce']['level'],160)
+    def test_special_ring_is_not_a_starforce_target(self):
+        # 사용자 확인(2026-09-29): 이터널 플레임 링·어웨이크 링·테네브리스 원정대 반지는 스타포스를 못 올린다.
+        conditions.clear(self.store)                            # 조건을 아직 안 고른 상태에서도
+        r,model=self.ask('서술','반지2 17성까지 기대값 얼마야?')
+        self.assertNotEqual(r['status'],'ask_conditions')     # 강화 조건을 헛되이 묻지 않는다
+        self.assertNotEqual(r['status'],'ask_price')
+        self.assertIn('올릴 수 없는 장비',model.seen)
+        self.assertIn('올릴 수 없는 장비',r['content'])          # 앱이 직접 쓴다
+    def test_seed_ring_is_excluded_by_level(self):
+        self.assertFalse(context.starforce_possible({'slot':'반지1','name':'리스트레인트 링','special_ring_level':4}))
+        self.assertFalse(context.starforce_possible({'slot':'반지3','name':'어웨이크 링'}))
+        self.assertTrue(context.starforce_possible({'slot':'반지1','name':'어센던트 펄스 링','special_ring_level':0}))
+        self.assertFalse(context.starforce_possible({'slot':'펜던트2','name':'정령의 펜던트','starforce':0,
+            'scroll_upgrade':0,'upgrade_slots_left':0,'upgrade_slots_restorable':0}))   # 업그레이드 횟수 0
+        self.assertTrue(context.starforce_possible({'slot':'펜던트2','name':'x','starforce':0,
+            'scroll_upgrade':0,'upgrade_slots_left':5,'upgrade_slots_restorable':0}))
+        self.assertTrue(context.starforce_possible({'slot':'펜던트2','name':'x','starforce':0,'scroll_upgrade':0}))  # 모르면 빼지 않는다
+        profile={'equipment':[{'slot':'반지1','name':'리스트레인트 링','starforce':0,'special_ring_level':4},
+                              {'slot':'벨트','name':'골든 클로버 벨트','starforce':18}]}
+        self.assertEqual([g['slot'] for g in context.starforce_gaps(profile)],['벨트'])
     def test_missing_target_star_is_reported(self):
         self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
         r,model=self.ask('서술','벨트 강화 기대값 알려줘')

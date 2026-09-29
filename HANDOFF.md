@@ -873,3 +873,19 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   실제 Windows 사용자도 아이콘을 두 번 누르면 메피티가 둘 뜨고 한쪽이 먹통이 됐을 문제다. `server.Server`로 Windows에서는 재사용을 끄고
   `SO_EXCLUSIVEADDRUSE`로 잡게 고쳤다. 테스트 `test_port_in_use_is_refused` 추가(283개 통과, Mac).
 - 미검증: Windows 창(WebView2)·어두운 제목 표시줄·아이콘, Windows 두 번째 실행 시 앞으로 가져오기(실기). CI 결과는 아래 후속에 적는다.
+- 후속(2026-09-29): 수정(`aa9c9b0`) 후 CI 두 OS 통과. Windows 테스트·Inno Setup(아이콘 포함)·PyInstaller 빌드 모두 성공, macOS 빌드(아이콘·Info.plist·재서명) 성공.
+  아직 `main` 병합·릴리스 전(v0.2.0에는 이번 변경이 없다). 다음: 사용자 확인 후 main 병합, `v0.2.1` 태그.
+
+### 2026-09-29 — 스타포스 불가 장비 제외, 0.2.1 릴리스 (사용자 결정: "그렇게 진행", "스타포스 못 올려")
+
+- 사용자 확인: 이터널 플레임 링·어웨이크 링·테네브리스 원정대 반지는 스타포스를 올릴 수 없다. (2026-09-28 평가에서 모든 모델이
+  '반지를 0성에서 올려라'라고 답하게 만든 원인이었다.)
+- 변경: `mepiti/context.py` `starforce_possible()`·`NO_STARFORCE_NAMES` — 위 3종, 시드링(`special_ring_level`>0),
+  업그레이드 횟수(주문서 강화+남은 횟수+복구 가능 횟수)가 모두 0이고 0성인 장비를 제외. 값이 응답에 없으면 제외하지 않는다.
+  `mepiti/adapters.py`에 `special_ring_level`·`upgrade_slots_left`·`upgrade_slots_restorable` 추가.
+  `mepiti/chat.py` — 이런 장비의 기대값 질문은 강화 조건을 묻기 전에 걸러 앱이 답 머리에 '올릴 수 없는 장비'라고 쓴다.
+  버전 0.2.1(`pyproject.toml`, `mepiti/__init__.py`, `scripts/installer.iss`). `IMPLEMENTATION.md` 갱신.
+- 업그레이드 횟수 규칙을 넣은 이유: 익명화한 실제 캐릭터 사실(`artifacts/eval_profile.json`)에서 반지 3종을 빼자 '정령의 펜던트 0성'이
+  맨 위로 올라왔다. 이 프로필은 새 필드가 생기기 전에 만든 것이라 그 필드가 없어 아직 걸러지지 않는다. 캐릭터를 다시 조회하면 적용된다(추정, 실응답 미확인).
+  필드명은 PyPI `maplestory-openapi` 래퍼 소스에서 확인했다(넥슨 문서 직접 대조는 못 함).
+- 검증(2026-09-29, 사용자 Mac): 자동 테스트 **285개 통과**(특수 반지 기대값 질문, 시드링·업그레이드 0 판정 추가, 기존 사실 묶음 테스트 수정).

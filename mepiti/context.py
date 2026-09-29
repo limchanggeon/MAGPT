@@ -69,13 +69,33 @@ def weakest_slots(profile, limit=5):
             + [{'slot': s, 'name': n, 'grade': 0, 'empty': True} for _, s, n in empty[:limit]])
 
 
+# 스타포스를 올릴 수 없는 특수 반지(사용자 확인 2026-09-29). 0성이어도 '강화 여지'가 아니다.
+NO_STARFORCE_NAMES = {'이터널 플레임 링', '어웨이크 링', '테네브리스 원정대 반지'}
+NO_STARFORCE_SLOTS = ('훈장', '뱃지', '칭호', '안드로이드', '포켓 아이템', '엠블렘', '보조무기')
+
+
+def starforce_possible(item):
+    """스타포스를 올릴 수 있는 장비인가.
+
+    시드링(리스트레인트 링 등)은 넥슨 응답의 special_ring_level로, 업그레이드 가능 횟수가 아예 없는 장비
+    (정령의 펜던트 등)는 주문서 강화·남은 횟수·복구 가능 횟수가 모두 0인 것으로 안다. 값이 없으면 판단하지 않는다.
+    """
+    if item.get('slot') in NO_STARFORCE_SLOTS or item.get('name') in NO_STARFORCE_NAMES:
+        return False
+    if item.get('special_ring_level'):
+        return False
+    slots = [item.get(k) for k in ('scroll_upgrade', 'upgrade_slots_left', 'upgrade_slots_restorable')]
+    if not item.get('starforce') and all(isinstance(v, int) for v in slots) and sum(slots) == 0:
+        return False
+    return True
+
+
 def starforce_gaps(profile, limit=5):
     """스타포스가 낮은 부위. 강화 여지가 있는 자리를 모델이 찾기 쉽게 추린다."""
     rows = []
     for item in profile.get('equipment') or []:
         star = item.get('starforce')
-        if isinstance(star, int) and item.get('slot') not in ('훈장', '뱃지', '칭호', '안드로이드',
-                                                              '포켓 아이템', '엠블렘', '보조무기'):
+        if isinstance(star, int) and starforce_possible(item):
             rows.append((star, item['slot'], item['name']))
     rows.sort()
     return [{'slot': s, 'name': n, 'starforce': st} for st, s, n in rows[:limit]]

@@ -528,6 +528,12 @@ def starforce_facts(store, profile, question, result):
     스페어(노작값)를 모르면 계산해도 총비용이 성립하지 않으므로 먼저 되묻는다.
     되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
     """
+    item = context.starforce_item(profile, question)
+    if item and not context.starforce_possible(item):   # 강화 조건을 묻기 전에 걸러야 헛질문이 없다
+        # 모델 서술을 버리는 경우에도 보이도록 앱이 직접 쓰는 답 머리에 둔다.
+        result['starforce_text'] = f"**{item['slot']} {item['name']}**은 스타포스를 올릴 수 없는 장비라 기대값을 계산하지 않았습니다."
+        return (f"\n\n[강화 기대값] {item['slot']}({item['name']})은 스타포스를 올릴 수 없는 장비라 계산하지 않았다. "
+                '그렇게 알려 줄 것.')
     if not conditions.answered(store):
         now_conditions = conditions.load(store)
         suggested, event = notices.suggested_event(store)
@@ -539,7 +545,6 @@ def starforce_facts(store, profile, question, result):
         if event:
             result['conditions'].insert(0, f"넥슨 공지 기준 지금 '{event['title']}' 진행 중이라 샤타포스를 미리 골라 두었습니다.")
         return None
-    item = context.starforce_item(profile, question)
     if not item:
         return '\n\n[강화 기대값] 어느 장비를 말하는지 몰라 계산하지 않았다. 부위나 장비 이름을 물어볼 것.'
     current = item['starforce']
