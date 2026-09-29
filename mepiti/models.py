@@ -1,6 +1,7 @@
 """사용자가 고를 수 있는 AI 모델과 추천.
 
-선택지는 세 개다. 클라우드(Gemini 무료)와 로컬 2B·8B.
+선택지는 다섯 개다. 클라우드(Gemini 무료, Claude·ChatGPT 유료)와 로컬 2B·8B.
+- Claude·ChatGPT: 2026-09-29 사용자 요청으로 추가. 무료 등급이 없어 추천하지 않고, 원하는 사람이 자기 키로 쓴다.
 - 클라우드: 설치할 것이 없고 가볍다. 사용자가 자기 Google 키를 넣는다. 질문과 캐릭터 사실이 Google로 간다.
   2026-09-29 사용자 결정으로 기본 추천이다.
 - 로컬: 2026-09-28 사용자 Mac(M4/16GB)에서 scripts/eval_models.py로 비교한 결과(HANDOFF.md '가벼운 모델 찾기')로 골랐다.
@@ -20,6 +21,17 @@ PRESETS = [
      # 근거: Gemini API 추가 약관의 무료 서비스 조항(개선에 사용, 사람 검토 가능, 만 18세 이상). 2026-09-29 확인.
      'note': '가장 가볍고 답이 좋다. Google API 키(무료)가 필요하다. 질문과 캐릭터 정보가 Google로 전송되며, '
              '무료 등급에서는 Google이 제품 개선에 쓰거나 사람이 검토할 수 있다. 만 18세 이상. 무료 한도를 넘으면 잠시 기다려야 한다.'},
+    # 유료 클라우드. 무료 등급이 없고 선불 크레딧이 필요하다(2026-09-29 기준). 모델은 설정에서 고른다(adapters.CLAUDE_MODELS 등).
+    {'id': 'claude', 'model': 'claude', 'label': '클라우드 · Claude (유료)', 'cloud': True,
+     'download_gb': 0, 'memory_gb': 0, 'license': 'Anthropic 상용 약관',
+     'fits': '설치 없이 바로. 쓴 만큼 결제',
+     'note': 'Anthropic의 Claude. 선불 크레딧 충전이 필요하다(Claude Pro 구독과는 별개). 질문 1번에 대략 8~40원(모델에 따라). '
+             '질문과 캐릭터 정보가 Anthropic으로 전송된다.'},
+    {'id': 'openai', 'model': 'openai', 'label': '클라우드 · ChatGPT (유료)', 'cloud': True,
+     'download_gb': 0, 'memory_gb': 0, 'license': 'OpenAI 상용 약관',
+     'fits': '설치 없이 바로. 쓴 만큼 결제',
+     'note': 'OpenAI의 GPT 모델. 선불 크레딧 충전이 필요하다(ChatGPT Plus 구독과는 별개). 질문 1번에 대략 1~85원(모델에 따라). '
+             '질문과 캐릭터 정보가 OpenAI로 전송된다.'},
     {'id': 'light', 'model': 'qwen3.5:2b', 'label': '2B · 가벼움',
      'download_gb': 2.7, 'memory_gb': 2.4, 'license': 'Apache 2.0',
      'fits': 'VRAM 4GB(GTX 1650 등)에서 게임과 함께',
@@ -55,14 +67,16 @@ def recommend(system):
     return 'light'
 
 
-def describe(system, installed, selected, cloud_key=False):
+def describe(system, installed, selected, cloud_keys=False):
     """화면에 보여 줄 선택지. 설치·사용 상태와 추천을 붙인다.
 
-    recommended는 전체 추천(클라우드), fits_device는 로컬 중 이 기기에 맞는 쪽이다.
-    클라우드의 installed는 'Gemini 키가 있다'는 뜻이다.
+    recommended는 전체 추천(클라우드 Gemini), fits_device는 로컬 중 이 기기에 맞는 쪽이다.
+    클라우드의 installed는 '그 회사 키가 있다'는 뜻이다. cloud_keys는 {제공자: 키 있음}(예전처럼 bool이면 Gemini).
     """
+    if not isinstance(cloud_keys, dict):
+        cloud_keys = {CLOUD_MODEL: bool(cloud_keys)}
     local = recommend(system)
-    return [{**p, 'installed': cloud_key if p.get('cloud') else p['model'] in installed,
+    return [{**p, 'installed': bool(cloud_keys.get(p['model'])) if p.get('cloud') else p['model'] in installed,
              'selected': p['model'] == selected, 'recommended': p['id'] == RECOMMENDED,
              'fits_device': p['id'] == local} for p in PRESETS]
 

@@ -1,6 +1,6 @@
 ; 메피티 Windows 설치 프로그램 (Inno Setup 6)
 ;
-; 마법사 흐름: 설치 폴더 -> AI 모델 선택(클라우드/2B/8B/나중에) -> Ollama 설치(로컬 모델을 고르고 없을 때만) -> 설치
+; 마법사 흐름: 설치 폴더 -> AI 모델 선택(Gemini·Claude·ChatGPT/2B/8B/나중에) -> Ollama 설치(로컬 모델을 고르고 없을 때만) -> 설치
 ; 클라우드(Gemini 무료)가 기본 추천이다. 설치할 것이 없고, 첫 실행에서 Google API 키를 넣는다.
 ; 로컬 모델 파일(2.7~4.8GB)은 여기서 받지 않는다. 고른 값을 %USERPROFILE%\.mepiti\setup.json에 남기면
 ; 앱이 첫 실행에서 진행률과 함께 받고 사용 모델로 정한다(mepiti/models.py). 모델을 받으려면 Ollama가
@@ -75,8 +75,10 @@ end;
 // 모델 선택지 순서. setup.json에 남기는 값과 앱(mepiti/models.py)의 id가 짝이다.
 const
   ChoiceCloud = 0;
-  ChoiceLight = 1;
-  ChoiceQuality = 2;
+  ChoiceClaude = 1;
+  ChoiceOpenAI = 2;
+  ChoiceLight = 3;
+  ChoiceQuality = 4;
 
 function LocalModelChosen: Boolean;
 begin
@@ -101,6 +103,8 @@ begin
     True, False);
   ModelPage.Add('클라우드 · 무료 (Gemini) — 추천. 설치할 것이 없고 그래픽카드와 상관없습니다. ' +
                 '처음 실행할 때 Google API 키(무료)를 넣으면 됩니다. 질문과 캐릭터 정보가 Google로 전송됩니다(만 18세 이상).');
+  ModelPage.Add('클라우드 · Claude (유료) — 선불 크레딧이 있는 Anthropic API 키가 필요합니다. 질문 1번에 대략 8~40원.');
+  ModelPage.Add('클라우드 · ChatGPT (유료) — 선불 크레딧이 있는 OpenAI API 키가 필요합니다. 질문 1번에 대략 1~85원.');
   ModelPage.Add('2B · 가벼움' + LightFit + ' — 내 PC에서만 실행. 내려받기 2.7GB, 메모리 약 2.4GB. VRAM 4GB(GTX 1650 등)에서 게임과 함께 쓰기 좋습니다.');
   ModelPage.Add('8B · 품질' + QualityFit + ' — 내 PC에서만 실행. 내려받기 4.8GB, 메모리 약 5.2GB. VRAM 8GB 이상 권장. 2B보다 3~4배 느립니다.');
   ModelPage.Add('나중에 고르기');
@@ -168,6 +172,8 @@ begin
 
   case ModelPage.SelectedValueIndex of
     ChoiceCloud: Choice := 'cloud';
+    ChoiceClaude: Choice := 'claude';
+    ChoiceOpenAI: Choice := 'openai';
     ChoiceLight: Choice := 'light';
     ChoiceQuality: Choice := 'quality';
   else

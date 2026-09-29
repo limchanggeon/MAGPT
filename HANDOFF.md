@@ -1069,3 +1069,22 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 버전 0.3.1, 브랜치 CI(`be28ba3`) 두 OS 통과 후 `main` 빨리감기(`fd75226..be28ba3`), 태그, 릴리스 작업 성공.
   `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB), 한국어 설명, `latest` 링크 HTTP 200. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.1
 - 미검증: Windows에서 경매장 창(WebView2) 로그인·요청, 로그인 유지 기간, 다른 곳에서 경매장을 열 때 풀리는지.
+
+### 2026-09-29 — Claude·ChatGPT 연결 (사용자 요청: "클로드랑 챗지피티도 연결할 수 있게 세팅")
+
+- 변경:
+  - `mepiti/adapters.py` — `Claude`(공식 Anthropic SDK, claude-api 스킬 기준: 기본 `claude-opus-5`, effort low, Opus 5에 `fallbacks: "default"`,
+    구조화 출력, refusal 처리, 오류 분류), `OpenAI`(Responses API REST, 기본 `gpt-6-sol`, reasoning low 재시도, `text.format` 구조화 출력),
+    공용 `cloud_messages`·`cloud_failure`, 모델 목록 `CLAUDE_MODELS`·`OPENAI_MODELS`(질문당 비용 어림 라벨), `CLOUD_PROVIDERS`, `ModelRouter`가 제공자 dict/함수를 받음.
+  - `mepiti/models.py` — 프리셋 `claude`·`openai`(유료, 추천 아님), `describe`가 회사별 키 여부 dict를 받음.
+  - `mepiti/server.py` — `claude`·`openai` 객체(키 보관 `anthropic-api-key`·`openai-api-key`, 모델 설정 `claude_model`·`openai_model`), `clouds` 속성,
+    `cloud_status(provider)`(choices 포함), `connect_cloud_key(key, use, provider)`, `choose_cloud_model`, `status.clouds`, `/api/cloud/model`, 키 없는 클라우드 프리셋 → `need_key`+provider.
+  - `mepiti/static/app.js`·`style.css` — `CLOUDS`(회사별 키 받는 순서), `cloudKeyForm(provider)`, 연결된 클라우드마다 모델 고르기·키 바꾸기·삭제, 상단 표시 'Claude · Opus 5'.
+  - `scripts/installer.iss` — 모델 페이지에 Claude·ChatGPT(유료) 추가(순서: Gemini·Claude·ChatGPT·2B·8B·나중에). `scripts/build.py` — `--collect-submodules anthropic`.
+    `pyproject.toml` — `anthropic>=1.9,<2`. `scripts/demo_server.py` — `FakePaidCloud`(키 `sk-bad…`는 거절).
+  - 테스트 `PaidCloudTests` 6개 + 기존 3개 수정. README(유료 클라우드 안내·문제 해결), IMPLEMENTATION.
+- 사실 확인(2026-09-29): claude-api 스킬(모델 ID·SDK 사용법·fallbacks), OpenAI 모델 문서(GPT-6 Astra/Sol/Luna, Responses API 권장), 구조화 출력 문서.
+  두 회사 모두 무료 API 등급 없음(선불 크레딧) — 일반 지식 기준, 공식 문서로 재확인은 못 함.
+- 검증: 자동 테스트 326개 통과. `scripts/build.py`로 Mac 앱 재빌드(46MB) → 패키지 앱(임시 데이터)에 가짜 키: Anthropic·OpenAI 실제 서버가 거절 → 앱 문구로 표시, 키 저장 안 됨.
+  데모 서버+WebKit: 다섯 카드, Claude 키 입력(거절·연결), 상단 'Claude · Opus 5' → 모델을 Sonnet 5로 바꾸면 반영, 대화 답변이 Claude(가짜)로 감. 페이지 오류 없음.
+- 미검증: 실제 유료 키로 답변(키 없음), 콘솔 메뉴 이름(Create Key 등)의 실제 표기, Windows 설치 마법사 새 선택지 화면(컴파일은 CI).

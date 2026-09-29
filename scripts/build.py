@@ -8,7 +8,7 @@ root=Path(__file__).resolve().parents[1]
 os_name=platform.system()
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','Mepiti','--collect-data','mepiti','--collect-submodules','keyring.backends',
       # 앱 창(pywebview). 운영체제별 창 모듈을 빠뜨리지 않게 통째로 넣는다.
-      '--collect-all','webview']
+      '--collect-all','webview','--collect-submodules','anthropic']
 icon=root/'scripts'/'icon'
 if os_name=='Darwin':args+=['--windowed','--onedir','--osx-bundle-identifier','local.mepiti.app','--icon',str(icon/'Mepiti.icns')]
 elif os_name=='Windows':args+=['--windowed','--onedir','--icon',str(icon/'Mepiti.ico')]   # 앱 창이 있으니 콘솔 창은 띄우지 않는다

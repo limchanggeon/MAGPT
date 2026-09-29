@@ -328,3 +328,15 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
   요청 방식은 maple-auction-mcp(MIT) 참고. 헤더 버전은 페이지가 보내는 값을 따른다(2026-09-29 실측 1.0.2). 쿠키는 읽지 않는다.
 - 노작값 조회기로 붙음(`prices.register_fetcher`): 판매 중 검색, 이름 정확 일치, 가장 싼 매물. 설정에서 연결 확인 시 자동 조회를 켠다. 실패 이유는 되묻기 문구에 붙는다.
 - 확인(2026-09-29): 자동 테스트 318개, 사용자 Mac 실기 — 로그인·연결·남은 횟수·노작값 1건 자동 저장, 값이 경매장 화면과 일치(사용자 확인). Windows 미확인.
+
+## 2026-09-29 Claude·ChatGPT(유료 클라우드) 추가
+
+- 선택지 다섯 개: Gemini(무료, 추천)·Claude·ChatGPT(유료, 사용자 키)·2B·8B. 설치 마법사·첫 실행·설정에서 고른다.
+- `adapters.Claude`: 공식 Anthropic Python SDK(`anthropic` 1.9, 의존성 추가). 모델 기본 `claude-opus-5`, 설정에서 Sonnet 5·Haiku 4.5.
+  effort low(Haiku 제외), Opus 5는 서버 쪽 거절 대비 `fallbacks: "default"`(`server-side-fallback-2026-07-01`). 근거 고르기는 `output_config.format` JSON 스키마.
+  키 확인은 토큰을 쓰지 않는 `models.retrieve`. 오류: invalid·model·quota·billing(크레딧)·unverified.
+- `adapters.OpenAI`: Responses API(REST). 모델 기본 `gpt-6-sol`(OpenAI 문서의 일반 대화 권장), Luna·Astra. reasoning low(거절되면 빼고 기억), 구조화 출력 `text.format`.
+  키 확인은 `GET /models/{model}`. 오류: 401/403 invalid, 404 model, 429 insufficient_quota → billing, 그 밖 429 → quota.
+- 서버: 키는 회사별 보관(`anthropic-api-key`, `openai-api-key`), `status.clouds`, `/api/cloud/key/connect|delete`에 provider, `/api/cloud/model`.
+- 확인(2026-09-29): 자동 테스트 326개. 패키지한 Mac 앱에서 가짜 키 → Anthropic·OpenAI 실제 서버가 거절, 쉬운 문구로 표시(SDK 번들 확인). 데모 서버(가짜 회사)+WebKit으로
+  키 입력·거절·연결·모델 변경·대화 답변 경로 확인. **실제 유료 키로 답변은 미확인.**

@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mepiti import conditions, server  # noqa: E402
-from mepiti.adapters import CLOUD_MODEL, gemini_error  # noqa: E402
+from mepiti.adapters import CLOUD_MODEL, cloud_failure, gemini_error  # noqa: E402
 from mepiti.core import AppError, now  # noqa: E402
 
 
@@ -55,6 +55,28 @@ class FakeGemini:
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False):
         return '(데모) 클라우드 모델 자리입니다. 데모 서버는 실제 Gemini를 부르지 않습니다.', {}
+
+    def select(self, model, question, passages):
+        return [0], {}
+
+
+class FakePaidCloud:
+    """실제 회사를 부르지 않는 Claude·ChatGPT. 'sk-bad'로 시작하는 키는 거절한 것처럼 응답한다."""
+    def __init__(self, real, name):
+        self.vault, self.MODELS, self.model_setting, self.name = real.vault, real.MODELS, real.model_setting, name
+
+    @property
+    def model(self):
+        chosen = self.model_setting()
+        return chosen if chosen in dict(self.MODELS) else self.MODELS[0][0]
+
+    def check(self, key=None):
+        if (key or '').startswith('sk-bad'):
+            raise cloud_failure('invalid', f'{self.name}가 이 API 키를 받아 주지 않았어요(데모).')
+        return self.model
+
+    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+        return f'(데모) {self.name} {self.model} 자리입니다. 데모 서버는 실제 회사를 부르지 않습니다.', {}
 
     def select(self, model, question, passages):
         return [0], {}
@@ -118,7 +140,9 @@ def main():
     app.vault = FakeVault()
     app.nexon = FakeNexon(profile)
     app.nexon_for = lambda key: FakeNexon(profile, key)
-    app.gemini = app.model.cloud = FakeGemini(app.cloud_vault)
+    app.gemini = FakeGemini(app.cloud_vault)
+    app.claude = FakePaidCloud(app.claude, 'Claude')
+    app.openai = FakePaidCloud(app.openai, 'ChatGPT')
     if args.cloud and not args.first_run:
         app.cloud_vault.save('AIza-demo-key-000000000000')
         args.model = CLOUD_MODEL

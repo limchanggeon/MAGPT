@@ -102,6 +102,15 @@ AI 모델은 **설정 → AI 모델**에서 언제든 바꿀 수 있습니다. �
 - 무료 사용 한도가 있습니다(2026-09-29 기준 분당 15회, 하루 500회. 한도는 키마다 따로입니다). 넘으면 AI 설명만 잠시 빠지고, 계산 결과 숫자는 그대로 보여 줍니다. 1분쯤 뒤, 하루 한도면 다음 날 다시 됩니다.
 - 키는 이 컴퓨터의 보안 저장소에만 저장됩니다. 설정에서 바꾸거나 지울 수 있습니다.
 
+**Claude·ChatGPT도 쓸 수 있습니다 (유료).** 설정 → AI 모델에서 **Claude 키 넣고 쓰기** / **ChatGPT 키 넣고 쓰기**를 누르면 키 받는 순서가 나옵니다.
+
+- 둘 다 무료 등급이 없어 **선불 크레딧 충전**이 필요합니다. Claude Pro·ChatGPT Plus 구독과는 별개입니다.
+  - Claude: [platform.claude.com](https://platform.claude.com/settings/keys) → 결제(Billing)에서 충전 → API Keys → Create Key (`sk-ant-`로 시작)
+  - ChatGPT: [platform.openai.com](https://platform.openai.com/api-keys) → Billing에서 충전 → API keys → Create new secret key (`sk-`로 시작)
+- 모델은 키를 넣은 뒤 설정에서 고릅니다. Claude는 Opus 5(기본)·Sonnet 5·Haiku 4.5, ChatGPT는 GPT-6 Sol(기본)·Luna·Astra.
+- 질문 1번 비용은 대략 Claude 8~40원, ChatGPT 1~85원입니다(모델에 따라, 입력 3천·출력 6백 토큰과 1달러 1,400원으로 어림).
+- 질문과 캐릭터 정보가 각 회사로 전송됩니다. 키는 이 컴퓨터의 보안 저장소에만 저장되고, 넣을 때 그 회사에 먼저 확인해 거절된 키는 저장하지 않습니다.
+
 **어느 쪽이든 숫자는 같습니다.** 스타포스 기대값 같은 숫자는 AI가 아니라 앱이 계산하고, AI는 설명만 덧붙입니다. 클라우드는 설명이 가장 좋고 컴퓨터를 쓰지 않습니다.
 로컬 8B는 2B보다 설명이 매끄럽고, 2B는 훨씬 빠르고 가볍습니다. 그래픽 메모리가 부족한 컴퓨터에서 8B를 쓰면 게임과 메모리를 나눠 쓰느라 둘 다 느려질 수 있습니다.
 (로컬 측정: 2026-09-28, Apple M4 / 16GB. GTX 1650 실측은 아직 없습니다. 자세한 비교는 [HANDOFF.md](HANDOFF.md) '가벼운 모델 찾기'.)
@@ -146,6 +155,7 @@ AI 없이도 캐릭터 조회·장비 보기·스타포스 계산은 다 됩니�
 | "앱 연결 실패" 알림 | 메피티가 꺼져 있습니다. 앱을 다시 실행한 뒤 새로고침하세요. |
 | "Ollama가 실행 중이 아닙니다" | Ollama 앱을 실행한 뒤 **다시 확인**을 누르세요. Windows는 시작 메뉴, Mac은 응용 프로그램 폴더에 있습니다. |
 | "Gemini 무료 사용 한도를 넘었어요" | 1분쯤 뒤에 다시 물어보세요. 하루 한도면 다음 날 풀립니다. 그동안 계산 결과 숫자는 그대로 나옵니다. 급하면 설정에서 로컬 모델로 바꿀 수 있습니다. |
+| "Claude API 크레딧이 없어요" / "OpenAI API 크레딧이 없어요" | 각 회사 개발자 사이트의 결제(Billing)에서 크레딧을 충전하세요. 구독(Pro·Plus)과는 별개입니다. |
 | "Google이 이 Gemini API 키를 받아 주지 않았어요" | 키를 다시 복사해 붙여 넣거나 [Google AI Studio](https://aistudio.google.com/apikey)에서 새로 만드세요. |
 | AI 모델 내려받기가 멈춤 | 인터넷 연결과 남은 저장 공간을 확인하고 설정의 AI 모델에서 다시 누르세요. |
 | 캐릭터 목록이 안 나옴 | API 키를 확인하세요. 발급 직후에는 몇 분 걸릴 수 있습니다. |
@@ -276,7 +286,7 @@ Windows 설치 파일은 AI 모델(클라우드 기본·2B·8B·나중에)을 �
 
 - `mepiti/server.py`: loopback HTTP 서버, API 라우팅, Origin/Host/세션 토큰 검사, 정적 UI
 - `mepiti/core.py`: SQLite, 검토/유효성, 검색, 용어 사전, 계산
-- `mepiti/adapters.py`: 넥슨 허용 API, OS 키체인, Ollama, Gemini(클라우드), 모델 라우터, OCR
+- `mepiti/adapters.py`: 넥슨 허용 API, OS 키체인, Ollama, 클라우드(Gemini·Claude·OpenAI), 모델 라우터, OCR
 - `mepiti/chat.py`: 대화 저장, 조건 확인, 보류, 출처 연결 원문 발췌
 - `mepiti/static/`: 빌드 없는 한국어 반응형 UI
 - `scripts/`: 가져오기, 합성 근거 선택 평가, 배포 빌드

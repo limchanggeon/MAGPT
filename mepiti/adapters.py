@@ -769,13 +769,225 @@ def gemini_error(code, detail):
     return error
 
 
+def cloud_messages(messages):
+    """지시문(system)과 대화(user/assistant)를 나눈다. 대화는 user로 시작해야 하므로 앞의 assistant는 뺀다."""
+    system = '\n'.join(m['content'] for m in messages if m['role'] == 'system')
+    rest = [{'role': m['role'], 'content': m['content']} for m in messages if m['role'] in ('user', 'assistant')]
+    while rest and rest[0]['role'] != 'user':
+        rest.pop(0)
+    return system, rest
+
+
+def cloud_failure(kind, message, status=502, detail=''):
+    error = AppError(message, 400 if kind in ('invalid', 'model') else status)
+    error.kind, error.detail = kind, detail[:300]
+    return error
+
+
+# 사용자가 고를 수 있는 유료 클라우드 모델. 값은 (모델 ID, 화면 이름). 첫 항목이 기본이다.
+# 비용은 질문 한 번에 입력 약 3,000토큰·출력 약 600토큰, 1달러 1,400원으로 어림한 값이다(2026-09-29 공시 단가).
+CLAUDE_MODELS = (('claude-opus-5', 'Opus 5 · 기본 · 질문당 약 40원'),
+                 ('claude-sonnet-5', 'Sonnet 5 · 질문당 약 17원'),
+                 ('claude-haiku-4-5', 'Haiku 4.5 · 질문당 약 8원'))
+OPENAI_MODELS = (('gpt-6-sol', 'GPT-6 Sol · 기본 · 질문당 약 17원'),
+                 ('gpt-6-luna', 'GPT-6 Luna · 질문당 약 1원'),
+                 ('gpt-6-astra', 'GPT-6 Astra · 질문당 약 85원'))
+
+
+class Claude:
+    """Anthropic Claude API(유료). 사용자가 자기 키를 넣는다. 공식 Python SDK(anthropic)로 부른다.
+
+    이 앱은 모델에게 추론을 맡기지 않으므로 effort는 low로 둔다(Haiku 4.5는 effort를 받지 않는다).
+    Opus 5는 안전 분류기가 거절하면 서버가 다른 모델로 다시 돌리도록 fallbacks: "default"를 켠다.
+    """
+    MODELS = CLAUDE_MODELS
+
+    def __init__(self, vault, model_setting=lambda: None):
+        self.vault = vault
+        self.model_setting = model_setting
+
+    @property
+    def model(self):
+        chosen = self.model_setting()
+        return chosen if chosen in dict(self.MODELS) else self.MODELS[0][0]
+
+    def client(self, key=None):
+        import anthropic
+        key = key or self.vault.get()
+        if not key:
+            raise AppError('설정에서 Claude API 키를 넣어 주세요.', 400)
+        return anthropic.Anthropic(api_key=key, timeout=120.0, max_retries=2)
+
+    def failure(self, e, model):
+        import anthropic
+        text = str(getattr(e, 'message', '') or e)
+        if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+            return cloud_failure('invalid', 'Anthropic이 이 Claude API 키를 받아 주지 않았어요. 키를 다시 복사하거나 새로 만들어 붙여 넣으세요.', detail=text)
+        if isinstance(e, anthropic.NotFoundError):
+            return cloud_failure('model', f'이 키로는 {model} 모델을 쓸 수 없어요. 설정에서 다른 Claude 모델을 골라 보세요.', detail=text)
+        if isinstance(e, anthropic.RateLimitError):
+            return cloud_failure('quota', 'Claude 요청 한도를 넘었어요. 잠시 뒤에 다시 해 보세요. 계산 결과는 그대로 보여 드려요.', detail=text)
+        if isinstance(e, anthropic.BadRequestError) and 'credit' in text.lower():
+            return cloud_failure('billing', 'Claude API 크레딧이 없어요. platform.claude.com의 결제(Billing)에서 충전해 주세요.', detail=text)
+        if isinstance(e, anthropic.APIConnectionError):
+            return cloud_failure('unverified', 'Claude에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.', 503, text)
+        status = getattr(e, 'status_code', None)
+        return cloud_failure('unverified', f'Claude 서버에서 오류가 났어요({status or "?"}). 잠시 뒤 다시 해 보세요.', detail=text)
+
+    def check(self, key=None):
+        """키가 맞고 고른 모델을 쓸 수 있는지. 토큰을 쓰지 않는 모델 조회로 확인한다."""
+        import anthropic
+        model = self.model
+        try:
+            self.client(key).models.retrieve(model)
+        except anthropic.AnthropicError as e:
+            raise self.failure(e, model)
+        return model
+
+    def generate(self, messages, output_config=None, max_tokens=16000):
+        import anthropic
+        model = self.model
+        system, turns = cloud_messages(messages)
+        config = dict(output_config or {})
+        if not model.startswith('claude-haiku'):
+            config.setdefault('effort', 'low')
+        request = {'model': model, 'max_tokens': max_tokens, 'messages': turns}
+        if system:
+            request['system'] = system
+        if config:
+            request['output_config'] = config
+        try:
+            client = self.client()
+            if model == 'claude-opus-5':
+                response = client.beta.messages.create(betas=['server-side-fallback-2026-07-01'], fallbacks='default', **request)
+            else:
+                response = client.messages.create(**request)
+        except anthropic.AnthropicError as e:
+            raise self.failure(e, model)
+        if response.stop_reason == 'refusal':
+            raise AppError('Claude가 이 질문에는 답하지 않았어요. 질문을 바꿔 보세요.', 502)
+        text = ''.join(block.text for block in response.content if block.type == 'text')
+        return text, {'eval_count': getattr(response.usage, 'output_tokens', None), 'model': response.model}
+
+    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
+        return written_text(text), meta
+
+    def select(self, model, question, passages):
+        schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
+                  'required': ['ids'], 'additionalProperties': False}
+        text, meta = self.generate(select_messages(question, passages), {'format': {'type': 'json_schema', 'schema': schema}})
+        return selected_ids(text, passages), meta
+
+
+class OpenAI:
+    """OpenAI API(유료, ChatGPT 모델). 사용자가 자기 키를 넣는다. Responses API를 REST로 부른다.
+
+    추론은 low로 줄인다. 모델이 그 설정을 받지 않으면(400에 reasoning이 적혀 옴) 빼고 다시 부르고 기억한다.
+    """
+    BASE = 'https://api.openai.com/v1'
+    MODELS = OPENAI_MODELS
+
+    def __init__(self, vault, model_setting=lambda: None):
+        self.vault = vault
+        self.model_setting = model_setting
+        self.plain = set()
+
+    @property
+    def model(self):
+        chosen = self.model_setting()
+        return chosen if chosen in dict(self.MODELS) else self.MODELS[0][0]
+
+    def call(self, method, path, body=None, key=None, timeout=120):
+        key = key or self.vault.get()
+        if not key:
+            raise AppError('설정에서 OpenAI API 키를 넣어 주세요.', 400)
+        request = Request(self.BASE + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                          headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'})
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read(8_000_000))
+        except HTTPError as e:
+            try:
+                detail = json.loads(e.read(16384)).get('error') or {}
+            except (ValueError, AttributeError, OSError):
+                detail = {}
+            raise self.failure(e.code, detail)
+        except (URLError, TimeoutError, OSError, ValueError):
+            raise cloud_failure('unverified', 'OpenAI에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.', 503)
+
+    def failure(self, code, detail):
+        text = str(detail.get('message') or '') if isinstance(detail, dict) else ''
+        kind_code = str(detail.get('code') or detail.get('type') or '') if isinstance(detail, dict) else ''
+        if code in (401, 403):
+            return cloud_failure('invalid', 'OpenAI가 이 API 키를 받아 주지 않았어요. 키를 다시 복사하거나 새로 만들어 붙여 넣으세요.', detail=text)
+        if code == 404:
+            return cloud_failure('model', f'이 키로는 {self.model} 모델을 쓸 수 없어요. 설정에서 다른 모델을 골라 보세요.', detail=text)
+        if code == 429 and 'insufficient_quota' in kind_code:
+            return cloud_failure('billing', 'OpenAI API 크레딧이 없어요. platform.openai.com의 결제(Billing)에서 충전해 주세요.', detail=text)
+        if code == 429:
+            return cloud_failure('quota', 'OpenAI 요청 한도를 넘었어요. 잠시 뒤에 다시 해 보세요. 계산 결과는 그대로 보여 드려요.', detail=text)
+        return cloud_failure('unverified', f'OpenAI 서버에서 오류가 났어요({code}). 잠시 뒤 다시 해 보세요.', detail=text)
+
+    def check(self, key=None):
+        model = self.model
+        self.call('GET', f'/models/{model}', key=key, timeout=20)
+        return model
+
+    def generate(self, messages, extra=None, max_output_tokens=8000):
+        model = self.model
+        system, turns = cloud_messages(messages)
+        body = {'model': model, 'input': ([{'role': 'system', 'content': system}] if system else []) + turns,
+                'max_output_tokens': max_output_tokens, **(extra or {})}
+        if model not in self.plain:
+            body['reasoning'] = {'effort': 'low'}
+        try:
+            result = self.call('POST', '/responses', body)
+        except AppError as e:
+            if 'reasoning' not in str(getattr(e, 'detail', '')).lower() or 'reasoning' not in body:
+                raise
+            self.plain.add(model)
+            body.pop('reasoning')
+            result = self.call('POST', '/responses', body)
+        text = ''
+        for item in result.get('output') or []:
+            if not isinstance(item, dict) or item.get('type') != 'message':
+                continue
+            for part in item.get('content') or []:
+                if part.get('type') == 'refusal':
+                    raise AppError('ChatGPT가 이 질문에는 답하지 않았어요. 질문을 바꿔 보세요.', 502)
+                if part.get('type') == 'output_text':
+                    text += part.get('text') or ''
+        usage = result.get('usage') or {}
+        return text, {'eval_count': usage.get('output_tokens'), 'model': result.get('model') or model}
+
+    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
+        return written_text(text), meta
+
+    def select(self, model, question, passages):
+        schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
+                  'required': ['ids'], 'additionalProperties': False}
+        text, meta = self.generate(select_messages(question, passages),
+                                   {'text': {'format': {'type': 'json_schema', 'name': 'evidence_ids', 'schema': schema, 'strict': True}}})
+        return selected_ids(text, passages), meta
+
+
+# 설정의 사용 모델 값 → 클라우드 제공자. 값이 이 목록에 없으면 로컬(Ollama) 모델 이름이다.
+CLOUD_PROVIDERS = (CLOUD_MODEL, 'claude', 'openai')
+
+
 class ModelRouter:
-    """고른 모델에 따라 로컬(Ollama)이나 클라우드(Gemini)로 보낸다. 나머지(상태·다운로드)는 로컬 몫이다."""
-    def __init__(self, local, cloud):
-        self.local, self.cloud = local, cloud
+    """고른 모델에 따라 로컬(Ollama)이나 클라우드(Gemini·Claude·OpenAI)로 보낸다. 나머지(상태·다운로드)는 로컬 몫이다.
+
+    clouds는 {제공자: 객체} 또는 그것을 돌려주는 함수(앱이 제공자 객체를 바꿔 끼워도 따라가게).
+    """
+    def __init__(self, local, clouds):
+        self.local, self.clouds = local, clouds
 
     def _for(self, model):
-        return self.cloud if model == CLOUD_MODEL else self.local
+        clouds = self.clouds() if callable(self.clouds) else self.clouds
+        return clouds.get(model) or self.local
 
     def analyse(self, model, *args, **kwargs):
         return self._for(model).analyse(model, *args, **kwargs)

@@ -1584,8 +1584,10 @@ class GeminiTests(unittest.TestCase):
             def __init__(self, name): self.name = name
             def analyse(self, model, *a, **k): return self.name, {}
             def status(self): return {'connected': True, 'models': []}
-        router = ModelRouter(Fake('local'), Fake('cloud'))
+        router = ModelRouter(Fake('local'), lambda: {'gemini': Fake('cloud'), 'claude': Fake('claude'), 'openai': Fake('openai')})
         self.assertEqual(router.analyse('gemini', 'f', 'q')[0], 'cloud')
+        self.assertEqual(router.analyse('claude', 'f', 'q')[0], 'claude')
+        self.assertEqual(router.analyse('openai', 'f', 'q')[0], 'openai')
         self.assertEqual(router.analyse('qwen3.5:2b', 'f', 'q')[0], 'local')
         self.assertEqual(router.status()['connected'], True)
 
@@ -1607,13 +1609,13 @@ class CloudChoiceTests(unittest.TestCase):
     def status(self):
         with patch.object(Ollama, 'status', return_value={'connected': False, 'models': []}):
             return self.app.status()
-    def test_three_choices_cloud_recommended(self):
+    def test_choices_cloud_recommended(self):
         presets = self.status()['presets']
-        self.assertEqual([p['id'] for p in presets], ['cloud', 'light', 'quality'])
+        self.assertEqual([p['id'] for p in presets], ['cloud', 'claude', 'openai', 'light', 'quality'])
         self.assertEqual([p['id'] for p in presets if p['recommended']], ['cloud'])
     def test_cloud_without_key_asks_for_key(self):
         r = self.app.route('POST', '/api/model/preset', {}, {'id': 'cloud'})
-        self.assertEqual(r, {'need_key': True}); self.assertEqual(self.app.store.setting('model'), '')
+        self.assertEqual(r, {'need_key': True, 'provider': 'gemini'}); self.assertEqual(self.app.store.setting('model'), '')
     def test_rejected_key_not_saved(self):
         with self.assertRaises(AppError): self.app.connect_cloud_key('AIza-rejected-key-000000', use=True)
         self.assertIsNone(self.app.cloud_vault.key); self.assertEqual(self.app.store.setting('model'), '')
@@ -1641,3 +1643,90 @@ class CloudChoiceTests(unittest.TestCase):
         self.app.connect_cloud_key('AIza-good-key-0000000000', use=True)
         self.app.route('POST', '/api/cloud/key/delete', {}, {})
         self.assertIsNone(self.app.cloud_vault.key); self.assertFalse(self.status()['ready'])
+
+
+class PaidCloudTests(unittest.TestCase):
+    """Claude·ChatGPT(유료, 사용자 키). 실제 회사 서버는 부르지 않는다."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.app = Application(self.tmp.name)
+        self.app.claude.vault = KeyConnectTests.MemoryVault(); self.app.openai.vault = KeyConnectTests.MemoryVault()
+    def tearDown(self): self.tmp.cleanup()
+    def status(self):
+        with patch.object(Ollama, 'status', return_value={'connected': False, 'models': []}):
+            return self.app.status()
+    def test_claude_default_model_and_choice(self):
+        self.assertEqual(self.app.claude.model, 'claude-opus-5')
+        self.app.route('POST', '/api/cloud/model', {}, {'provider': 'claude', 'model': 'claude-sonnet-5'})
+        self.assertEqual(self.app.claude.model, 'claude-sonnet-5')
+        with self.assertRaises(AppError):
+            self.app.route('POST', '/api/cloud/model', {}, {'provider': 'claude', 'model': 'gpt-6-sol'})
+        self.assertEqual(self.app.openai.model, 'gpt-6-sol')
+    def test_connect_use_and_ready(self):
+        with patch.object(type(self.app.claude), 'check', return_value='claude-opus-5'):
+            r = self.app.route('POST', '/api/cloud/key/connect', {}, {'provider': 'claude', 'key': 'sk-ant-test-key-000000000', 'use': True})
+        self.assertEqual(r, {'state': 'ok', 'model': 'claude-opus-5'})
+        st = self.status()
+        self.assertEqual(st['selected_model'], 'claude'); self.assertTrue(st['ready'])
+        self.assertTrue(st['clouds']['claude']['key_present']); self.assertFalse(st['clouds']['openai']['key_present'])
+        self.assertEqual([c['id'] for c in st['clouds']['claude']['choices']][0], 'claude-opus-5')
+        self.assertEqual(self.app.route('POST', '/api/model/preset', {}, {'id': 'openai'}), {'need_key': True, 'provider': 'openai'})
+    def test_rejected_key_not_saved(self):
+        from mepiti.adapters import cloud_failure
+        with patch.object(type(self.app.openai), 'check', side_effect=cloud_failure('invalid', '거절')):
+            with self.assertRaises(AppError):
+                self.app.connect_cloud_key('sk-test-key-000000000000000', True, 'openai')
+        self.assertIsNone(self.app.openai.vault.key)
+    def test_claude_request_shape(self):
+        # Opus 5: 서버 쪽 거절 대비(fallbacks default), effort low, 지시문은 system으로, 대화는 user부터.
+        seen = {}
+        class Block:
+            def __init__(self, t): self.type, self.text = 'text', t
+        class Resp:
+            stop_reason = 'end_turn'; model = 'claude-opus-5'; content = [Block('벨트부터 보세요.')]
+            usage = type('U', (), {'output_tokens': 9})()
+        class FakeMessages:
+            def create(self, **kw): seen.update(kw); return Resp()
+        class FakeClient:
+            messages = FakeMessages(); beta = type('B', (), {'messages': FakeMessages()})()
+        with patch.object(type(self.app.claude), 'client', return_value=FakeClient()):
+            text, meta = self.app.claude.analyse('claude', '벨트: 18성', '어디부터?', [{'role': 'assistant', 'content': '이전 답'}])
+        self.assertEqual(text, '벨트부터 보세요.'); self.assertEqual(meta['eval_count'], 9)
+        self.assertEqual((seen['model'], seen['fallbacks'], seen['betas']), ('claude-opus-5', 'default', ['server-side-fallback-2026-07-01']))
+        self.assertEqual(seen['output_config'], {'effort': 'low'})
+        self.assertIn('메이플스토리', seen['system']); self.assertEqual(seen['messages'][0]['role'], 'user')
+        # Haiku는 effort를 받지 않고, fallbacks도 붙이지 않는다.
+        self.app.store.set_setting('claude_model', 'claude-haiku-4-5'); seen.clear()
+        with patch.object(type(self.app.claude), 'client', return_value=FakeClient()):
+            Resp.content = [Block('{"ids": [0]}')]
+            ids, _ = self.app.claude.select('claude', '질문', [{'id': 0, 'text': 'a'}])
+        self.assertEqual(ids, [0]); self.assertNotIn('fallbacks', seen)
+        self.assertNotIn('effort', seen['output_config']); self.assertEqual(seen['output_config']['format']['type'], 'json_schema')
+    def test_claude_errors_are_told_plainly(self):
+        import anthropic, httpx2
+        req = httpx2.Request('POST', 'https://api.anthropic.com/v1/messages')
+        def err(cls, code, msg):
+            return cls(msg, response=httpx2.Response(code, request=req), body=None)
+        c = self.app.claude
+        self.assertEqual(c.failure(err(anthropic.AuthenticationError, 401, 'invalid x-api-key'), 'm').kind, 'invalid')
+        self.assertEqual(c.failure(err(anthropic.RateLimitError, 429, 'rate'), 'm').kind, 'quota')
+        self.assertEqual(c.failure(err(anthropic.BadRequestError, 400, 'Your credit balance is too low'), 'm').kind, 'billing')
+        self.assertEqual(c.failure(err(anthropic.NotFoundError, 404, 'model'), 'm').kind, 'model')
+    def test_openai_request_and_errors(self):
+        sent = []
+        def fake_call(method, path, body=None, key=None, timeout=120):
+            sent.append(json.loads(json.dumps(body)))
+            if 'reasoning' in body:
+                from mepiti.adapters import cloud_failure
+                raise cloud_failure('unverified', 'x', detail="Unsupported parameter: 'reasoning.effort'")
+            return {'model': 'gpt-6-sol', 'usage': {'output_tokens': 5},
+                    'output': [{'type': 'reasoning'}, {'type': 'message', 'content': [{'type': 'output_text', 'text': '좋아요.'}]}]}
+        o = self.app.openai
+        with patch.object(o, 'call', side_effect=fake_call):
+            text, _ = o.analyse('openai', 'f', 'q')
+            o.analyse('openai', 'f', 'q')
+        self.assertEqual(text, '좋아요.')
+        self.assertEqual(sent[0]['input'][0]['role'], 'system'); self.assertEqual(sent[0]['reasoning'], {'effort': 'low'})
+        self.assertNotIn('reasoning', sent[1]); self.assertEqual(len(sent), 3)      # 거절되면 빼고, 다음부터는 처음부터 뺀다
+        self.assertEqual(o.failure(429, {'code': 'insufficient_quota'}).kind, 'billing')
+        self.assertEqual(o.failure(429, {'code': 'rate_limit_exceeded'}).kind, 'quota')
+        self.assertEqual(o.failure(401, {}).kind, 'invalid')

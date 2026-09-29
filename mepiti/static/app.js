@@ -382,7 +382,7 @@ $('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
   toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
   await loadForgeHistory();
 });
-async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.ready;const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?modelLabel(s):s.selected_model?'모델 연결 필요':'모델 선택 필요'),el('span','','↗'));$('#model-status').textContent=`클라우드: Gemini 키 ${(s.cloud||{}).key_present?'연결됨':'없음'} · 로컬: `+(s.model.connected?`Ollama 연결됨, 모델 ${s.model.models.length}개`:'Ollama 꺼짐');const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);return s;}
+async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.ready;const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?modelLabel(s):s.selected_model?'모델 연결 필요':'모델 선택 필요'),el('span','','↗'));$('#model-status').textContent=`클라우드 키: ${Object.entries(s.clouds||{}).filter(([,c])=>c.key_present).map(([p])=>CLOUDS[p].name).join(', ')||'없음'} · 로컬: `+(s.model.connected?`Ollama 연결됨, 모델 ${s.model.models.length}개`:'Ollama 꺼짐');const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);return s;}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){
@@ -447,22 +447,48 @@ $('#model-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{awai
 $('#pull-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('model/pull',formData(e.target));pollDownload();});};
 function progressText(d){return (d.status||'대기')+(d.total?` · ${Math.round((d.completed||0)/d.total*100)}% (${(d.completed/1e9).toFixed(2)} / ${(d.total/1e9).toFixed(2)} GB)`:'');}
 async function pollDownload(){clearTimeout(downloadTimer);try{const d=await api('download');$$('.download-status').forEach(e=>e.textContent=progressText(d));$('#pull-form button').disabled=d.running;$$('.preset-card button').forEach(b=>b.disabled=d.running);if(d.running)downloadTimer=setTimeout(pollDownload,1500);else await loadStatus();}catch(e){toast(e.message,true);$('#pull-form button').disabled=false;}}
-// AI 모델 선택: 클라우드(Gemini 무료)·2B·8B. 앱이 정하지 않고 사용자가 고른다(설치 마법사·첫 실행·설정).
+// AI 모델 선택: 클라우드(Gemini 무료, Claude·ChatGPT 유료)·2B·8B. 앱이 정하지 않고 사용자가 고른다(설치 마법사·첫 실행·설정).
 // 첫 실행 카드와 설정 화면이 같은 선택 화면(modelChooser)을 쓴다.
 const CLOUD='gemini';
-let setupSkipped=false,setupAutoStarted=false,ollamaTimer,cloudFormOpen=false,cloudFormUse=false,localHelpOpen=false;
+const b=(text)=>el('b','',text),code=(text)=>el('code','',text),link=(url,text)=>sourceLink(url,text);
+// 클라우드마다 키 받는 법. 유료(Claude·ChatGPT)는 선불 크레딧이 필요하고 구독(Pro·Plus)과는 별개다.
+const CLOUDS={
+  gemini:{name:'Gemini',company:'Google',title:'Gemini API 키 받기 (무료)',
+    steps:[[link('https://aistudio.google.com/apikey','Google AI Studio ↗'),'에 들어가 Google 계정으로 로그인하세요.'],
+           [b('Get API key'),'(API 키 받기) → ',b('Create API key'),'(API 키 만들기)를 누르세요. 약관 창이 뜨면 동의하세요.'],
+           ['만들어진 키(',code('AIza'),'로 시작하는 긴 글자)를 복사해 아래 칸에 붙여 넣으세요.']],
+    // 문구 근거: Gemini API 추가 약관(무료 서비스) — 제공·개선에 사용, 사람이 검토할 수 있음, 만 18세 이상. 2026-09-29 확인.
+    hint:'결제 정보는 넣지 않아도 돼요. 질문과 캐릭터 정보가 Google로 전송되고, 무료 등급에서는 Google이 제품 개선에 쓰거나 사람이 검토할 수 있어요. Google 약관상 만 18세 이상만 쓸 수 있어요. 키는 이 컴퓨터의 보안 저장소에만 보관돼요.'},
+  claude:{name:'Claude',company:'Anthropic',title:'Claude API 키 받기 (유료)',
+    steps:[[link('https://platform.claude.com/settings/keys','Claude 개발자 콘솔 ↗'),'에 들어가 로그인하세요(처음이면 가입).'],
+           [b('결제(Billing)'),'에서 크레딧을 충전하세요. 선불이며 Claude Pro 구독과는 별개예요.'],
+           [b('API Keys'),' → ',b('Create Key'),'를 누르고 이름(예: 메피티)을 적으세요.'],
+           ['만들어진 키(',code('sk-ant-'),'로 시작)를 복사해 아래 칸에 붙여 넣으세요. 키는 만들 때 한 번만 보여요.']],
+    hint:'질문과 캐릭터 정보가 Anthropic으로 전송돼요. 쓴 만큼 크레딧에서 빠져요(질문 1번에 대략 8~40원, 모델에 따라). 키는 이 컴퓨터의 보안 저장소에만 보관돼요.'},
+  openai:{name:'ChatGPT',company:'OpenAI',title:'OpenAI API 키 받기 (유료)',
+    steps:[[link('https://platform.openai.com/api-keys','OpenAI 개발자 플랫폼 ↗'),'에 들어가 로그인하세요(ChatGPT 계정으로도 돼요).'],
+           [b('Billing'),'에서 크레딧을 충전하세요. 선불이며 ChatGPT Plus 구독과는 별개예요.'],
+           [b('API keys'),' → ',b('Create new secret key'),'를 누르세요.'],
+           ['만들어진 키(',code('sk-'),'로 시작)를 복사해 아래 칸에 붙여 넣으세요. 키는 만들 때 한 번만 보여요.']],
+    hint:'질문과 캐릭터 정보가 OpenAI로 전송돼요. 쓴 만큼 크레딧에서 빠져요(질문 1번에 대략 1~85원, 모델에 따라). 키는 이 컴퓨터의 보안 저장소에만 보관돼요.'},
+};
+// cloudFormOpen: 키 입력을 연 클라우드 이름(없으면 null). cloudFormUse: 연결하면 바로 사용 모델로 정할지.
+let setupSkipped=false,setupAutoStarted=false,ollamaTimer,cloudFormOpen=null,cloudFormUse=false,localHelpOpen=false;
 function rerenderModels(){if(lastStatus){renderPresets(lastStatus);renderSetup(lastStatus);}}
-function modelLabel(s){return s.selected_model===CLOUD?`Gemini · 클라우드`:s.selected_model;}
+function cloudModelName(s,provider){const c=(s.clouds||{})[provider]||{};const hit=(c.choices||[]).find(x=>x.id===c.model);return hit?hit.label.split(' · ')[0]:(c.model||'');}
+function modelLabel(s){const p=s.selected_model;return CLOUDS[p]?`${CLOUDS[p].name} · ${p===CLOUD?'클라우드':cloudModelName(s,p)}`:p;}
+function openCloudForm(provider,use){
+  cloudFormOpen=provider;cloudFormUse=use;rerenderModels();
+  // 입력칸이 카드들 아래에 생기므로 보이게 하고 바로 붙여 넣게 둔다.
+  const form=[...$$('.cloud-key')].find(e=>e.offsetParent);if(form){form.scrollIntoView({block:'nearest',behavior:'smooth'});form.querySelector('input').focus({preventScroll:true});}
+}
 async function choosePreset(id){
   const r=await api('model/preset',{id});
-  if(r.need_key){   // Gemini 키부터 받는다. 입력칸이 카드들 아래에 생기므로 보이게 하고 바로 붙여 넣게 둔다.
-    cloudFormOpen=true;cloudFormUse=true;rerenderModels();
-    const form=[...$$('.cloud-key')].find(e=>e.offsetParent);if(form){form.scrollIntoView({block:'nearest',behavior:'smooth'});form.querySelector('input').focus({preventScroll:true});}
-    return;}
-  if(r.selected){toast(`${r.selected===CLOUD?'클라우드(Gemini)':r.selected}를 사용합니다.`);await loadStatus();}else pollDownload();
+  if(r.need_key){openCloudForm(r.provider||CLOUD,true);return;}   // 그 회사 키부터 받는다
+  if(r.selected){toast(`${CLOUDS[r.selected]?CLOUDS[r.selected].name:r.selected}를 사용합니다.`);await loadStatus();}else pollDownload();
 }
 function presetCard(p,s){
-  const busy=s.download.running,card=el('div','preset-card'+(p.cloud?' cloud':'')+(p.selected?' selected':''));
+  const busy=s.download.running,card=el('div','preset-card'+(p.id==='cloud'?' cloud':'')+(p.selected?' selected':''));
   const top=el('div','preset-top');top.append(el('strong','',p.label));
   if(p.recommended)top.append(el('span','badge gold','추천'));else if(p.fits_device)top.append(el('span','badge','이 기기에 맞음'));
   if(p.selected)top.append(el('span','badge','사용 중'));else if(p.installed)top.append(el('span','badge',p.cloud?'키 연결됨':'받아 둠'));
@@ -471,30 +497,26 @@ function presetCard(p,s){
   (p.cloud?['설치 없음','인터넷 필요',p.license]:[`모델 ${p.model}`,`내려받기 ${p.download_gb}GB`,`메모리 약 ${p.memory_gb}GB`,p.license]).forEach(t=>meta.append(el('span','',t)));
   card.append(meta);
   const localBlocked=!p.cloud&&!s.model.connected;      // 로컬은 Ollama가 떠 있어야 받고 쓸 수 있다
-  const label=p.selected?'사용 중':p.cloud?(p.installed?'이 모델 쓰기':'Gemini 키 넣고 쓰기'):localBlocked?'Ollama 필요':p.installed?'이 모델 쓰기':`받고 쓰기 (${p.download_gb}GB)`;
+  const label=p.selected?'사용 중':p.cloud?(p.installed?'이 모델 쓰기':`${CLOUDS[p.model].name} 키 넣고 쓰기`):localBlocked?'Ollama 필요':p.installed?'이 모델 쓰기':`받고 쓰기 (${p.download_gb}GB)`;
   const button=el('button',p.selected?'secondary':'primary',label);button.type='button';button.disabled=p.selected||(busy&&!p.cloud);
   button.onclick=()=>{if(localBlocked){localHelpOpen=true;rerenderModels();return;}task(button,()=>choosePreset(p.id));};
   card.append(button);return card;
 }
-// Gemini 키 받는 법과 입력칸. 결제 정보 없이 Google 계정만으로 받는다.
-function cloudKeyForm(){
-  const box=el('div','cloud-key');box.append(el('h3','','Gemini API 키 받기 (무료)'));
-  const steps=el('ol','key-steps');
-  const first=el('li');first.append(sourceLink('https://aistudio.google.com/apikey','Google AI Studio ↗'),document.createTextNode('에 들어가 Google 계정으로 로그인하세요.'));
-  const second=el('li');second.append(el('b','','Get API key'),document.createTextNode('(API 키 받기) → '),el('b','','Create API key'),document.createTextNode('(API 키 만들기)를 누르세요. 약관 창이 뜨면 동의하세요.'));
-  const third=el('li');third.append(document.createTextNode('만들어진 키('),el('code','','AIza'),document.createTextNode('로 시작하는 긴 글자)를 복사해 아래 칸에 붙여 넣으세요.'));
-  steps.append(first,second,third);box.append(steps);
-  const form=el('form','key-card-form');const input=el('input');input.type='password';input.name='key';input.required=true;input.autocomplete='off';input.maxLength=200;input.placeholder='복사한 Gemini API 키 붙여 넣기';input.setAttribute('aria-label','Gemini API 키');
+// 키 받는 법과 입력칸. 키는 그 회사에 먼저 확인하고, 거절된 키는 저장하지 않는다.
+function cloudKeyForm(provider){
+  const info=CLOUDS[provider],box=el('div','cloud-key');box.append(el('h3','',info.title));
+  const steps=el('ol','key-steps');info.steps.forEach(parts=>{const li=el('li');parts.forEach(x=>li.append(typeof x==='string'?document.createTextNode(x):x));steps.append(li);});box.append(steps);
+  const form=el('form','key-card-form');const input=el('input');input.type='password';input.name='key';input.required=true;input.autocomplete='off';input.maxLength=300;input.placeholder=`복사한 ${info.name} API 키 붙여 넣기`;input.setAttribute('aria-label',`${info.name} API 키`);
   const submit=el('button','primary','연결');submit.type='submit';form.append(input,submit);box.append(form);
   const status=el('p','notice');status.hidden=true;status.setAttribute('role','status');box.append(status);
-  // 문구 근거: Gemini API 추가 약관(무료 서비스) — 제공·개선에 사용, 사람이 검토할 수 있음, 만 18세 이상. 2026-09-29 확인.
-  box.append(el('p','hint','결제 정보는 넣지 않아도 돼요. 질문과 캐릭터 정보가 Google로 전송되고, 무료 등급에서는 Google이 제품 개선에 쓰거나 사람이 검토할 수 있어요. Google 약관상 만 18세 이상만 쓸 수 있어요. 키는 이 컴퓨터의 보안 저장소에만 보관돼요.'));
+  box.append(el('p','hint',info.hint));
+  const cancel=el('button','secondary','닫기');cancel.type='button';cancel.onclick=()=>{cloudFormOpen=null;rerenderModels();};box.append(cancel);
   form.onsubmit=e=>{e.preventDefault();task(submit,async()=>{
     status.hidden=true;let r;
-    try{r=await api('cloud/key/connect',{key:input.value,use:cloudFormUse});}
-    catch(err){status.textContent=err.message;status.hidden=false;return;}          // Google이 거절한 키는 저장하지 않았다
-    cloudFormOpen=false;
-    toast(r.state==='ok'?`Gemini를 연결했어요(${r.model}).${cloudFormUse?' 이제 답변에 씁니다.':''}`:`키를 저장했어요. 지금은 Google에서 확인하지 못했어요(${r.message}).`);
+    try{r=await api('cloud/key/connect',{provider,key:input.value,use:cloudFormUse});}
+    catch(err){status.textContent=err.message;status.hidden=false;return;}          // 거절된 키는 저장하지 않았다
+    cloudFormOpen=null;
+    toast(r.state==='ok'?`${info.name}를 연결했어요(${r.model}).${cloudFormUse?' 이제 답변에 씁니다.':''}`:`키를 저장했어요. 지금은 ${info.company}에서 확인하지 못했어요(${r.message}).`);
     await loadStatus();});};
   return box;
 }
@@ -518,15 +540,23 @@ function ollamaHelp(s){
 }
 function modelChooser(s){
   const parts=[],grid=el('div','model-presets');(s.presets||[]).forEach(p=>grid.append(presetCard(p,s)));parts.push(grid);
-  const cloud=s.cloud||{};
-  if(cloudFormOpen)parts.push(cloudKeyForm());
-  else if(cloud.key_present){
-    const row=el('div','cloud-row');row.append(el('span','',`Gemini 키 연결됨${cloud.model?' · '+cloud.model:''}`));
-    const change=el('button','secondary','키 바꾸기');change.type='button';change.onclick=()=>{cloudFormOpen=true;cloudFormUse=s.selected_model===CLOUD;rerenderModels();};
-    const remove=el('button','secondary','키 삭제');remove.type='button';remove.onclick=()=>task(remove,async()=>{if(!confirm('저장된 Gemini API 키를 삭제합니다.'))return;await api('cloud/key/delete',{});await loadStatus();toast('Gemini 키를 삭제했습니다.');});
+  if(cloudFormOpen)parts.push(cloudKeyForm(cloudFormOpen));
+  // 키를 넣어 둔 클라우드마다: 연결 상태, (유료는) 모델 고르기, 키 바꾸기·삭제.
+  Object.entries(s.clouds||{gemini:s.cloud||{}}).forEach(([provider,c])=>{
+    const info=CLOUDS[provider];if(!info)return;
+    if(c.vault_error)parts.push(el('p','notice',c.vault_error));
+    if(!c.key_present||cloudFormOpen===provider)return;
+    const row=el('div','cloud-row');row.append(el('span','',`${info.name} 키 연결됨`+(provider===CLOUD&&c.model?' · '+c.model:'')));
+    if((c.choices||[]).length){
+      const pick=el('select');pick.setAttribute('aria-label',`${info.name} 모델`);
+      c.choices.forEach(x=>{const o=el('option','',x.label);o.value=x.id;o.selected=x.id===c.model;pick.append(o);});
+      pick.onchange=()=>guard(async()=>{await api('cloud/model',{provider,model:pick.value});await loadStatus();toast(`${info.name} 모델을 바꿨어요.`);});
+      row.append(pick);
+    }
+    const change=el('button','secondary','키 바꾸기');change.type='button';change.onclick=()=>openCloudForm(provider,s.selected_model===provider);
+    const remove=el('button','secondary','키 삭제');remove.type='button';remove.onclick=()=>task(remove,async()=>{if(!confirm(`저장된 ${info.name} API 키를 삭제합니다.`))return;await api('cloud/key/delete',{provider});await loadStatus();toast(`${info.name} 키를 삭제했습니다.`);});
     row.append(change,remove);parts.push(row);
-  }
-  if(cloud.vault_error)parts.push(el('p','notice',cloud.vault_error));
+  });
   if(s.model.connected)clearInterval(ollamaTimer);
   else if(localHelpOpen||(s.ollama_setup||{}).running)parts.push(ollamaHelp(s));
   return parts;
@@ -589,14 +619,14 @@ function renderSetup(s){
   if(wasHidden)requestAnimationFrame(()=>{$('#chat-scroll').scrollTop=0;});
   const chosen=s.setup_choice&&(s.presets||[]).find(p=>p.id===s.setup_choice);
   // 설치 마법사에서 고른 것이 있으면 그 준비부터 보여 준다(클라우드는 키 입력, 로컬은 Ollama 확인 후 자동 다운로드).
-  if(chosen&&wasHidden){if(chosen.cloud&&!chosen.installed){cloudFormOpen=true;cloudFormUse=true;}if(!chosen.cloud&&!s.model.connected)localHelpOpen=true;}
+  if(chosen&&wasHidden){if(chosen.cloud&&!chosen.installed){cloudFormOpen=chosen.model;cloudFormUse=true;}if(!chosen.cloud&&!s.model.connected)localHelpOpen=true;}
   card.replaceChildren(el('h2','','AI 모델 준비'));
-  card.append(el('p','',chosen?(chosen.cloud?'설치할 때 클라우드(Gemini)를 골랐어요. 아래에 Gemini API 키를 넣으면 바로 쓸 수 있어요.'
+  card.append(el('p','',chosen?(chosen.cloud?`설치할 때 ${CLOUDS[chosen.model].name}를 골랐어요. 아래에 API 키를 넣으면 바로 쓸 수 있어요.`
                                             :`설치할 때 고른 ${chosen.label} 모델을 받습니다. 끝나면 바로 쓸 수 있습니다.`)
                                :'답변을 쓸 AI를 고르세요. 설치할 것이 없는 클라우드를 추천해요. 나중에 설정에서 바꿀 수 있습니다.'));
   card.append(...modelChooser(s));
   card.append(el('p','download-status',s.download.running||s.download.status?progressText(s.download):''));
-  const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;cloudFormOpen=false;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
+  const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;cloudFormOpen=null;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
   if(chosen&&!chosen.cloud&&!chosen.installed&&s.model.connected&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
 }
 (async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');const [,status]=await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');checkSavedKey(status);}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();

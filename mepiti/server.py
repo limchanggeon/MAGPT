@@ -12,8 +12,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .adapters import (CLOUD_MODEL, FixedKey, Gemini, ModelRouter, Nexon, Ollama, Vault, install_ollama_mac,
-                       key_problem, recognize, system_info)
+from .adapters import (CLOUD_MODEL, CLOUD_PROVIDERS, Claude, FixedKey, Gemini, ModelRouter, Nexon, Ollama, OpenAI, Vault,
+                       install_ollama_mac, key_problem, recognize, system_info)
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
@@ -84,7 +84,10 @@ class Application:
         self.nexon = CachedNexon(Nexon(self.vault))
         self.cloud_vault = Vault('gemini-api-key', 'Gemini API 키')
         self.gemini = Gemini(self.cloud_vault)
-        self.model = ModelRouter(Ollama(), self.gemini)   # 고른 모델에 따라 로컬·클라우드로 보낸다
+        # 유료 클라우드. 키는 회사마다 따로, 모델은 설정값 claude_model·openai_model(없으면 첫 항목).
+        self.claude = Claude(Vault('anthropic-api-key', 'Claude API 키'), lambda: self.store.setting('claude_model') or None)
+        self.openai = OpenAI(Vault('openai-api-key', 'OpenAI API 키'), lambda: self.store.setting('openai_model') or None)
+        self.model = ModelRouter(Ollama(), lambda: self.clouds)   # 고른 모델에 따라 로컬·클라우드로 보낸다
         self.auction = None                               # 앱 창으로 실행하면 desktop.run이 붙인다(mepiti/auction.py)
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
@@ -102,11 +105,12 @@ class Application:
         ollama = self.model.status()
         system = system_info(self.store.folder)
         selected = self.store.setting('model')
-        cloud = self.cloud_status()
-        # 답변을 쓸 준비가 됐는가. 클라우드는 키가 있으면, 로컬은 Ollama에 그 모델이 있으면.
-        ready = cloud['key_present'] if selected == CLOUD_MODEL else bool(selected) and selected in ollama['models']
-        return {'version':__version__,'model':ollama,'selected_model':selected,'ready':ready,'cloud':cloud,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
-                'presets':models.describe(system,ollama['models'],selected,cloud['key_present']),
+        clouds = {name: self.cloud_status(name) for name in CLOUD_PROVIDERS}
+        cloud = clouds[CLOUD_MODEL]
+        # 답변을 쓸 준비가 됐는가. 클라우드는 그 회사 키가 있으면, 로컬은 Ollama에 그 모델이 있으면.
+        ready = clouds[selected]['key_present'] if selected in clouds else bool(selected) and selected in ollama['models']
+        return {'version':__version__,'model':ollama,'selected_model':selected,'ready':ready,'cloud':cloud,'clouds':clouds,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
+                'presets':models.describe(system,ollama['models'],selected,{n:c['key_present'] for n,c in clouds.items()}),
                 'setup_choice':models.setup_choice(self.store.folder) if not selected else None,
                 'ollama_setup':dict(self.ollama_setup),
                 'tour_done':self.store.setting('tour_done')=='1'}
@@ -166,34 +170,54 @@ class Application:
             return state
         return self.auction.status()
 
-    def cloud_status(self):
+    @property
+    def clouds(self):
+        """클라우드 제공자. 테스트·데모가 self.gemini 등을 바꿔 끼워도 따라가도록 매번 모은다."""
+        return {CLOUD_MODEL: self.gemini, 'claude': self.claude, 'openai': self.openai}
+
+    def cloud_status(self, provider=CLOUD_MODEL):
+        engine = self.clouds[provider]
         try:
-            present, error = bool(self.cloud_vault.get()), None
+            present, error = bool(engine.vault.get()), None
         except AppError as e:
             present, error = False, str(e)
-        return {'key_present':present,'vault_error':error,
-                'model':self.gemini.model or self.store.setting('cloud_model') or None}
+        if provider == CLOUD_MODEL:
+            model, choices = engine.model or self.store.setting('cloud_model') or None, []
+        else:
+            model, choices = engine.model, [{'id': m, 'label': label} for m, label in engine.MODELS]
+        return {'key_present':present,'vault_error':error,'model':model,'choices':choices}
 
-    def connect_cloud_key(self, key, use=False):
-        """Gemini 키를 먼저 시험하고 저장한다. Google이 거절한 키는 저장하지 않는다. use면 사용 모델도 클라우드로 정한다."""
+    def connect_cloud_key(self, key, use=False, provider=CLOUD_MODEL):
+        """클라우드 키를 먼저 시험하고 저장한다. 회사가 거절한 키는 저장하지 않는다. use면 사용 모델도 그 클라우드로 정한다."""
+        if provider not in self.clouds:
+            raise AppError('알 수 없는 클라우드입니다.')
+        engine = self.clouds[provider]
         key = key.strip()
-        if not 20 <= len(key) <= 200 or any(c.isspace() for c in key):
-            raise AppError('Gemini API 키 형식을 확인해 주세요. 복사한 키를 그대로 붙여 넣으면 됩니다.')
+        if not 20 <= len(key) <= 300 or any(c.isspace() for c in key):
+            raise AppError('API 키 형식을 확인해 주세요. 복사한 키를 그대로 붙여 넣으면 됩니다.')
         state = {'state':'ok'}
         try:
-            state['model'] = self.gemini.check(key)
+            state['model'] = engine.check(key)
         except AppError as e:
-            if getattr(e, 'kind', 'unverified') in ('invalid', 'region'):
+            if getattr(e, 'kind', 'unverified') in ('invalid', 'region', 'model'):
                 raise AppError(str(e), 400)
-            # 인터넷·일시 오류면 키가 맞을 수도 있다. 저장하고 쓸 때 다시 확인한다.
+            # 인터넷·일시 오류·크레딧 부족이면 키는 맞을 수 있다. 저장하고 쓸 때 다시 확인한다.
             state = {'state':'unverified','message':str(e)}
-        self.cloud_vault.save(key)
-        if state.get('model'):
+        engine.vault.save(key)
+        if provider == CLOUD_MODEL and state.get('model'):
             self.store.set_setting('cloud_model', state['model'])
         if use:
-            self.store.set_setting('model', CLOUD_MODEL)
+            self.store.set_setting('model', provider)
             models.clear_setup(self.store.folder)
         return state
+
+    def choose_cloud_model(self, provider, model):
+        """Claude·ChatGPT 중 쓸 모델(예: Opus 5·Sonnet 5). 목록에 있는 것만."""
+        engine = self.clouds.get(provider)
+        if provider == CLOUD_MODEL or engine is None or model not in dict(engine.MODELS):
+            raise AppError('고를 수 있는 모델이 아닙니다.')
+        self.store.set_setting(f'{provider}_model', model)
+        return self.cloud_status(provider)
 
     def forget_nexon_cache(self):
         cache = getattr(self.nexon, 'cache', None)
@@ -294,11 +318,15 @@ class Application:
             if path in ('/api/auction/open', '/api/auction/check'):
                 return self.auction_route(path)
             if path == '/api/cloud/key/connect':
-                return self.connect_cloud_key(required(data,'key',200), bool(data.get('use')))
+                return self.connect_cloud_key(required(data,'key',300), bool(data.get('use')), data.get('provider') or CLOUD_MODEL)
             if path == '/api/cloud/key/delete':
-                self.cloud_vault.delete()
-                self.gemini.model = None
+                provider = data.get('provider') or CLOUD_MODEL
+                if provider not in self.clouds: raise AppError('알 수 없는 클라우드입니다.')
+                self.clouds[provider].vault.delete()
+                if provider == CLOUD_MODEL: self.gemini.model = None
                 return {'ok':True}
+            if path == '/api/cloud/model':
+                return self.choose_cloud_model(required(data,'provider',20), required(data,'model',60))
             if path == '/api/tour':
                 # 사용법 안내를 끝냈는지. 앱 창(pywebview)은 브라우저 저장소가 남지 않을 수 있어 DB에 둔다.
                 s.set_setting('tour_done','1' if data.get('done') else '0')
@@ -316,12 +344,12 @@ class Application:
                 preset = models.by_id(required(data,'id',20))
                 if not preset: raise AppError('고를 수 있는 모델이 아닙니다.')
                 if preset.get('cloud'):
-                    # 클라우드는 받을 것이 없다. 키가 없으면 화면이 키 입력을 먼저 보여 준다.
-                    if not self.cloud_status()['key_present']:
-                        return {'need_key':True}
-                    s.set_setting('model',CLOUD_MODEL)
+                    # 클라우드는 받을 것이 없다. 키가 없으면 화면이 그 회사 키 입력을 먼저 보여 준다.
+                    if not self.cloud_status(preset['model'])['key_present']:
+                        return {'need_key':True,'provider':preset['model']}
+                    s.set_setting('model',preset['model'])
                     models.clear_setup(s.folder)
-                    return {'selected':CLOUD_MODEL}
+                    return {'selected':preset['model']}
                 if preset['model'] in self.model.status()['models']:
                     s.set_setting('model',preset['model'])
                     models.clear_setup(s.folder)
