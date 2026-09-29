@@ -11,7 +11,11 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','Mepiti
       '--collect-all','webview','--collect-submodules','anthropic']
 icon=root/'scripts'/'icon'
 if os_name=='Darwin':args+=['--windowed','--onedir','--osx-bundle-identifier','local.mepiti.app','--icon',str(icon/'Mepiti.icns')]
-elif os_name=='Windows':args+=['--windowed','--onedir','--icon',str(icon/'Mepiti.ico')]   # 앱 창이 있으니 콘솔 창은 띄우지 않는다
+elif os_name=='Windows':
+    args+=['--windowed','--onedir','--icon',str(icon/'Mepiti.ico'),   # 앱 창이 있으니 콘솔 창은 띄우지 않는다
+           # 실행하자마자 뜨는 로딩 창. Windows는 프로그램을 푸는 데·백신 검사에 몇 초가 걸려 그동안 아무것도 안 보였다.
+           # 메피티 창이 뜨면 desktop.close_splash()가 닫는다. (PyInstaller 스플래시는 macOS를 지원하지 않는다.)
+           '--splash',str(icon/'splash.png')]
 else:raise SystemExit('Windows 또는 macOS에서 빌드하세요.')
 subprocess.run(args+['scripts/desktop_entry.py'],cwd=root,check=True)
 # 업데이터(MepitiUpdater): 본체와 따로 만든 작은 실행 파일. 메피티가 꺼진 뒤 새 파일로 바꾸고 다시 켠다(mepiti/update_apply.py).

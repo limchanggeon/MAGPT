@@ -62,6 +62,16 @@ class DesktopTests(unittest.TestCase):
         self.assertIs(fake.start_kwargs['private_mode'], False)          # 경매장 로그인을 다시 켜도 유지
         self.assertTrue(fake.start_kwargs['storage_path'].endswith('webview'))
 
+    def test_splash_closes_when_window_shows(self):
+        # Windows 패키지 앱의 로딩 창(PyInstaller 스플래시)은 메피티 창이 뜨면 닫는다.
+        import sys, types
+        closed = []
+        splash = types.SimpleNamespace(close=lambda: closed.append(True))
+        with patch.dict(sys.modules, {'pyi_splash': splash}):
+            desktop.close_splash()
+        self.assertEqual(closed, [True])
+        desktop.close_splash()                                            # 스플래시가 없는 환경(소스·macOS)에서도 조용히 넘어간다
+
     def test_auction_is_attached_only_while_window_runs(self):
         from mepiti import prices
         seen = {}

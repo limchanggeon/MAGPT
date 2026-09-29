@@ -1198,3 +1198,16 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 참고: 같은 화면에서 어센던트 펄스 링이 Windows 130레벨, Mac 140레벨로 달랐다(원인 미확인 — 레벨을 캐릭터 조회에서 가져오는데 기기별 데이터가 다름).
 - **릴리스 v0.3.6**(2026-09-29): `c562f7b`, CI 두 OS 통과, `main` 빨리감기(`df44da8..c562f7b`), 태그, 릴리스 성공(파일 5개), API latest v0.3.6.
   사용자 Windows는 v0.3.5 → 알림으로 0.3.6 자동 업데이트 시험 대상. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.6
+
+### 2026-09-29 — 로딩 창 (사용자 요청: "로딩창 추가해, 지금 윈도우 로딩되는 거 같은데")
+
+- 측정(Mac): 파이썬 import 약 0.06초, `/api/status` 0.04초로 빠르다. Windows에서 느린 부분은 패키지 앱 시작(파일 200여 개 풀기·백신 검사)·WebView2 시작과,
+  매 상태 조회마다 부르던 `nvidia-smi`로 추정(Windows 실측 없음).
+- 변경:
+  - Windows 로딩 창: PyInstaller `--splash scripts/icon/splash.png`(Pillow로 만든 440x260 이미지: 아이콘·'메피티'·'불러오는 중이에요'). 실행하자마자 뜨고,
+    `desktop.close_splash()`가 메피티 창이 뜰 때(`events.shown`)·창 실패·브라우저 대체·이미 떠 있는 메피티로 넘길 때 닫는다. macOS는 PyInstaller가 지원하지 않음.
+  - 앱 안 로딩 화면(`#boot`): 첫 자료(대화 목록·상태)를 받을 때까지 표시, 2.5초 넘으면 'AI 연결·컴퓨터 사양 확인 중', 실패하면 한국어 안내와 '다시 시도'(빈 화면 대신).
+  - `adapters.hardware()`: 메모리·그래픽카드(nvidia-smi)를 한 번만 재고, Windows에서 검은 창이 번쩍이지 않게 `CREATE_NO_WINDOW`.
+  - 테스트: 스플래시 닫기 1개.
+- 검증(2026-09-29): 자동 테스트 통과. WebKit으로 상태 응답을 3.2초 늦춰 로딩 화면·문구 바뀜·사라짐, 첫 요청 실패 시 안내·다시 시도로 복구 확인.
+  **Windows 스플래시는 CI 빌드로만 확인 — 실제 화면은 사용자 확인 필요.**

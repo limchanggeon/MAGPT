@@ -22,6 +22,15 @@ BACKGROUND = '#0e1217'                       # style.css --bg와 같은 색
 ICON = Path(__file__).with_name('static') / 'icon.png'
 
 
+def close_splash():
+    """Windows 패키지 앱의 로딩 창(PyInstaller 스플래시)을 닫는다. 없으면(소스 실행·macOS) 아무것도 안 한다."""
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except Exception:
+        pass
+
+
 def load_webview():
     try:
         import webview
@@ -127,6 +136,7 @@ def run(server, app, url, webview=None):
         events = getattr(window, 'events', None)
         if events is not None and hasattr(events, 'shown'):
             events.shown += lambda: style_native(window)
+            events.shown += close_splash                # 메피티 창이 뜨면 로딩 창을 닫는다
         if events is not None and hasattr(events, 'closed'):
             events.closed += app.auction.shutdown       # 숨겨 둔 경매장 창이 남아 있으면 앱이 끝나지 않는다
         # macOS는 메인 스레드에서 돌아야 한다. 창이 닫힐 때까지 멈춰 있다.
@@ -134,6 +144,7 @@ def run(server, app, url, webview=None):
         webview.start(icon=str(ICON) if ICON.exists() else None, private_mode=False,
                       storage_path=str(Path(app.store.folder) / 'webview'))
     except Exception:
+        close_splash()
         server.shutdown()
         thread.join(timeout=5)
         prices.register_fetcher(None)

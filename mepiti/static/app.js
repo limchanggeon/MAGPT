@@ -772,7 +772,24 @@ function renderSetup(s){
   const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;cloudFormOpen=null;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
   if(chosen&&!chosen.cloud&&!chosen.installed&&s.model.connected&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
 }
-(async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');const [,status]=await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');checkSavedKey(status);setTimeout(()=>guard(checkUpdate),2500);}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
+// 처음 켤 때 로딩 화면. 첫 자료(대화 목록·상태)를 받을 때까지 가리고, 실패하면 빈 화면 대신 이유와 '다시 시도'를 보여 준다.
+function bootDone(){const boot=$('#boot');boot.classList.add('done');setTimeout(()=>boot.hidden=true,250);}
+async function boot(){
+  const text=$('#boot-text'),retry=$('#boot-retry');retry.hidden=true;$('#boot').classList.remove('failed');
+  text.textContent='준비하고 있어요';
+  const slow=setTimeout(()=>{text.textContent='AI 연결·컴퓨터 사양을 확인하고 있어요';},2500);
+  try{
+    const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');
+    const [,status]=await Promise.all([loadHistory(),loadStatus()]);
+    switchView(location.hash.slice(1)||'chat');bootDone();
+    checkSavedKey(status);setTimeout(()=>guard(checkUpdate),2500);
+  }catch(e){
+    // 브라우저 내부 오류 문구(영어)는 보여 주지 않는다.
+    $('#boot').classList.add('failed');text.textContent='메피티에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요. 계속되면 메피티를 껐다 켜 주세요.';retry.hidden=false;
+  }finally{clearTimeout(slow);}
+}
+$('#boot-retry').onclick=()=>boot();
+boot();
 
 $('#quit-app').onclick=()=>guard(async()=>{if(!confirm('앱을 종료합니다. 저장된 데이터는 유지됩니다.'))return;await api('shutdown',{});clearTimeout(downloadTimer);toast('종료했습니다. 탭을 닫아도 됩니다.');});
 

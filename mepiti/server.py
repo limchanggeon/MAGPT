@@ -577,6 +577,7 @@ def main(argv=None):
     try:
         server = make_server(app,args.port)
     except OSError:
+        desktop.close_splash()            # 이미 떠 있는 메피티가 있다 — 로딩 창은 필요 없다
         if args.window and focus_existing(args.port):
             # 이미 앱 창이 떠 있다. 보통 프로그램처럼 새 창 대신 그 창을 앞으로 가져온다.
             return 0
@@ -591,6 +592,7 @@ def main(argv=None):
     if args.window and desktop.run(server,app,url):
         server.server_close()
         return 0
+    desktop.close_splash()                # 창을 못 만들어 브라우저로 연다
     if not args.no_browser: webbrowser.open(url)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

@@ -1105,17 +1105,30 @@ def install_ollama_mac(update):
     return str(destination)
 
 
-def system_info(folder):
-    ram = None
-    try:
-        import psutil
-        ram = round(psutil.virtual_memory().total/(1024**3),1)
-    except ImportError:
-        pass
-    gpu = None
-    if shutil.which('nvidia-smi'):
+_HARDWARE = {}
+
+
+def hardware():
+    """메모리·그래픽카드. 켜진 동안 바뀌지 않으니 한 번만 잰다.
+    nvidia-smi는 Windows에서 부를 때마다 느려(화면을 열 때마다 상태를 묻는다) 매번 부르지 않는다."""
+    if not _HARDWARE:
+        ram = None
         try:
-            gpu = subprocess.run(['nvidia-smi','--query-gpu=name,memory.total','--format=csv,noheader'],capture_output=True,text=True,timeout=3).stdout.strip()
-        except (OSError,subprocess.TimeoutExpired):
+            import psutil
+            ram = round(psutil.virtual_memory().total/(1024**3),1)
+        except ImportError:
             pass
+        gpu = None
+        if shutil.which('nvidia-smi'):
+            try:
+                gpu = subprocess.run(['nvidia-smi','--query-gpu=name,memory.total','--format=csv,noheader'],capture_output=True,text=True,timeout=3,
+                                     creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).stdout.strip()   # Windows에서 검은 창이 번쩍이지 않게
+            except (OSError,subprocess.TimeoutExpired):
+                pass
+        _HARDWARE.update(ram=ram, gpu=gpu)
+    return _HARDWARE['ram'], _HARDWARE['gpu']
+
+
+def system_info(folder):
+    ram, gpu = hardware()
     return {'os':platform.system(),'architecture':platform.machine(),'cpu':platform.processor() or platform.machine(),'ram_gb':ram,'disk_free_gb':round(shutil.disk_usage(folder).free/1024**3,1),'gpu':gpu,'ocr_available':bool(shutil.which('tesseract')),'ollama_installed':ollama_installed()}
