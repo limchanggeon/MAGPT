@@ -998,3 +998,21 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.0
 - 미검증: Flash-Lite 선택 후 실제 키 답변(코드상 첫 질문 때 다시 고름), Windows 설치 마법사 실제 화면, 실제 만료 넥슨 키의 오류 코드.
 - 다음: 지인 실사용 피드백. 후보 — Lite 하루 한도 초과 시 Gemma 4로 넘기기, 설정 화면의 Gemini 모델 이름을 실제 사용 모델로 갱신.
+
+### 2026-09-29 — maple-auction-mcp 분석 (사용자 요청: "뜯어보고 우리 프로그램에 붙일 수 있는지 보자")
+
+- 대상: https://github.com/oyc0401/maple-auction-mcp (MIT, 서버 v0.8.1, 확장 v0.3.0, 와이어 프로토콜 v2). 코드만 읽었고 아직 아무것도 붙이지 않았다.
+- 구조(확인한 사실):
+  - 크롬 확장(웹스토어 배포)이 `ws://127.0.0.1:29171`에 접속해 `hello{protocolVersion:2}`를 보내고, 받은 `{id,type:'fetch',url,method,headers,body}`를
+    `credentials:'include'`로 실행해 `{id,ok,status,bodyText}`를 돌려준다. **https + *.nexon.com만** 실행, 쿠키 값은 읽지 않음. 20초마다 keepalive, 30초마다 재접속.
+  - 서버 쪽 '브로커'가 29171을 열고 Origin이 `chrome-extension://`이면 확장, 없으면 클라이언트로 구분한다(웹페이지 Origin은 거부).
+  - 경매장 API는 공식 Open API가 아닌 웹 거래소 API `https://api.mskr.nexon.com/v1/market/web/...`. 헤더 `x-platform: PC_WEB`, `x-device-id`, `x-client-version: 1.0.1`(없으면 426).
+    신원: `GET /accounts`(fanout) → 월드별 `GET /accounts/{id}/gameWorlds/{world}/characters` → 최고 레벨 캐릭터. 세션이 없을 때만 `POST /auth/web-token/session`
+    (토큰을 회전시켜 브라우저 로그인이 풀릴 수 있어 최후 수단이라고 주석에 적혀 있음).
+  - 검색: `POST .../items/searches/tool-tip`(판매 중) 또는 `.../searches/sold/tool-tip`(시세) — **일일 100회 소진**, 결과는 가격 낮은 순 10개 + `searchKey`.
+    같은 조건은 `GET .../searches/{searchKey}/tool-tip`으로 재조회(소진 없음). 남은 횟수 `GET /market/web/daily-limit`. 매물의 `pricePerItem`이 개당 가격.
+- 붙이는 방법(판단): 메피티(Python)가 브로커 역할을 하면 **Node·npx 없이** 같은 확장을 그대로 쓸 수 있다. 29171이 이미 열려 있으면(사용자가 그 MCP도 씀) 클라이언트로 붙는다.
+  `prices.register_fetcher()` 자리에 "장비 이름 정확 일치·가격 낮은 순 첫 매물" 조회기를 넣으면 노작값 되묻기 전에 자동으로 채울 수 있다. WebSocket 서버는 `websockets` 패키지(동기 API) 추가가 필요.
+- 위험·비용(사용자 판단 필요): 공식 API가 아님(웹 거래소 흉내, 넥슨 약관 위반 가능성·계정 위험은 사용자 몫), 확장·API가 바뀌면 깨짐,
+  사용자마다 크롬 + 확장 설치 + 경매장 로그인 + 크롬 켜 두기 필요, 세션 회전 시 경매장 로그인이 풀릴 수 있음, 로컬의 다른 프로그램도 29171로 같은 확장을 쓸 수 있는 구조.
+- 실제 동작 확인은 사용자 크롬(확장 설치·경매장 로그인)이 있어야 가능. 구현 전 사용자 결정 대기.
