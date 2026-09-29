@@ -21,18 +21,18 @@
 <section id="view-chat" class="view chat-view">
 <div id="chat-scroll" class="chat-scroll"><section id="key-card" class="setup-card key-card" hidden aria-labelledby="key-card-title">
 <h2 id="key-card-title">넥슨 API 키 연결</h2>
-<p>내 캐릭터와 장비를 불러오려면 넥슨이 무료로 발급하는 API 키가 필요해요. 처음 한 번만 하면 됩니다.</p>
-<ol class="key-steps">
+<p id="key-card-lead">내 캐릭터와 장비를 불러오려면 넥슨이 무료로 발급하는 API 키가 필요해요. 처음 한 번만 하면 됩니다.</p>
+<ol id="key-card-steps" class="key-steps">
 <li><a href="https://openapi.nexon.com/ko/" target="_blank" rel="noreferrer noopener">넥슨 Open API 사이트 ↗</a>에 들어가 오른쪽 위 <b>로그인</b>을 누르세요. 넥슨 ID가 없으면 회원가입부터 하면 됩니다.</li>
 <li>로그인한 뒤 <b>내 애플리케이션</b> → <b>애플리케이션 등록</b>을 누르세요.</li>
 <li>게임은 <b>메이플스토리</b>, 애플리케이션 타입은 <b>개발 단계</b>를 고르고, 서비스명에는 아무 이름(예: 메피티)이나 적으세요.</li>
 <li>이용 약관에 동의하고 <b>등록</b>을 누르면 API Key가 자동으로 발급돼요.</li>
 <li><b>애플리케이션 목록</b>에서 방금 만든 항목을 눌러 <b>API Key</b>(<code>test_</code>로 시작하는 긴 글자)를 복사한 뒤, 아래 칸에 붙여 넣으세요.</li>
 </ol>
-<form id="key-card-form" class="key-card-form"><label class="sr-only" for="key-card-input">API 키</label><input id="key-card-input" type="password" name="key" required autocomplete="off" maxlength="500" placeholder="복사한 API Key 붙여 넣기"><button class="primary" type="submit">연결</button></form>
+<form id="key-card-form" class="key-card-form"><label class="sr-only" for="key-card-input">API 키</label><input id="key-card-input" type="password" name="key" required autocomplete="off" maxlength="500" placeholder="복사한 API Key 붙여 넣기"><button id="key-card-submit" class="primary" type="submit">연결</button></form>
 <p id="key-card-status" class="notice" hidden role="status"></p>
-<p class="hint">키는 이 컴퓨터의 보안 저장소(Mac 키체인, Windows 자격 증명 관리자)에만 보관돼요. Mac에서 '키체인 접근 허용' 창이 뜨면 허용을 누르세요.</p>
-<button id="key-card-later" class="secondary" type="button">나중에</button>
+<p id="key-card-hint" class="hint">키는 이 컴퓨터의 보안 저장소(Mac 키체인, Windows 자격 증명 관리자)에만 보관돼요. Mac에서 '키체인 접근 허용' 창이 뜨면 허용을 누르세요.</p>
+<button id="key-card-retry" class="secondary" type="button" hidden>다시 확인</button> <button id="key-card-later" class="secondary" type="button">나중에</button>
 </section><section id="setup-card" class="setup-card" hidden aria-live="polite"></section><div id="welcome" class="welcome">
 <h1>시작해볼까요?</h1>
 </div><div id="topic-card" class="topic-card" hidden></div><div id="messages" class="messages" aria-live="polite"></div></div>

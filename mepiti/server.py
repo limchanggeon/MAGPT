@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .adapters import Nexon, Ollama, Vault, install_ollama_mac, recognize, system_info
+from .adapters import FixedKey, Nexon, Ollama, Vault, install_ollama_mac, key_problem, recognize, system_info
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
@@ -104,6 +104,48 @@ class Application:
                 'ollama_setup':dict(self.ollama_setup),
                 'tour_done':self.store.setting('tour_done')=='1'}
 
+    def nexon_for(self, key):
+        """저장하지 않은 키로 넥슨을 부르는 클라이언트. 데모·테스트는 이 메서드를 바꿔 끼운다."""
+        return Nexon(FixedKey(key))
+
+    def connect_key(self, key):
+        """새 키를 넥슨에 먼저 시험하고 저장한다. 넥슨이 거절한 키는 저장하지 않아, 이미 쓰던 키가 그대로 남는다."""
+        key = key.strip()
+        if not 10 <= len(key) <= 500 or any(c.isspace() for c in key):
+            raise AppError('넥슨 API 키 형식을 확인해 주세요. 복사한 키를 그대로 붙여 넣으면 됩니다.')
+        try:
+            listing = self.nexon_for(key).characters()
+        except AppError as e:
+            if key_problem(e) == 'invalid':
+                raise AppError('넥슨이 이 키를 받아 주지 않았어요. 복사할 때 빠진 글자가 없는지, 메이플스토리용 키인지 확인해 주세요. '
+                               '(이미 저장된 키가 있었다면 그대로 둡니다.) ' + str(e), 400)
+            # 인터넷·요청 한도·점검 때문이면 키가 맞을 수도 있다. 저장하고 나중에 다시 확인한다.
+            self.vault.save(key)
+            self.forget_nexon_cache()
+            return {'state':'unverified','message':str(e)}
+        self.vault.save(key)
+        self.forget_nexon_cache()
+        return {'state':'ok','characters':len(listing['characters'])}
+
+    def check_key(self):
+        """저장된 키가 지금도 쓸 수 있는지. 앱을 켤 때 한 번 부른다."""
+        try:
+            key = self.vault.get()
+        except AppError as e:
+            return {'state':'vault_error','message':str(e)}
+        if not key:
+            return {'state':'missing'}
+        try:
+            self.nexon_for(key).characters()
+        except AppError as e:
+            return {'state':key_problem(e),'message':str(e)}
+        return {'state':'ok'}
+
+    def forget_nexon_cache(self):
+        cache = getattr(self.nexon, 'cache', None)
+        if isinstance(cache, dict):
+            cache.clear()
+
     def start_pull(self, model, select_after=False):
         """모델 다운로드를 뒤에서 돌린다. select_after면 끝난 뒤 그 모델을 사용 모델로 정한다."""
         with self.lock:
@@ -187,6 +229,10 @@ class Application:
             if path == '/api/settings/key':
                 self.vault.save(required(data,'key',500))
                 return {'ok':True}
+            if path == '/api/settings/key/connect':
+                return self.connect_key(required(data,'key',500))
+            if path == '/api/settings/key/check':
+                return self.check_key()
             if path == '/api/settings/key/delete':
                 self.vault.delete()
                 return {'ok':True}

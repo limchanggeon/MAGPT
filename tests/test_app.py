@@ -1435,3 +1435,47 @@ class NoticeTests(unittest.TestCase):
         event=next(q for q in r['form']['questions'] if q['key']=='event')
         self.assertEqual(next(o['value'] for o in event['options'] if o['selected']),'샤타포스')
         self.assertIn('진행 중이라 샤타포스',' '.join(r['conditions']))
+
+
+class KeyConnectTests(unittest.TestCase):
+    """사용자 요청(2026-09-29): 이미 연결된 경우, 키가 만료된 경우, 보안 저장소를 못 읽는 경우를 따로 다룬다."""
+    class MemoryVault:
+        def __init__(self, key=None, broken=False): self.key, self.broken = key, broken
+        def get(self):
+            if self.broken: raise AppError('OS 보안 저장소에 접근하지 못했습니다.', 503)
+            return self.key
+        def save(self, key): self.key = key
+        def delete(self): self.key = None
+    class KeyNexon:
+        def __init__(self, key): self.key = key
+        def characters(self):
+            if self.key == 'rejected-key-0000':
+                e = AppError('요청 조건을 확인해 주세요. 넥슨 오류 코드: OPENAPI00005.', 502); e.upstream, e.nexon_code = 400, 'OPENAPI00005'; raise e
+            if self.key == 'expired-key-00000':
+                e = AppError('API 키 인증에 실패했습니다.', 502); e.upstream, e.nexon_code = 401, ''; raise e
+            if self.key == 'offline-key-00000':
+                raise AppError('서비스에 연결하지 못했습니다.', 503)
+            return {'characters': [{'name': '가'}, {'name': '나'}]}
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.app = Application(self.tmp.name)
+        self.app.vault = self.MemoryVault('working-key-00000'); self.app.nexon_for = self.KeyNexon
+    def tearDown(self): self.tmp.cleanup()
+    def test_rejected_key_is_not_saved_and_old_key_stays(self):
+        with self.assertRaises(AppError) as e: self.app.connect_key('rejected-key-0000')
+        self.assertIn('받아 주지 않았어요', str(e.exception))
+        self.assertEqual(self.app.vault.key, 'working-key-00000')
+    def test_good_key_replaces_and_reports_characters(self):
+        self.assertEqual(self.app.connect_key('  other-good-key-000 '), {'state': 'ok', 'characters': 2})
+        self.assertEqual(self.app.vault.key, 'other-good-key-000')
+    def test_unreachable_nexon_still_saves(self):
+        self.assertEqual(self.app.connect_key('offline-key-00000')['state'], 'unverified')
+        self.assertEqual(self.app.vault.key, 'offline-key-00000')
+    def test_malformed_key_is_refused_before_calling_nexon(self):
+        with self.assertRaises(AppError): self.app.connect_key('짧음')
+        with self.assertRaises(AppError): self.app.connect_key('has space in key')
+    def test_saved_key_check_states(self):
+        self.assertEqual(self.app.check_key()['state'], 'ok')
+        self.app.vault.key = 'expired-key-00000'; self.assertEqual(self.app.check_key()['state'], 'invalid')
+        self.app.vault.key = 'offline-key-00000'; self.assertEqual(self.app.check_key()['state'], 'unverified')
+        self.app.vault.key = None; self.assertEqual(self.app.check_key()['state'], 'missing')
+        self.app.vault.broken = True; self.assertEqual(self.app.check_key()['state'], 'vault_error')

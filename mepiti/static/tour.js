@@ -118,9 +118,14 @@ function tourEnd(done){
 }
 
 // 처음 실행하면 한 번 보여 준다. API 키 연결·AI 모델 준비 카드가 떠 있는 동안은 그것부터 끝내게 기다린다.
+function tourBlocked(status){
+  const key=$('#key-card');
+  return status.tour_done||key.dataset.checking||!key.hidden||!$('#setup-card').hidden;
+}
 function maybeStartTour(status){
-  if(tour.started||status.tour_done||!$('#key-card').hidden||!$('#setup-card').hidden)return;
-  tour.started=true;setTimeout(()=>{tour.started=false;tourStart();},450);
+  if(tour.started||tourBlocked(status))return;
+  // 켜자마자 저장된 키 확인이 이어서 시작될 수 있어, 잠깐 뒤 조건을 다시 본다.
+  tour.started=true;setTimeout(()=>{tour.started=false;if(!tourBlocked(status))tourStart();},450);
 }
 
 $('#replay-tour').onclick=()=>tourStart();

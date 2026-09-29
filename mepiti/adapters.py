@@ -39,7 +39,9 @@ def request_json(url, payload=None, headers=None, timeout=15):
             message += f' 넥슨 오류 코드: {code}.'
         if e.code in (401,403):
             message += ' 넥슨 개발자 페이지에서 메이플스토리용 키의 만료·권한·허용 IP를 확인해 주세요.'
-        raise AppError(message,502)
+        error = AppError(message,502)
+        error.upstream, error.nexon_code = e.code, code    # 키 문제인지 가려내는 데 쓴다(key_problem)
+        raise error
     except (URLError, TimeoutError, OSError, ValueError):
         raise AppError('서비스에 연결하지 못했습니다. 인터넷 또는 로컬 모델 실행 상태를 확인해 주세요.',503)
 
@@ -211,6 +213,23 @@ class Vault:
             raise
         except Exception:
             raise AppError('API 키를 삭제하지 못했습니다.',503)
+
+# 넥슨이 키 자체를 거절한 경우. OPENAPI00002 권한 없음, OPENAPI00005 유효하지 않은 API KEY.
+KEY_REJECTED_CODES = ('OPENAPI00002', 'OPENAPI00005')
+
+
+def key_problem(error):
+    """넥슨 호출 실패가 키 탓인지. 'invalid'면 키를 바꿔야 하고, 'unverified'면 인터넷·한도·점검 등으로 확인을 못 한 것이다."""
+    if getattr(error, 'upstream', None) in (401, 403) or getattr(error, 'nexon_code', '') in KEY_REJECTED_CODES:
+        return 'invalid'
+    return 'unverified'
+
+
+class FixedKey:
+    """저장하기 전에 새 키를 시험할 때 쓰는 보관소 대용."""
+    def __init__(self, key): self.key = key
+    def get(self): return self.key
+
 
 class Nexon:
     BASE = 'https://open.api.nexon.com/maplestory/v1/'

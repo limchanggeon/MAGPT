@@ -921,3 +921,20 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB), 한국어 설명. README `latest` 링크 두 개 HTTP 200, 최신 릴리스 v0.2.2 확인.
   https://github.com/limchanggeon/MAGPT/releases/tag/v0.2.2
 - 다음: 지인이 실제로 설치해 키 안내를 따라 할 수 있는지 확인(특히 넥슨 사이트 메뉴 이름), Windows 실기 확인.
+
+### 2026-09-29 — API 키 상태별 예외 처리 (사용자 요청: "이것도 연결이 되어 있다면? 예외 처리해야 함")
+
+- 문제(0.2.2): 키가 있으면 안내를 숨기기만 했다. 저장된 키가 만료·삭제돼도 알려 주지 않았고, 보안 저장소를 못 읽으면 키가 없는 것처럼 새 발급을 안내했고,
+  '발급 방법 보기'는 연결 상태를 말하지 않았고, 잘못된 키를 넣으면 쓰던 키를 덮어썼다.
+- 변경: `adapters.py` — 넥슨 오류에 `upstream`(HTTP 코드)·`nexon_code`를 붙이고 `key_problem()`으로 키 거절(`invalid`)과 확인 불가(`unverified`)를 가림,
+  `FixedKey`. `server.py` — `nexon_for(key)`, `connect_key`(형식 확인 → 넥슨 시험 → 통과·확인 불가면 저장, 거절이면 저장 안 함, 캐시 비움),
+  `check_key`, 경로 `POST /api/settings/key/connect`·`/check`. `app.js` — 카드 모드 4가지(`KEY_CARD`), 켤 때 `checkSavedKey`, 설정 키 입력도 `connectKey`,
+  `loadStatus`가 status를 돌려줌. `tour.js` — 키 확인 중이면 시작 안 함, 시작 직전 조건 재확인. `index.html` 카드 요소 id·'다시 확인'.
+  `scripts/demo_server.py` — `--bad-saved-key`, `--vault-error`, 특수 키 `bad-key-test`·`offline-key-test`. 테스트 `KeyConnectTests` 5개. README·IMPLEMENTATION.
+- 확인하다 찾은 버그: 화면이 키 확인을 GET으로 불러 404가 났고, 실패를 '확인 불가'로 삼켜 만료 키 안내가 안 떴다 → POST로 수정.
+  **팁: `api(path)`는 인자가 없으면 GET이다. 서버의 POST 경로는 `api(path,{})`로 부른다.**
+- 검증(2026-09-29, 사용자 Mac): 자동 테스트 293개 통과. 데모 서버 + WebKit으로 네 상태 확인 — 연결됨(안내 없음, 발급 방법 보기 → "연결되어 있어요"/바꾸기/닫기,
+  거절 키로 바꾸기 시도 → 문구 표시·기존 키 유지), 만료 키(켤 때 "쓸 수 없어요" 카드, 사용법 안내 대기, 새 키 → 연결 후 안내 시작),
+  보안 저장소 오류(발급 단계 숨김, 다시 확인), 키 없음 + 넥슨 연결 불가(저장 후 '확인하지 못했어요' 알림). 설정의 키 입력도 거절·연결 모두 확인.
+- 미검증: 실제 넥슨이 만료·삭제된 키에 돌려주는 코드(401/403/OPENAPI00005 중 무엇인지)는 실제 키로 확인하지 않았다. 다른 코드가 오면 '확인 불가'로 처리돼 카드가 안 뜬다.
+- 릴리스 전(0.2.2에는 없음). 다음: 사용자 확인 후 0.2.3 릴리스.

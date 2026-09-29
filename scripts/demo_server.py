@@ -24,22 +24,39 @@ from mepiti.core import AppError, now  # noqa: E402
 class FakeVault:
     """키는 메모리에만 둔다. 실제 키체인을 건드리지 않는다."""
     key = 'demo-key'
-    def get(self): return type(self).key
+    broken = False
+    def get(self):
+        if type(self).broken:
+            raise AppError('OS 보안 저장소에 접근하지 못했습니다.', 503)
+        return type(self).key
     def save(self, key): type(self).key = key
     def delete(self): type(self).key = None
 
 
+def fake_nexon_error(key):
+    """키 'bad-key-test'는 넥슨이 거절한 것처럼, 'offline-key-test'는 인터넷이 안 되는 것처럼 응답한다."""
+    if key == 'bad-key-test':
+        error = AppError('요청 조건을 확인해 주세요. 넥슨 오류 코드: OPENAPI00005.', 502)
+        error.upstream, error.nexon_code = 400, 'OPENAPI00005'
+        return error
+    if key == 'offline-key-test':
+        return AppError('서비스에 연결하지 못했습니다. 인터넷 또는 로컬 모델 실행 상태를 확인해 주세요.', 503)
+    return None
+
+
 class FakeNexon:
     """데모에서 쓰는 캐릭터 한 명. 나머지 넥슨 기능은 데모에서 제공하지 않는다."""
-    def __init__(self, profile):
+    def __init__(self, profile, key=None):
         self.profile = profile
+        self.key = key                     # None이면 저장된(가짜) 키를 쓴다
 
     def character(self, name, details=False):
         return dict(self.profile, retrieved_at=now())
 
     def characters(self):
-        if FakeVault.key == 'bad':          # 첫 실행 화면에서 잘못된 키를 시험할 때
-            raise AppError('API 키 인증에 실패했습니다.', 401)
+        error = fake_nexon_error(self.key if self.key is not None else FakeVault.key)
+        if error:
+            raise error
         p = self.profile
         return {'characters': [{'name': p['name'], 'world': p.get('world'), 'job': p.get('job'), 'level': p.get('level')}],
                 'retrieved_at': now(), 'source_url': 'demo'}
@@ -56,7 +73,9 @@ def main():
     parser.add_argument('--port', type=int, default=8790)
     parser.add_argument('--model', default='qwen3.5:2b')
     parser.add_argument('--first-run', action='store_true', help='모델을 고르지 않은 상태로 띄운다')
-    parser.add_argument('--no-key', action='store_true', help='API 키가 없는 상태로 띄운다(키 bad는 인증 실패로 응답)')
+    parser.add_argument('--no-key', action='store_true', help='API 키가 없는 상태로 띄운다(키 bad-key-test는 넥슨 거절, offline-key-test는 연결 실패로 응답)')
+    parser.add_argument('--bad-saved-key', action='store_true', help='넥슨이 거절하는(만료된) 키가 저장된 상태로 띄운다')
+    parser.add_argument('--vault-error', action='store_true', help='보안 저장소를 읽지 못하는 상태로 띄운다')
     args = parser.parse_args()
 
     profile = json.loads(Path(args.profile).read_text(encoding='utf-8'))
@@ -64,9 +83,13 @@ def main():
     server.Vault = FakeVault
     if args.no_key:
         FakeVault.key = None
+    if args.bad_saved_key:
+        FakeVault.key = 'bad-key-test'
+    FakeVault.broken = args.vault_error
     app = server.Application(folder)
     app.vault = FakeVault()
     app.nexon = FakeNexon(profile)
+    app.nexon_for = lambda key: FakeNexon(profile, key)
     app.token = 'demo-token'
     store = app.store
     store.character_save({'name': profile['name'], 'budget': 30_000_000_000, 'goal': '검은 마법사 클리어', 'main': True})

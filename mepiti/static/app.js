@@ -382,7 +382,7 @@ $('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
   toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
   await loadForgeHistory();
 });
-async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);}
+async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);return s;}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){
@@ -420,7 +420,7 @@ function parsePrice(text){
   return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
 }
 $('#price-fetch').onchange=e=>guard(async()=>{await api('prices/fetch',{enabled:e.target.checked});await loadPrices();});
-$('#key-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('settings/key',formData(e.target));e.target.reset();accountCatalog=null;$('#account-characters').replaceChildren();toast('키를 저장했습니다.');switchView('characters');await loadStatus();});};
+$('#key-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const status=$('#key-card-status');if(await connectKey(e.target,status)){$('#account-characters').replaceChildren();switchView('characters');}else throw new Error(status.textContent);});};
 $('#delete-key').onclick=e=>task(e.currentTarget,async()=>{if(!confirm('저장된 API 키를 삭제합니다.'))return;await api('settings/key/delete',{});accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='키 삭제됨 · 설정에서 등록하세요';await loadStatus();toast('키를 삭제했습니다.');});
 $('#model-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('settings/model',formData(e.target));await loadStatus();toast('모델을 저장했습니다.');});};
 $('#pull-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('model/pull',formData(e.target));pollDownload();});};
@@ -442,16 +442,55 @@ function presetCard(p,busy){
 }
 function renderPresets(s){const box=$('#model-presets');box.replaceChildren();(s.presets||[]).forEach(p=>box.append(presetCard(p,s.download.running)));}
 // 처음 실행하면 넥슨 API 키부터 연결하게 안내한다. 캐릭터·장비·기록이 모두 이 키로 조회된다.
-let keySkipped=false,lastStatus=null;
-function renderKeyCard(s){lastStatus=s;$('#key-card').hidden=s.key_present||keySkipped;}
-$('#key-card-form').onsubmit=e=>{e.preventDefault();const form=e.target,status=$('#key-card-status');task(e.submitter,async()=>{
-  status.hidden=true;await api('settings/key',formData(form));form.reset();accountCatalog=null;
-  // 저장만 하고 끝내면 잘못 복사한 키를 모른다. 바로 캐릭터 목록을 불러 확인한다.
-  try{accountCatalog=await api('characters/discover',{});}
-  catch(err){status.textContent=`키를 저장했지만 넥슨에서 확인하지 못했어요. ${err.message} 키를 다시 복사해 붙여 넣어 보세요.`;status.hidden=false;return;}
-  toast(`연결됐어요. 캐릭터 ${accountCatalog.characters.length}개를 찾았어요. 캐릭터 탭에서 볼 수 있어요.`);await loadStatus();});};
-$('#show-key-guide').onclick=()=>{keySkipped=false;$('#key-card').hidden=false;switchView('chat');requestAnimationFrame(()=>$('#key-card').scrollIntoView({block:'start'}));};
-$('#key-card-later').onclick=()=>{keySkipped=true;$('#key-card').hidden=true;if(lastStatus&&typeof maybeStartTour==='function')maybeStartTour(lastStatus);};
+// 키 상태: missing(없음) · vault_error(보안 저장소를 못 읽음 — 키가 있을 수도 있다) · invalid(넥슨이 거절: 만료·삭제 등)
+// · connected(연결됨, 설정의 '발급 방법 보기'로 연 경우만 보인다). 인터넷·한도·점검으로 확인 못 한 경우는 카드를 띄우지 않는다.
+let keySkipped=false,keyOpened=false,keyState=null,keyChecking=false,lastStatus=null;
+const KEY_CARD={
+  missing:{title:'넥슨 API 키 연결',lead:'내 캐릭터와 장비를 불러오려면 넥슨이 무료로 발급하는 API 키가 필요해요. 처음 한 번만 하면 됩니다.',submit:'연결',close:'나중에'},
+  invalid:{title:'저장된 넥슨 API 키를 쓸 수 없어요',lead:'넥슨이 저장된 키를 받아 주지 않았어요. 키가 만료됐거나 넥슨 Open API에서 삭제됐을 수 있어요. 아래 순서대로 키를 확인하거나 새로 받아 붙여 넣으세요.',submit:'바꾸기',close:'나중에'},
+  connected:{title:'넥슨 API 키가 연결되어 있어요',lead:'지금 키로 잘 쓰고 있어요. 다른 키로 바꾸려면 아래 순서대로 새 키를 받아 붙여 넣으세요.',submit:'바꾸기',close:'닫기'},
+  vault_error:{title:'저장된 키를 읽지 못했어요',lead:'이 컴퓨터의 보안 저장소(Mac 키체인, Windows 자격 증명 관리자)를 열지 못했어요. 키를 새로 받을 필요는 없을 수 있어요. Mac에서 \'키체인 접근 허용\' 창이 떴다면 허용을 누른 뒤 다시 확인하세요.',close:'나중에'},
+};
+function keyCardMode(s){
+  if(s.vault_error)return 'vault_error';
+  if(!s.key_present)return 'missing';
+  if(keyState==='invalid')return 'invalid';
+  return keyOpened?'connected':null;
+}
+function renderKeyCard(s){
+  lastStatus=s;const card=$('#key-card'),mode=keyCardMode(s);
+  card.dataset.checking=keyChecking?'1':'';                 // 확인이 끝나기 전에는 사용법 안내를 시작하지 않는다
+  card.hidden=!mode||(keySkipped&&!keyOpened);if(card.hidden)return;
+  const text=KEY_CARD[mode];card.dataset.mode=mode;
+  $('#key-card-title').textContent=text.title;$('#key-card-lead').textContent=text.lead;
+  const canEnter=mode!=='vault_error';
+  $('#key-card-steps').hidden=!canEnter;$('#key-card-form').hidden=!canEnter;$('#key-card-hint').hidden=!canEnter;
+  $('#key-card-retry').hidden=canEnter;$('#key-card-later').textContent=text.close;
+  if(canEnter)$('#key-card-submit').textContent=text.submit;
+  if(mode==='vault_error'){$('#key-card-status').textContent=s.vault_error;$('#key-card-status').hidden=false;}
+}
+// 앱을 켤 때 저장된 키가 아직 쓸 수 있는지 한 번 확인한다.
+async function checkSavedKey(s){
+  if(!s.key_present||keyState)return;
+  keyChecking=true;renderKeyCard(s);
+  try{keyState=(await api('settings/key/check',{})).state;}catch{keyState='unverified';}
+  finally{keyChecking=false;}
+  renderKeyCard(lastStatus||s);if(typeof maybeStartTour==='function')maybeStartTour(lastStatus||s);
+}
+async function connectKey(form,status){
+  status.hidden=true;
+  let result;
+  try{result=await api('settings/key/connect',formData(form));}
+  catch(err){status.textContent=err.message;status.hidden=false;return false;}  // 넥슨이 거절한 키는 저장하지 않았다
+  form.reset();accountCatalog=null;keyState=result.state;keyOpened=false;
+  toast(result.state==='ok'?`연결됐어요. 캐릭터 ${result.characters}개를 찾았어요. 캐릭터 탭에서 볼 수 있어요.`
+                          :`키를 저장했어요. 지금은 넥슨에서 확인하지 못했어요(${result.message}). 잠시 뒤 캐릭터 탭에서 다시 시도해 보세요.`);
+  await loadStatus();return true;
+}
+$('#key-card-form').onsubmit=e=>{e.preventDefault();task(e.submitter,()=>connectKey(e.target,$('#key-card-status')));};
+$('#key-card-retry').onclick=e=>task(e.currentTarget,async()=>{$('#key-card-status').hidden=true;keyState=null;const s=await loadStatus();if(s)await checkSavedKey(s);});
+$('#show-key-guide').onclick=()=>{keySkipped=false;keyOpened=true;$('#key-card-status').hidden=true;renderKeyCard(lastStatus);switchView('chat');requestAnimationFrame(()=>$('#key-card').scrollIntoView({block:'start'}));};
+$('#key-card-later').onclick=()=>{keySkipped=true;keyOpened=false;$('#key-card').hidden=true;if(lastStatus&&typeof maybeStartTour==='function')maybeStartTour(lastStatus);};
 function renderSetup(s){
   const card=$('#setup-card');const ready=s.selected_model&&s.model.models.includes(s.selected_model);
   const wasHidden=card.hidden;card.hidden=ready||setupSkipped;if(card.hidden)return;card.replaceChildren();
@@ -483,7 +522,7 @@ function renderSetup(s){
   const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
   if(chosen&&!chosen.installed&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
 }
-(async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
+(async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');const [,status]=await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');checkSavedKey(status);}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
 
 $('#quit-app').onclick=()=>guard(async()=>{if(!confirm('앱을 종료합니다. 저장된 데이터는 유지됩니다.'))return;await api('shutdown',{});clearTimeout(downloadTimer);toast('종료했습니다. 탭을 닫아도 됩니다.');});
 
