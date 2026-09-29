@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.2 릴리스(Claude·ChatGPT 연결, 화면 위쪽 모델 선택). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.3 릴리스(수익 대시보드, 업데이트 시 자동 백업). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1133,3 +1133,11 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 미검증: Windows 실제 업데이트 설치(설치 파일의 업데이트 감지 화면).
 - 후속: Windows CI에서 `BackupTests` 3개가 임시 폴더 삭제 실패(WinError 32). 원인: `with sqlite3.connect(...)`는 커밋만 하고 **닫지 않아** Windows에서 파일이 잠긴 채 남음
   (앱에서도 작은 핸들 누수). `backup.py`에서 `contextlib.closing`으로 닫게 고침. **팁: sqlite3 연결은 `closing()` 또는 `Store.db()`로 연다.**
+
+### 2026-09-29 — 릴리스 v0.3.3 (사용자: "릴리즈 하삼")
+
+- 포함: 수익 대시보드(지난주·지난달·캐릭터별·흐름), 업데이트 시 자동 백업·데이터 보관 패널·설치 파일 업데이트 감지, sqlite 연결 닫기 수정.
+- 버전 0.3.3(`defe8bc`), 브랜치 CI 두 OS 통과 후 `main` 빨리감기(`1c12789..defe8bc`), 태그, 릴리스 작업 성공.
+  `Mepiti-macOS.dmg`(25.8MB)·`Mepiti-Windows-Setup.exe`(22.2MB), 한국어 설명, `latest` 링크 HTTP 200. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.3
+- 미검증: Windows 실제 업데이트 설치 화면, 실제 유료 클라우드 키 답변.
+- 다음 후보: 예전 '미지정' 수익 기록에 캐릭터 붙이기(사용자 답 대기).
