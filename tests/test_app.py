@@ -1863,3 +1863,69 @@ class BackupTests(unittest.TestCase):
         Application(self.tmp.name).store.set_setting('app_version', '0.0.1')
         with patch('mepiti.backup.make', side_effect=OSError('disk full')):
             self.assertIsNone(backup.on_start(self.tmp.name, '9.9.9'))
+
+
+class UpdaterTests(unittest.TestCase):
+    """업데이트: 실행 파일(설치용)과 업데이터(업데이트용)를 나눴다(사용자 요청 2026-09-29)."""
+    def setUp(self): self.tmp = tempfile.TemporaryDirectory(); self.root = Path(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def make_install(self):
+        app = self.root / 'install'; (app / '_internal').mkdir(parents=True)
+        (app / 'Mepiti.exe').write_text('old'); (app / '_internal' / 'old.txt').write_text('old')
+        (app / 'unins000.exe').write_text('uninstaller')                      # zip에 없는 파일은 남아야 한다
+        archive = self.root / 'update.zip'
+        import zipfile
+        with zipfile.ZipFile(archive, 'w') as z:
+            z.writestr('Mepiti.exe', 'new'); z.writestr('_internal/new.txt', 'new'); z.writestr('MepitiUpdater.exe', 'updater')
+        return app, archive
+    def test_versions_and_sums(self):
+        from mepiti.updater import version_tuple, parse_sums
+        self.assertGreater(version_tuple('v0.3.10'), version_tuple('0.3.9'))
+        self.assertEqual(version_tuple('0.3.4-test'), (0, 3, 4))
+        digest = 'a' * 64
+        self.assertEqual(parse_sums(f'{digest}  Mepiti-macOS-update.zip\n{"b"*64} *Mepiti-Windows-update.zip'),
+                         {'Mepiti-macOS-update.zip': digest, 'Mepiti-Windows-update.zip': 'b' * 64})
+    def test_apply_replaces_app_files_only(self):
+        from mepiti.update_apply import apply
+        app, archive = self.make_install()
+        self.assertEqual(apply(archive, app, 0, app / 'Mepiti.exe', self.root, relaunch=False), 0)
+        self.assertEqual((app / 'Mepiti.exe').read_text(), 'new')
+        self.assertTrue((app / '_internal' / 'new.txt').exists()); self.assertFalse((app / '_internal' / 'old.txt').exists())
+        self.assertEqual((app / 'unins000.exe').read_text(), 'uninstaller')
+        self.assertEqual(sorted(p.name for p in app.iterdir()), ['Mepiti.exe', 'MepitiUpdater.exe', '_internal', 'unins000.exe'])
+        self.assertFalse(archive.exists())
+        self.assertIn('완료', (self.root / 'update.log').read_text(encoding='utf-8'))
+    def test_failure_rolls_back(self):
+        from mepiti import update_apply
+        app, archive = self.make_install()
+        real, calls = update_apply.shutil.move, []
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) == 2: raise OSError('disk full')
+            return real(src, dst)
+        with patch.object(update_apply.shutil, 'move', side_effect=flaky):
+            self.assertEqual(update_apply.apply(archive, app, 0, app / 'Mepiti.exe', self.root, relaunch=False), 1)
+        self.assertEqual((app / 'Mepiti.exe').read_text(), 'old')                # 되돌렸다
+        self.assertTrue((app / '_internal' / 'old.txt').exists())
+        self.assertFalse(any(p.name.endswith('.old') for p in app.iterdir()))
+        self.assertIn('되돌림', (self.root / 'update.log').read_text(encoding='utf-8'))
+    def test_check_reports_newer_but_not_in_source_mode(self):
+        from mepiti import updater
+        release = {'tag_name': 'v9.0.0', 'body': '바뀐 점', 'html_url': 'https://example.test/r',
+                   'assets': [{'name': n, 'browser_download_url': 'https://example.test/' + n}
+                              for n in ('Mepiti-macOS-update.zip', 'Mepiti-Windows-update.zip', 'SHA256SUMS.txt')]}
+        class Resp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        with patch.object(updater, 'fetch', return_value=Resp(json.dumps(release).encode())):
+            info = updater.Updater(self.root).check()
+        self.assertTrue(info['newer']); self.assertEqual(info['latest'], '9.0.0')
+        self.assertFalse(info['can_apply']); self.assertIn('소스', info['reason'])       # 테스트는 패키지 앱이 아니다
+        app = Application(self.tmp.name); app.updater.info = info
+        with self.assertRaises(AppError): app.route('POST', '/api/update/apply', {}, {})
+        self.assertNotIn('_zip', app.route('GET', '/api/update', {}, {}))              # 내부 주소는 화면에 안 보낸다
+    def test_check_offline_is_reported_not_raised(self):
+        from mepiti import updater
+        with patch.object(updater, 'fetch', side_effect=OSError('offline')):
+            info = updater.Updater(self.root).check()
+        self.assertIn('확인하지 못했어요', info['error'])

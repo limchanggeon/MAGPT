@@ -1149,3 +1149,18 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   → 예전 기록 이름, `default_character`(대표), `account_loaded`. 화면: 그룹별(관리 중/계정 캐릭터/예전 기록) 목록, 'Lv·월드' 표시, 기본값 대표 캐릭터,
   계정 목록을 한 번도 안 불렀으면 수익 화면에서 한 번 불러옴. 테스트 1개.
 - 검증(2026-09-29): 자동 테스트 통과. 사용자 실제 앱에서 계정 목록 불러오기 → 고르기 목록 79개(관리 중 1·계정 78), 기본 선택 있음.
+
+### 2026-09-29 — 실행 파일과 업데이터 분리 (사용자 요청: "릴리즈 업데이트할 때 실행파일과 업데이터 나눠서")
+
+- 설계: 릴리스에 처음 설치용(Setup.exe·dmg)과 업데이트용(`*-update.zip` + `SHA256SUMS.txt`)을 함께 올린다. 앱이 새 버전을 알리고, 누르면 받아 SHA256 확인 →
+  따로 빌드한 업데이터(`MepitiUpdater`)를 임시 폴더로 복사해 실행 → 앱 종료 → 업데이터가 앱 파일만 바꾸고(실패 시 되돌림) 다시 켠다. 데이터·키는 설치 폴더 밖이라 그대로.
+- 변경: `mepiti/update_apply.py`(업데이터 본체: wait_exit·extract(mac은 ditto)·swap·rollback·launch·update.log), `scripts/updater_entry.py`,
+  `mepiti/updater.py`(확인·적용), `server.py`(`updater`, `quit_app`를 make_server가 붙임 — `/api/shutdown`도 이것을 씀, `/api/update*`),
+  화면(위쪽 알림, 설정 버전 줄·업데이트 확인), `scripts/build.py`(업데이터 onefile 빌드 → 앱에 넣기, update.zip 만들기),
+  `.github/workflows/build.yml`(update.zip 올리기, 릴리스에서 SHA256SUMS.txt 만들기), `installer.iss`(`[UninstallDelete]` 앱 폴더),
+  테스트 `UpdaterTests` 5개, README '업데이트 (자동)', IMPLEMENTATION.
+- 검증(2026-09-29, 사용자 Mac): 자동 테스트 342개 통과. **실기 E2E**: 버전 0.3.4로 앱 빌드 → 시험 폴더에 설치, 0.3.5로 다시 빌드해 update.zip → 로컬 서버에 가짜 release.json·SHA256SUMS →
+  0.3.4 앱(MEPITI_UPDATE_URL)에서 확인(newer, can_apply) → 적용: 앱 2초 안에 종료, update.log '완료', Info.plist 0.3.5, `codesign --verify` 통과, .old 없음 →
+  0.3.5로 켜서 기록(7억) 그대로, 버전 백업 `v0.3.4-to-v0.3.5` 생성. 데모+WebKit으로 알림·설정 버전 줄 확인.
+- 주의: **0.3.3 이하에는 업데이터가 없어** 0.3.4로는 한 번 직접 설치해야 한다(릴리스 설명에 적을 것). 버전은 아직 0.3.3(릴리스 전).
+- 미검증: Windows 실제 업데이트(파일 잠금 재시도 포함), 업데이트 뒤 `open`으로 다시 켜기(시험 때 기존 메피티와 포트가 겹쳐 확인 못 함), GitHub API 한도(시간당 60회, 켤 때 한 번이라 충분할 것).

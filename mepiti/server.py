@@ -19,6 +19,7 @@ from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
 from . import backup, desktop, earnings, history, notices, prices, starforce
+from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
 
@@ -93,6 +94,8 @@ class Application:
         self.openai = OpenAI(Vault('openai-api-key', 'OpenAI API 키'), lambda: self.store.setting('openai_model') or None)
         self.model = ModelRouter(Ollama(), lambda: self.clouds)   # 고른 모델에 따라 로컬·클라우드로 보낸다
         self.auction = None                               # 앱 창으로 실행하면 desktop.run이 붙인다(mepiti/auction.py)
+        self.updater = Updater(folder)                     # 새 버전 확인·업데이트(mepiti/updater.py)
+        self.quit_app = None                              # make_server가 붙인다. 업데이트 때 메피티를 끈다
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
         self.ollama_setup = {'running':False}
@@ -303,6 +306,7 @@ class Application:
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
             if path == '/api/auction/status': return self.auction_route(path)
             if path == '/api/data': return self.data_status()
+            if path == '/api/update': return self.updater.public()
         if method == 'POST':
             if path == '/api/chat':
                 if not self.chat_lock.acquire(blocking=False):
@@ -379,6 +383,12 @@ class Application:
                 return self.select_model(required(data,'provider',20), data.get('model'))
             if path == '/api/cloud/model':
                 return self.choose_cloud_model(required(data,'provider',20), required(data,'model',60))
+            if path == '/api/update/check':
+                self.updater.check()
+                return self.updater.public()
+            if path == '/api/update/apply':
+                if not self.quit_app: raise AppError('지금은 업데이트를 할 수 없어요.', 409)
+                return self.updater.start(self.quit_app)
             if path == '/api/data/backup':
                 made = backup.make(s.folder, 'manual')
                 return {'made': made.name, **self.data_status()}
@@ -492,10 +502,7 @@ def make_server(app,port=8765):
                         return self.respond(200,{'focused':bool(focus)})
                     if self.command == 'POST' and path == '/api/shutdown':
                         self.respond(200,{'ok':True})
-                        threading.Thread(target=self.server.shutdown,daemon=True).start()
-                        close = getattr(app,'on_shutdown',None)
-                        if close:   # 앱 창으로 실행 중이면 창도 닫는다.
-                            threading.Thread(target=close,daemon=True).start()
+                        app.quit_app()
                         return
                     result = app.route(self.command,path,parse_qs(parsed.query),data)
                     return self.respond(200,result)
@@ -512,6 +519,14 @@ def make_server(app,port=8765):
         do_POST = handle_request
     server = Server(('127.0.0.1',port),Handler)
     server.daemon_threads = True
+
+    def quit_app():
+        # 서버를 끄고, 앱 창으로 실행 중이면 창도 닫는다(설정의 '앱 종료'·업데이트가 쓴다).
+        threading.Thread(target=server.shutdown,daemon=True).start()
+        close = getattr(app,'on_shutdown',None)
+        if close:
+            threading.Thread(target=close,daemon=True).start()
+    app.quit_app = quit_app
     return server
 
 

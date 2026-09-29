@@ -486,6 +486,29 @@ function parsePrice(text){
   if(hit)return total;
   return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
 }
+// 업데이트 — 새 버전이 있으면 위쪽에 알린다. '업데이트'를 누르면 받아서 확인한 뒤 업데이터가 바꾸고 다시 켠다.
+let updateTimer,updateDismissed=false;
+function renderUpdate(u){
+  const line=$('#version-line');
+  if(line)line.textContent=`지금 버전 v${u.current||''}`+(u.latest?(u.newer?` · 새 버전 v${u.latest} 있음`:' · 최신 버전이에요'):'')+(u.error?` · ${u.error}`:'');
+  const box=$('#update-banner'),st=u.state||{};
+  if(!(u.newer||st.running||st.error)||(updateDismissed&&!st.running)){box.hidden=true;return;}
+  box.replaceChildren();box.hidden=false;
+  if(st.running||st.restarting){
+    const pct=st.total?` ${Math.round((st.completed||0)/st.total*100)}%`:'';
+    box.append(el('span','',`${st.status||'업데이트 중'}${pct}`));return;
+  }
+  box.append(el('strong','',`새 버전 v${u.latest}이(가) 나왔어요.`));
+  if(st.error)box.append(el('span','notice-inline',st.status));
+  if(u.can_apply){const go=el('button','primary','업데이트');go.type='button';go.onclick=()=>task(go,async()=>{renderUpdate(await api('update/apply',{}));watchUpdate();});box.append(go);}
+  else box.append(el('span','hint',u.reason||''));
+  box.append(sourceLink(u.page||'https://github.com/limchanggeon/MAGPT/releases/latest','바뀐 점 ↗'));
+  const close=el('button','update-close','×');close.type='button';close.setAttribute('aria-label','알림 닫기');close.onclick=()=>{updateDismissed=true;box.hidden=true;};box.append(close);
+}
+function watchUpdate(){clearTimeout(updateTimer);updateTimer=setTimeout(()=>guard(async()=>{
+  const u=await api('update');renderUpdate(u);if(u.state&&(u.state.running||u.state.restarting))watchUpdate();}),1000);}
+async function checkUpdate(){renderUpdate(await api('update/check',{}));}
+$('#update-check').onclick=e=>task(e.currentTarget,async()=>{updateDismissed=false;await checkUpdate();const u=await api('update');toast(u.error||(u.newer?`새 버전 v${u.latest}이 있어요.`:'최신 버전이에요.'),!!u.error);});
 // 데이터 보관 — 데이터 위치, OS 보안 저장소의 키, 백업. 키 값은 보여 주지 않는다.
 function renderDataPanel(d){
   const info=$('#data-info');info.replaceChildren();
@@ -737,7 +760,7 @@ function renderSetup(s){
   const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;cloudFormOpen=null;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
   if(chosen&&!chosen.cloud&&!chosen.installed&&s.model.connected&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
 }
-(async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');const [,status]=await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');checkSavedKey(status);}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
+(async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');const [,status]=await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');checkSavedKey(status);setTimeout(()=>guard(checkUpdate),2500);}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();
 
 $('#quit-app').onclick=()=>guard(async()=>{if(!confirm('앱을 종료합니다. 저장된 데이터는 유지됩니다.'))return;await api('shutdown',{});clearTimeout(downloadTimer);toast('종료했습니다. 탭을 닫아도 됩니다.');});
 

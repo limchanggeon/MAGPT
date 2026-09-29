@@ -27,6 +27,7 @@ jobs:
           path: |
             dist/*-Setup.exe
             dist/*.dmg
+            dist/*-update.zip
   # 'v'로 시작하는 태그를 올리면 두 OS 설치 파일을 Releases 페이지에 올린다.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -39,9 +40,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # 앱의 자동 업데이트가 받은 파일을 확인하는 데 쓴다(mepiti/updater.py).
+      - run: cd dist && sha256sum *-Setup.exe *.dmg *-update.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*-Setup.exe
             dist/*.dmg
+            dist/*-update.zip
+            dist/SHA256SUMS.txt
           generate_release_notes: true

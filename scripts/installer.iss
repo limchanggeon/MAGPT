@@ -33,6 +33,11 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 [Files]
 Source: "..\dist\Mepiti\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; 자동 업데이트(MepitiUpdater)가 나중에 넣은 파일은 설치 기록에 없다. 제거할 때 앱 폴더를 통째로 지운다.
+; 데이터(%USERPROFILE%\.mepiti)와 키(자격 증명 관리자)는 이 폴더 밖이라 남는다.
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"
+
 [Icons]
 Name: "{group}\메피티"; Filename: "{app}\Mepiti.exe"
 Name: "{autodesktop}\메피티"; Filename: "{app}\Mepiti.exe"

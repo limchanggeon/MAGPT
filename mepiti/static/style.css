@@ -742,3 +742,11 @@ html.in-app :is(img,a){-webkit-user-drag:none}
 .backup-row{display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:11.5px;padding:5px 8px;border:1px solid var(--line-soft);border-radius:4px;background:var(--inset)}
 .backup-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--muted)}
 .backup-row small{color:var(--faint)}
+
+/* 새 버전 알림 */
+.update-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 24px;border-bottom:1px solid var(--gold-dim);
+  background:color-mix(in srgb,var(--gold) 10%,var(--bg));font-size:12.5px;position:sticky;top:46px;z-index:9}
+.update-banner strong{color:var(--gold)}
+.update-banner .primary{margin:0;padding:5px 12px}
+.update-banner .notice-inline{color:var(--bad)}
+.update-close{margin-left:auto;color:var(--muted);font-size:16px}

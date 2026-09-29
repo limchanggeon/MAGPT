@@ -361,3 +361,13 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
   `GET /api/data`(위치·키 있음 여부·백업 목록, 키 값은 없음), `POST /api/data/backup`. 설정의 '데이터 보관' 패널.
 - Windows 설치 파일: `%USERPROFILE%\.mepiti\mepiti.sqlite3`가 있으면 업데이트로 보고 모델·Ollama 페이지를 건너뛰고 setup.json을 쓰지 않는다.
 - 확인(2026-09-29): 자동 테스트 336개(`BackupTests` 4개). **실제 릴리스 v0.3.2 DMG 앱으로 임시 폴더에 기록 → 새 코드(0.3.3로 가정)로 열기: 기록·노작값 그대로, 백업 1개 생성.**
+
+## 2026-09-29 실행 파일과 업데이터 분리(자동 업데이트)
+
+- 릴리스 파일: 처음 설치용(Setup.exe·dmg) + 업데이트용(`Mepiti-Windows-update.zip`·`Mepiti-macOS-update.zip`, 앱 파일만) + `SHA256SUMS.txt`(CI 릴리스 작업이 만든다).
+- 업데이터 `MepitiUpdater`(`mepiti/update_apply.py`, `scripts/updater_entry.py`): 본체와 따로 PyInstaller onefile로 빌드해 앱 안에 넣는다.
+  본체가 임시 폴더로 복사해 실행 → 본체 종료를 기다림 → zip 맨 위 항목마다 기존 것을 .old로 옮기고 새 것 넣기(실패하면 전부 되돌림) → 다시 켬. zip에 없는 파일(unins000.exe)은 그대로.
+- 본체 `mepiti/updater.py`: GitHub 최신 릴리스 확인(시작 2.5초 뒤 한 번·설정 버튼), 패키지 앱이고 쓸 권한·업데이터·파일이 있을 때만 자동 적용, 내려받기·SHA256 확인·업데이터 실행·종료.
+  `GET /api/update`, `POST /api/update/check`·`/apply`. 화면 위쪽 새 버전 알림, 설정의 버전 줄·업데이트 확인. Windows 제거 시 앱 폴더 통째 삭제(`[UninstallDelete]`, 데이터는 밖).
+- 확인(2026-09-29): 자동 테스트 342개(`UpdaterTests` 5개). **Mac에서 실제로 0.3.4·0.3.5 두 앱을 빌드해, 0.3.4 앱이 가짜 릴리스(로컬 서버)를 보고 업데이트 → 0.3.5로 교체·서명 유효·기록 그대로·버전 백업 생성.**
+  미검증: Windows 실제 업데이트, 업데이트 뒤 자동 재실행(시험 환경에서 같은 포트의 기존 메피티와 겹침).
