@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.1 릴리스(경매장 노작값 조회, 펜던트2 기대값 수정 포함). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.2 릴리스(Claude·ChatGPT 연결, 화면 위쪽 모델 선택). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1099,3 +1099,10 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   설정의 연결된 클라우드 줄 드롭다운은 `chosen` 기준. 데모 FakeGemini가 선택지를 따름. 테스트 `ModelSelectTests` 5개. README.
 - 검증(2026-09-29): 자동 테스트 331개 통과. 데모 서버+WebKit: 메뉴 구성·✓, Gemini Flash로 전환, 키 없는 Claude Sonnet 5 → 설정 키 입력 → 연결 후 'Claude · Sonnet 5',
   로컬 qwen3.5:2b 전환, Esc 닫힘, 페이지 오류 없음.
+
+### 2026-09-29 — 릴리스 v0.3.2 (사용자: "ㅇㅇㅇ")
+
+- 버전 0.3.2(`06adfca`), 브랜치 CI 두 OS 통과 후 `main` 빨리감기(`b6653fa..06adfca`), 태그, 릴리스 작업 성공.
+  `Mepiti-macOS.dmg`(25.7MB)·`Mepiti-Windows-Setup.exe`(22.2MB, Anthropic SDK 포함으로 커짐), 한국어 설명, `latest` 링크 HTTP 200.
+  https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.2
+- 미검증: 실제 유료 키(Claude·OpenAI) 답변, Windows 실기.
