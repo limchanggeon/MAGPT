@@ -56,6 +56,10 @@ def market(method, path, body):
         return 500, {'code': 1}                                      # 캐릭터 없는 월드
     if path == '/market/web/daily-limit':
         return 200, {'search': {'remaining': 97}}
+    if path == '/market/web/items/searches/tool-tip' and body['filters'].get('keyword') == '솔 에르다 조각':
+        assert body['filters'] == {'exactMatch': True, 'keyword': '솔 에르다 조각', 'myWorldOnly': True}   # 같은 월드만
+        return 200, {'items': [{'itemName': '솔 에르다 조각', 'pricePerItem': '6400000', 'quantity': 50},
+                               {'itemName': '솔 에르다 조각', 'pricePerItem': '6390000', 'quantity': 3}]}
     if path == '/market/web/items/searches/tool-tip':
         assert body['filters'] == {'exactMatch': True, 'keyword': '골든 클로버 벨트'}
         return 200, {'items': [{'itemName': '골든 클로버 벨트', 'pricePerItem': '31000000', 'isMyWorld': True},
@@ -136,6 +140,29 @@ class AuctionTests(unittest.TestCase):
         a.auction_page('https://nxlogin.nexon.com/auth/login')
         miss = prices.resolve(self.store, '다른 벨트')
         self.assertEqual(miss['reason'], 'fetch_error'); self.assertIn('경매장 조회 실패', prices.ask_text([miss]))
+
+
+class PiecePriceTests(unittest.TestCase):
+    """솔 에르다 조각 시세(사용자 요청 2026-09-29: '조각 가격도 경매장 봐야 해, 크로아 서버 기준')."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.store = Store(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def test_world_price_and_reuse_within_an_hour(self):
+        from mepiti import earnings
+        web = FakeWebview(market); a = auction.Auction(web, self.store, lambda: '테스트'); web.owner = a
+        a.open(); web.windows[0].events.loaded.fire()
+        got = earnings.piece_price(self.store, a)
+        self.assertEqual((got['price'], got['world'], got['cached']), (6390000, '크로아', False))
+        searches = lambda: sum(p['url'].endswith('/searches/tool-tip') for p in web.windows[0].sent)
+        before = searches()
+        again = earnings.piece_price(self.store, a)
+        self.assertTrue(again['cached']); self.assertEqual(searches(), before)          # 한 시간 안에는 다시 검색하지 않는다
+        earnings.piece_price(self.store, a, refresh=True); self.assertEqual(searches(), before + 1)
+        self.assertEqual(earnings.overview(self.store)['piece_auction']['price'], 6390000)
+    def test_without_auction_explains(self):
+        from mepiti import earnings
+        with self.assertRaises(AppError) as e: earnings.piece_price(self.store, None)
+        self.assertIn('경매장', str(e.exception))
 
 
 class AuctionRouteTests(unittest.TestCase):

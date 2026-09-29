@@ -342,6 +342,7 @@ class Application:
                 return {'ok':True}
             if path == '/api/earnings': return earnings.add(s, data)
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
+            if path == '/api/earnings/piece-price': return earnings.piece_price(s, self.auction, bool(data.get('refresh')))
             if path == '/api/earnings/scheduler':
                 names = [c['name'] for c in s.characters()]
                 if not names: raise AppError('캐릭터 화면에서 관리할 캐릭터를 먼저 등록하세요.')

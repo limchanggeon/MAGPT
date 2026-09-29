@@ -15,6 +15,9 @@ from .prices import parse_price
 PIECE_PRICE = 'piece_price'      # 마지막으로 쓴 조각 가격. 다음 기록의 기본값이다.
 BOSS_PRICES = 'boss_prices'      # 보스별 마지막 결정석 판매가. 스케줄러로 불러올 때 채운다.
 MAX_MESO = 10_000_0000_0000      # 1경. 오타로 자릿수가 크게 넘어가는 것만 막는다.
+PIECE_ITEM = '솔 에르다 조각'
+PIECE_AUCTION = 'piece_price_auction'   # 경매장에서 본 조각 시세 {price, world, at}. 한 시간 안에는 다시 검색하지 않는다
+PIECE_FRESH_MINUTES = 60
 MIN_PIECE_PRICE = 10_000          # 솔 에르다 조각 1개가 1만 메소보다 쌀 수는 없다. 단위를 빼먹은 입력('650')을 잡는다.
 
 SCHEMA = '''
@@ -154,6 +157,23 @@ def add(store, data):
     return {**row, 'total': total(row)}
 
 
+def piece_price(store, auction, refresh=False):
+    """솔 에르다 조각 시세(경매장, 검색 기준 캐릭터 월드의 판매 중 최저 개당 가격). 한 시간 안에 본 값은 다시 쓴다(하루 검색 100회 아끼기)."""
+    cached = store.setting(PIECE_AUCTION) or None
+    if cached and not refresh:
+        try:
+            age = datetime.now(KST) - datetime.fromisoformat(cached['at'])
+            if age < timedelta(minutes=PIECE_FRESH_MINUTES):
+                return {**cached, 'cached': True}
+        except (KeyError, ValueError, TypeError):
+            pass
+    if auction is None:
+        raise AppError('경매장 시세는 메피티를 앱 창으로 실행하고 설정 → 장비 노작값에서 경매장에 연결했을 때 쓸 수 있어요.', 409)
+    found = auction.world_price(PIECE_ITEM)
+    store.set_setting(PIECE_AUCTION, found)
+    return {**found, 'cached': False}
+
+
 def delete(store, record_id):
     ensure(store)
     with store.db() as db:
@@ -270,7 +290,7 @@ def overview(store, week=None, month=None, limit=200):
             'bosses': [r for r in in_week if r['kind'] == 'boss'][:limit],
             'characters': [c['name'] for c in choices], 'character_choices': choices,
             'default_character': default_character, 'account_loaded': bool(store.setting(ACCOUNT_CHARACTERS)),
-            'piece_price': store.setting(PIECE_PRICE) or None,
+            'piece_price': store.setting(PIECE_PRICE) or None, 'piece_auction': store.setting(PIECE_AUCTION) or None,
             'boss_prices': store.setting(BOSS_PRICES) or {},
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],

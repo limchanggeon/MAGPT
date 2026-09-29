@@ -259,13 +259,29 @@ async function ensureAccountCharacters(d){
   if(d.account_loaded||accountListTried)return;accountListTried=true;
   try{await api('characters/discover',{});await loadEarnings();}catch{}
 }
+// 솔 에르다 조각 시세 — 경매장(검색 기준 캐릭터 월드)의 판매 중 최저 개당 가격. 한 시간 안에 본 값은 다시 검색하지 않는다.
+let pieceEdited=false;
+function showPieceAuction(p,fill){
+  const note=$('#piece-auction-note');if(!p){note.textContent='';return;}
+  const at=String(p.at||'').replace('T',' ').slice(5,16);
+  note.textContent=`${p.world} 경매장 최저가 ${mesoText(p.price)} (${at}${p.cached?' · 한 시간 안에 본 값':''})`;
+  if(fill)$('#hunt-form').elements.piece_price.value=amountText(p.price),huntPreview();
+}
+async function autoPieceAuction(d){
+  if(pieceEdited)return;
+  showPieceAuction(d.piece_auction,false);
+  try{const a=await api('auction/status');if(!a.logged_in)return;       // 경매장에 연결돼 있을 때만 자동으로 본다
+    showPieceAuction(await api('earnings/piece-price',{}),!pieceEdited);}catch{}
+}
+$('#piece-auction').onclick=e=>task(e.currentTarget,async()=>{pieceEdited=false;showPieceAuction(await api('earnings/piece-price',{}),true);});
+$('#hunt-form').elements.piece_price.addEventListener('input',()=>{pieceEdited=true;});
 async function loadEarnings(){
   const query=new URLSearchParams();if(earningsWeek)query.set('week',earningsWeek);if(earningsMonth)query.set('month',earningsMonth);
   const d=await api('earnings'+(query.toString()?'?'+query:''));lastEarnings=d;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
   earningsWeek=d.week.current?'':d.week.start;earningsMonth=d.month.current?'':d.month.month;
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
-  fillCharacterSelects(d);ensureAccountCharacters(d);
+  fillCharacterSelects(d);ensureAccountCharacters(d);autoPieceAuction(d);
   const alertBox=$('#crystal-alert');if(alertBox){alertBox.replaceChildren();alertBox.hidden=!d.crystal_alert;
     if(d.crystal_alert){alertBox.append(el('span','',`새 업데이트에 결정석 판매가 이야기가 있습니다: ${d.crystal_alert.title}. 앱의 결정석 가격표(업데이트 813 기준)가 바뀌었을 수 있으니 확인해 주세요. `),sourceLink(d.crystal_alert.url,'공지 보기'));}}
   const w=d.week,m=d.month,a=d.all,weekText=`${dayShort(w.start)}(목) ~ ${dayShort(w.end)}(수)`;

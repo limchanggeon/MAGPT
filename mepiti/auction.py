@@ -85,12 +85,15 @@ def request_script(payload):
     return PAGE_JS + '\nwindow.__mepiti(' + json.dumps(payload, ensure_ascii=False) + ');'
 
 
-def search_body(identity, keyword):
-    """판매 중 검색(가격 낮은 순 10개). 원작 mapping.ts buildCreateBody의 이름 정확 일치 경우."""
+def search_body(identity, keyword, my_world=False):
+    """판매 중 검색(가격 낮은 순 10개). 원작 mapping.ts buildCreateBody의 이름 정확 일치 경우.
+    my_world면 검색 기준 캐릭터의 월드 매물만(원작 myWorldOnly — 다른 월드 구매 수수료가 없는 값)."""
+    filters = {'exactMatch': True, 'keyword': keyword}
+    if my_world:
+        filters['myWorldOnly'] = True
     return {'worldId': identity['world_id'], 'accountId': identity['account_id'],
             'characterId': identity['character_id'], 'page': 1, 'limit': 10,
-            'sortType': 'PRICE_PER_ITEM_ASC', 'saveRecentKeyword': False,
-            'filters': {'exactMatch': True, 'keyword': keyword}}
+            'sortType': 'PRICE_PER_ITEM_ASC', 'saveRecentKeyword': False, 'filters': filters}
 
 
 def cheapest(data, item):
@@ -267,6 +270,20 @@ class Auction:
         except AppError as e:
             self.error = str(e)
         return self.status()
+
+    def world_price(self, item):
+        """같은 월드(검색 기준 캐릭터의 월드) 판매 중 최저 개당 가격. 솔 에르다 조각처럼 묶음으로 파는 물건에 쓴다."""
+        identity = self.find_identity()
+        data = self.request('POST', '/market/web/items/searches/tool-tip', search_body(identity, item, my_world=True))
+        best = cheapest(data, item)
+        try:
+            limit = self.request('GET', '/market/web/daily-limit') or {}
+            self.remaining = (limit.get('search') or {}).get('remaining')
+        except AppError:
+            pass
+        if not best:
+            raise AppError(f"{identity['world']} 경매장에 판매 중인 {item}이(가) 없어요.", 404)
+        return {'price': best[0], 'world': identity['world'], 'at': now()}
 
     def fetch(self, item, add_grade=None):
         """prices의 외부 조회기. 판매 중 매물 중 이름이 같은 가장 싼 값(스페어용 노작값)."""
