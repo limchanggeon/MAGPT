@@ -136,19 +136,8 @@ main{margin-left:200px;width:calc(100% - 200px)}
 .chat-scroll:has(>#welcome:not([hidden]))>#welcome{margin-block:auto}
 .chat-scroll:has(>#welcome:not([hidden]))>#setup-card:not([hidden]){margin-top:auto}
 .chat-scroll:has(>#welcome:not([hidden]))>#setup-card:not([hidden])+#welcome{margin-top:24px}
-.welcome{max-width:760px;padding:56px 24px 20px;margin:0 auto}
-.welcome h1{font-size:26px;line-height:1.45;letter-spacing:-.8px;margin:0 0 12px;font-weight:650;text-wrap:balance}
-.welcome-copy{font-size:12.5px;line-height:1.85;color:var(--muted);max-width:60ch;margin-bottom:26px}
-.suggestions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.suggestions button{
-  text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:4px;
-  padding:11px 13px;display:flex;flex-direction:column;gap:5px;
-}
-.suggestions button:hover{border-color:var(--gold-dim);background:var(--inset)}
-.suggestions strong{font-size:12px;font-weight:600;color:var(--ink)}
-.suggestions span{font-size:11px;color:var(--muted)}
-.trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:10.5px;color:var(--faint);margin-top:18px}
-.trust-line span+span:before{content:'·';margin-right:18px;color:var(--line)}
+.welcome{max-width:760px;padding:24px;margin:0 auto;text-align:center}
+.welcome h1{font-size:28px;line-height:1.45;letter-spacing:-.8px;margin:0;font-weight:650;text-wrap:balance}
 
 .messages{max-width:760px;margin:0 auto;padding:20px 24px}
 .message{margin:0 0 22px}
@@ -221,10 +210,8 @@ main{margin-left:200px;width:calc(100% - 200px)}
 .picker-text{display:grid;gap:1px;min-width:0}
 .picker-text small{font-size:10.5px;color:var(--muted)}
 .picker-text strong{font-size:12px;font-weight:500;overflow-wrap:anywhere}
-.suggestions .pick-item{border-color:var(--gold-dim)}
 .send-button{background:var(--gold);border-radius:4px;width:28px;height:28px;font-size:16px;color:#1a1205;font-weight:700}
 .send-button:hover{background:#efbb5d}
-.composer-note{font-size:10px;color:var(--faint);text-align:center;margin:8px 0 0}
 .attachment{
   font-size:11px;border-radius:4px;background:var(--inset);border:1px solid var(--line);
   padding:7px 10px;margin-bottom:6px;display:flex;justify-content:space-between;color:var(--ink-dim);
@@ -516,7 +503,6 @@ dialog::backdrop{background:#05080bcc}
   .two-columns,.character-grid,.form-grid{grid-template-columns:1fr}
   .conversion-form{grid-template-columns:1fr 1fr}
   .conversion-compare,.conversion-detail{grid-template-columns:1fr 1fr}
-  .suggestions{grid-template-columns:1fr}
   .character-hero{grid-template-columns:1fr}
   .character-stage{border-right:0;border-bottom:1px solid var(--line);min-height:420px}
   .hero-avatar{width:min(400px,100%);height:auto;aspect-ratio:1}
@@ -657,3 +643,21 @@ html.in-app,html.in-app body{overscroll-behavior:none}
 html.in-app body{-webkit-user-select:none;user-select:none}
 html.in-app :is(input,textarea,select,.message-body,.fact-sheet pre,.doc-meta,.item-options,.conditions p){-webkit-user-select:text;user-select:text}
 html.in-app :is(img,a){-webkit-user-drag:none}
+
+/* 사용법 안내(온보딩 투어) — tour.js */
+.tour-spot{position:fixed;z-index:900;border-radius:10px;pointer-events:none;
+  box-shadow:0 0 0 2px var(--gold),0 0 0 9999px rgba(4,7,10,.66);
+  transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease}
+.tour-spot.pulse{animation:tour-pulse 1.4s ease-in-out infinite}
+@keyframes tour-pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--gold) 55%,transparent),0 0 0 9999px rgba(4,7,10,.66)}}
+.tour-card{position:fixed;z-index:901;width:min(340px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:16px 16px 12px;box-shadow:0 18px 48px rgba(0,0,0,.45);transition:left .25s ease,top .25s ease}
+.tour-card h3{margin:4px 0 6px;font-size:15px;font-weight:650;color:var(--ink)}
+.tour-card p{margin:0;font-size:12.5px;line-height:1.75;color:var(--ink-dim)}
+.tour-count{font-size:10.5px;color:var(--gold);font-family:var(--mono)}
+.tour-actions{display:flex;align-items:center;gap:6px;margin-top:14px}
+.tour-gap{flex:1}
+.tour-skip{font-size:11.5px;color:var(--faint);padding:6px 2px}
+.tour-skip:hover{color:var(--muted)}
+.tour-actions .primary,.tour-actions .secondary{padding:6px 12px;margin:0}
+@media (prefers-reduced-motion:reduce){.tour-spot,.tour-card{transition:none}.tour-spot.pulse{animation:none}}

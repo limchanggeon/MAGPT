@@ -13,7 +13,7 @@ if(inAppWindow){
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
 let accountCatalog = null, accountLoading = false, managedNames = new Set(), managedCharacters = [];
-const titles = {chat:'질의',characters:'캐릭터',calculator:'수익',library:'기록',settings:'설정'};
+const titles = {chat:'대화',characters:'캐릭터',calculator:'수익',library:'기록',settings:'설정'};
 const fmt = (n) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:3}).format(n);
 const el = (tag,cls,text) => { const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e; };
 function toast(message,error=false){const e=$('#toast');e.textContent=message;e.classList.toggle('error',error);e.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.hidden=true,6500);}
@@ -110,7 +110,6 @@ async function openItemPicker(){
   }catch(e){status.textContent='장비를 불러오지 못했습니다: '+e.message;}
 }
 $('#item-button').onclick=()=>guard(openItemPicker);
-$('#welcome-pick-item').onclick=()=>guard(openItemPicker);
 // 되묻기 선택창 — 조건은 버튼으로 고르고, 노작값은 칸에 적는다. 직접 입력창에 적어도 된다.
 function renderChoiceForm(form){
   const box=el('form','choice-form');
@@ -383,7 +382,7 @@ $('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
   toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
   await loadForgeHistory();
 });
-async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderSetup(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);}
+async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.model.connected&&s.selected_model&&s.model.models.includes(s.selected_model);const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?s.selected_model:s.model.connected?'모델 선택 필요':'모델 연결 필요'),el('span','','↗'));$('#model-status').textContent=s.model.connected?`Ollama 연결됨 · 모델 ${s.model.models.length}개`:'Ollama 연결 실패 · 로컬에서 실행하세요';const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){
@@ -470,7 +469,7 @@ function renderSetup(s){
   card.append(el('p','',chosen?`설치할 때 고른 ${chosen.label} 모델을 받습니다. 끝나면 바로 쓸 수 있습니다.`:'답변을 쓸 모델을 고르세요. 나중에 설정에서 바꿀 수 있습니다.'));
   const grid=el('div','model-presets');(s.presets||[]).forEach(p=>grid.append(presetCard(p,s.download.running)));card.append(grid);
   card.append(el('p','download-status',s.download.running||s.download.status?progressText(s.download):''));
-  const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;await api('model/setup/skip',{});card.hidden=true;});card.append(later);
+  const later=el('button','secondary','나중에');later.type='button';later.onclick=()=>guard(async()=>{setupSkipped=true;await api('model/setup/skip',{});card.hidden=true;if(typeof maybeStartTour==='function')maybeStartTour(s);});card.append(later);
   if(chosen&&!chosen.installed&&!s.download.running&&!setupAutoStarted){setupAutoStarted=true;guard(()=>choosePreset(chosen.id));}
 }
 (async()=>{try{const r=await fetch('/api/bootstrap');const b=await r.json();token=b.token;if(!token)throw new Error('앱 연결에 실패했습니다.');await Promise.all([loadHistory(),loadStatus()]);switchView(location.hash.slice(1)||'chat');}catch(e){toast('앱 연결 실패 · 실행 상태 확인 후 새로고침',true);}})();

@@ -101,7 +101,8 @@ class Application:
         return {'version':__version__,'model':ollama,'selected_model':selected,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
                 'presets':models.describe(system,ollama['models'],selected),
                 'setup_choice':models.setup_choice(self.store.folder) if not selected else None,
-                'ollama_setup':dict(self.ollama_setup)}
+                'ollama_setup':dict(self.ollama_setup),
+                'tour_done':self.store.setting('tour_done')=='1'}
 
     def start_pull(self, model, select_after=False):
         """모델 다운로드를 뒤에서 돌린다. select_after면 끝난 뒤 그 모델을 사용 모델로 정한다."""
@@ -188,6 +189,10 @@ class Application:
                 return {'ok':True}
             if path == '/api/settings/key/delete':
                 self.vault.delete()
+                return {'ok':True}
+            if path == '/api/tour':
+                # 사용법 안내를 끝냈는지. 앱 창(pywebview)은 브라우저 저장소가 남지 않을 수 있어 DB에 둔다.
+                s.set_setting('tour_done','1' if data.get('done') else '0')
                 return {'ok':True}
             if path == '/api/settings/model':
                 name = required(data,'model',100)
@@ -296,7 +301,7 @@ def make_server(app,port=8765):
                     result = app.route(self.command,path,parse_qs(parsed.query),data)
                     return self.respond(200,result)
                 if self.command != 'GET': raise AppError('요청 경로를 찾을 수 없습니다.',404)
-                filename = {'/':'index.html','/app.js':'app.js','/characters.js':'characters.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(path)
+                filename = {'/':'index.html','/app.js':'app.js','/characters.js':'characters.js','/tour.js':'tour.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(path)
                 if not filename: raise AppError('파일을 찾을 수 없습니다.',404)
                 content = (STATIC/filename).read_bytes()
                 self.respond(200,content,(mimetypes.guess_type(filename)[0] or 'text/plain')+'; charset=utf-8')

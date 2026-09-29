@@ -824,6 +824,18 @@ class HTTPTests(unittest.TestCase):
     def test_validation_error_not_server_error(self):
         with self.assertRaises(HTTPError) as e:self.request('/api/earnings',{'kind':'hunt','meso':'abc'})
         self.assertEqual(e.exception.code,400)
+    def test_tour_script_is_served_and_done_is_remembered(self):
+        with self.request('/tour.js') as r:self.assertIn('TOUR_STEPS',r.read().decode())
+        with self.request('/api/tour',{'done':True}) as r:self.assertEqual(r.status,200)
+        self.assertEqual(self.app.store.setting('tour_done'),'1')
+        with self.request('/api/tour',{'done':False}):pass
+        self.assertEqual(self.app.store.setting('tour_done'),'0')
+    def test_chat_screen_is_plain(self):
+        # 사용자 요청(2026-09-29): 탭 이름은 '대화', 첫 화면에는 '시작해볼까요?'만 둔다.
+        with self.request('/') as r:page=r.read().decode()
+        self.assertNotIn('질의',page)
+        welcome=page.split('id="welcome"')[1].split('</div>')[0]
+        self.assertIn('시작해볼까요?',welcome);self.assertNotIn('<button',welcome);self.assertNotIn('<p',welcome)
 
 if __name__=='__main__':unittest.main()
 

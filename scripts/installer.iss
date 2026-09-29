@@ -5,7 +5,7 @@
 ; 앱이 첫 실행에서 진행률과 함께 받고 사용 모델로 정한다(mepiti/models.py). 모델을 받으려면 Ollama가
 ; 실행 중이어야 하고, 대용량 진행률은 앱 화면이 더 잘 보여 주기 때문이다.
 
-#define AppVersion "0.2.1"
+#define AppVersion "0.2.2"
 
 [Setup]
 AppId=Mepiti.Local.Alpha
