@@ -836,6 +836,11 @@ class HTTPTests(unittest.TestCase):
         self.assertNotIn('질의',page)
         welcome=page.split('id="welcome"')[1].split('</div>')[0]
         self.assertIn('시작해볼까요?',welcome);self.assertNotIn('<button',welcome);self.assertNotIn('<p',welcome)
+    def test_app_window_css_does_not_block_scrolling(self):
+        # 실제로 겪은 문제(2026-09-29): 앱 창에서 html·body에 overscroll-behavior:none을 걸자 macOS 창에서 탭 스크롤이 막혔다.
+        css=(Path(__file__).resolve().parent.parent/'mepiti'/'static'/'style.css').read_text(encoding='utf-8')
+        css=re.sub(r'/\*.*?\*/','',css,flags=re.S)
+        self.assertNotIn('overscroll-behavior',css)
     def test_first_run_explains_api_key(self):
         # 사용자 요청(2026-09-29): 처음 설치하면 넥슨 API 키 연결부터, 발급 방법도 비개발자가 따라 할 수 있게.
         with self.request('/') as r:page=r.read().decode()

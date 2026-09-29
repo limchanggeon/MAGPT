@@ -968,3 +968,14 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 미검증: **실제 Gemini 키로 답변**(키 없음 — 사용자나 지인이 키를 넣어 한 번 확인 필요), Windows 설치 마법사 실제 화면(Pascal 컴파일은 CI로 확인).
 - 브랜치 CI(`3d30ec8`) 두 OS 통과 — Windows는 바뀐 설치 마법사(Pascal)까지 컴파일됨.
 - 다음: 사용자 확인 후 릴리스(기능 추가라 0.3.0 제안). 실제 Gemini 키로 한 번 답변 확인.
+
+### 2026-09-29 — 앱 창에서 캐릭터·수익·기록·설정 탭이 스크롤되지 않던 문제 (사용자 보고)
+
+- 사용자 보고: 클라우드(Gemini)는 동작함("되긴 하네"). 그런데 캐릭터·수익·기록·설정에서 스크롤이 안 된다(대화는 됨 — 자체 스크롤 영역이라).
+- 원인: 0.2.1에서 앱 창(`html.in-app`)에만 건 `html,body{overscroll-behavior:none}`(튕김 막기). **macOS WKWebView에서는 이게 페이지 스크롤 자체를 막는다.**
+  Playwright WebKit(합성 휠)에서는 재현되지 않았고, 실제 pywebview 창에 Quartz로 진짜 휠 입력을 보내 재현했다:
+  같은 화면을 `?shell=window` 있을 때는 안 움직이고, 없을 때는 움직임 → 그 규칙 하나만 빼자 움직임.
+- 변경: `style.css`에서 그 규칙 삭제(이유 주석), 테스트 `test_app_window_css_does_not_block_scrolling`(주석 밖에 `overscroll-behavior`가 다시 생기면 실패).
+- 팁: 앱 창 전용 CSS·동작은 Playwright WebKit만으로 판단하지 말고 실제 창에 진짜 입력(Quartz CGEvent)을 보내 확인할 것.
+- 검증(2026-09-29, 사용자 Mac): 자동 테스트 307개 통과, 실제 창에서 설정 탭 휠 스크롤 확인. 사용자 앱 창을 수정본으로 다시 띄움.
+  0.2.1~0.2.3 릴리스에 이 문제가 있다 → 다음 릴리스에 포함 필요.
