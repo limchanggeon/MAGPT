@@ -113,6 +113,15 @@ def applied(value):
     return flag(value) or ('적용' in text and '미적용' not in text)
 
 
+def superior(value):
+    """슈페리얼 장비인가. 넥슨은 '슈페리얼 장비 미해당'처럼 부정형도 글로 보낸다(2026-09-29 실제 응답 확인).
+    '슈페리얼'이 들어 있다고 해당으로 보면 모든 장비가 슈페리얼이 된다(Windows에서 기록 계산이 전부 빠진 버그)."""
+    if flag(value):
+        return True
+    text = str(value or '').strip()
+    return '슈페리얼' in text and not any(word in text for word in ('미해당', '아님', '해당 없음', '해당없음', '미적용'))
+
+
 def extra_slot(slot, name, icon, description=None):
     """장비창에 자리는 있으나 item_equipment에 들어오지 않는 칸(칭호·안드로이드)."""
     return {'slot':slot,'part':slot,'name':name,'icon':static_icon(icon),
@@ -425,7 +434,7 @@ class Nexon:
                              'result': str(r.get('item_upgrade_result') or '')[:20],
                              'starcatch': str(r.get('starcatch_result') or '')[:20] or None,
                              'safeguard': applied(r.get('destroy_defence', r.get('destroy_defense'))),
-                             'superior': flag(r.get('superior_item_flag')) or '슈페리얼' in str(r.get('superior_item_flag') or ''),
+                             'superior': superior(r.get('superior_item_flag')),
                              'created': str(r.get('date_create') or day)[:32],
                              'events': [starforce_event(e) for e in (r.get('starforce_event_list') or [])
                                         if isinstance(e, dict)][:5]})

@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS starforce_history_item ON starforce_history(character
 
 
 # 이름만으로 장비 레벨이 확실한 세트. 착용하지 않은 장비도 계산할 수 있게 한다.
+SUPERIOR_FIXED = 'starforce_superior_fixed'   # 잘못 저장된 슈페리얼 표시를 바로잡았는가
 NAME_LEVELS = (('에테르넬', 250), ('아케인셰이드', 200), ('제네시스', 200), ('앱솔랩스', 160))
 
 
@@ -40,6 +41,12 @@ def ensure(store):
         db.executescript(SCHEMA)
         if 'superior' not in [r['name'] for r in db.execute('PRAGMA table_info(starforce_history)')]:
             db.execute('ALTER TABLE starforce_history ADD COLUMN superior INTEGER')
+    # 0.3.5 이하가 '슈페리얼 장비 미해당'을 슈페리얼로 잘못 저장했다. 한 번만 바로잡는다:
+    # 슈페리얼 계열(타일런트)만 남기고 지운다. 이후 받는 기록은 제대로 저장된다.
+    if not store.setting(SUPERIOR_FIXED):
+        with store.db() as db:
+            db.execute("UPDATE starforce_history SET superior=CASE WHEN item LIKE '%타일런트%' THEN 1 ELSE 0 END WHERE superior=1")
+        store.set_setting(SUPERIOR_FIXED, '1')
 
 
 def destroyed(row):
@@ -71,8 +78,10 @@ def fetch(store, nexon, days=14):
             continue
         with store.db() as db:
             for r in rows:
-                added += db.execute('INSERT OR IGNORE INTO starforce_history(id,character,world,item,before,after,result,'
-                                    'starcatch,safeguard,created,events,superior) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                # 이미 받은 기록이면 슈페리얼 표시만 새로 받은 값으로 고친다(예전 판별 오류를 다시 받기로도 바로잡게).
+                added += db.execute('INSERT INTO starforce_history(id,character,world,item,before,after,result,'
+                                    'starcatch,safeguard,created,events,superior) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) '
+                                    'ON CONFLICT(id) DO UPDATE SET superior=excluded.superior WHERE superior IS NOT excluded.superior',
                                     (r['id'], r['character'], r['world'], r['item'], r['before'], r['after'],
                                      r['result'], r['starcatch'], int(bool(r['safeguard'])), r['created'],
                                      json.dumps(r.get('events') or [], ensure_ascii=False),

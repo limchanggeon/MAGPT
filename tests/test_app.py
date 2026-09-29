@@ -1367,6 +1367,37 @@ class StarforceHistoryTests(unittest.TestCase):
         self.assertTrue(rows[0]['safeguard']); self.assertFalse(rows[1]['safeguard'])
         self.assertEqual(rows[0]['events'][0]['discount'],0.3)
         self.assertEqual(rows[0]['events'][0]['range'],[0,21])
+    def test_superior_flag_reads_negative_text(self):
+        # 사용자 보고(2026-09-29, Windows): 넥슨이 '슈페리얼 장비 미해당'을 보내는데 '슈페리얼'이 들어 있다고 해당으로 봐서
+        # 에테르넬 장비까지 '슈페리얼이라 계산하지 않음'으로 나왔다.
+        from mepiti.adapters import superior
+        for no in ('슈페리얼 장비 미해당','슈페리얼 아님','','0','false',None): self.assertFalse(superior(no),no)
+        for yes in ('슈페리얼 장비','1','true',True): self.assertTrue(superior(yes),yes)
+        class V:
+            def get(self): return 'k'
+        row=dict(self.api_row(1,17,18,'성공'),superior_item_flag='슈페리얼 장비 미해당')
+        with patch('mepiti.adapters.request_json',return_value={'starforce_history':[row],'next_cursor':''}):
+            self.assertFalse(Nexon(V()).starforce_history('2026-09-27')[0]['superior'])
+    def test_wrongly_saved_superior_is_repaired(self):
+        history.ensure(self.store)
+        with self.store.db() as db:
+            for i,item in enumerate(('에테르넬 나이트팬츠','타일런트 히아데스 클록')):
+                db.execute('INSERT INTO starforce_history(id,character,world,item,before,after,result,starcatch,safeguard,created,events,superior) '
+                           "VALUES(?, '본캐','크로아',?,0,1,'성공',NULL,0,'2026-09-20T12:00:00',NULL,1)",(f'w{i}',item))
+        self.store.set_setting(history.SUPERIOR_FIXED,'')
+        history.ensure(self.store)                                       # 다음 실행 때 한 번 바로잡는다
+        got={r['item']:r['superior'] for r in self.store.rows('SELECT item,superior FROM starforce_history')}
+        self.assertEqual(got,{'에테르넬 나이트팬츠':0,'타일런트 히아데스 클록':1})
+        # 다시 받으면 넥슨이 준 값으로 고쳐진다.
+        with self.store.db() as db: db.execute("UPDATE starforce_history SET superior=1 WHERE id='w0'")
+        class Fake:
+            def starforce_history(self,day):
+                return [{'id':'w0','character':'본캐','world':'크로아','item':'에테르넬 나이트팬츠','before':0,'after':1,
+                         'result':'성공','starcatch':None,'safeguard':False,'created':'2026-09-20T12:00:00','events':[],'superior':False}]
+            def character(self,*a,**k): raise AppError('없음')
+        with patch('mepiti.history.today',return_value=history.FIRST_DAY):
+            history.fetch(self.store,Fake(),1)
+        self.assertEqual(self.store.rows("SELECT superior FROM starforce_history WHERE id='w0'")[0]['superior'],0)
     def test_attempt_cost_uses_recorded_event(self):
         base=starforce.attempt_costs(250)[17]
         shining=[{'discount':0.3,'destroy_decrease':0.3,'range':[0,21]}]
