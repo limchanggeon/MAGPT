@@ -293,6 +293,20 @@ def make_server(app,port=8765):
     return server
 
 
+def say(text, stream=None):
+    """콘솔 안내 출력. 창 모드(콘솔 없음)나 한글을 못 쓰는 콘솔(Windows cp1252 등)에서도 멈추지 않는다."""
+    stream = stream or sys.stdout
+    if stream is None:
+        return
+    try:
+        print(text, file=stream, flush=True)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, 'encoding', None) or 'ascii'
+        print(text.encode(encoding, 'replace').decode(encoding), file=stream, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
 def window_only(url):
     webview = desktop.load_webview()
     webview.create_window(desktop.TITLE, url, width=1440, height=940, min_size=(960, 640))
@@ -314,10 +328,10 @@ def main(argv=None):
             # 이미 켜져 있는 메피티가 있으면 그 화면을 새 창으로 연다.
             window_only(f'http://127.0.0.1:{args.port}')
             return 0
-        print('포트를 사용 중입니다. 다른 --port 값으로 실행해 주세요.',file=sys.stderr)
+        say('포트를 사용 중입니다. 다른 --port 값으로 실행해 주세요.',sys.stderr)
         return 1
     url = f'http://127.0.0.1:{server.server_port}'
-    print(f'메피티 {__version__} · {url}\n저장 위치: {args.data_dir}\n종료: Ctrl+C',flush=True)
+    say(f'메피티 {__version__} · {url}\n저장 위치: {args.data_dir}\n종료: Ctrl+C')
     if args.window and desktop.run(server,app,url):
         server.server_close()
         return 0

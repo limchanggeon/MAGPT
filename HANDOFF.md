@@ -827,3 +827,10 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 검증(2026-09-29, 클라우드 컨테이너): 테스트 275개 중 273개 통과. 실패 2개(`ModelChoiceTests`)는 이 컨테이너의 키체인 라이브러리
   충돌(`cryptography` 패닉)로, 변경 전 main에서도 똑같이 실패한다. **실제 창은 이 환경에 화면이 없어 띄워 보지 못했다.**
   CI의 macOS·Windows 빌드가 pywebview를 포함해 통과하는지, Mac·Windows에서 창이 뜨는지 확인이 필요하다.
+- 후속(2026-09-29): PR CI에서 macOS 빌드는 pywebview 포함으로 통과했다. Windows는 테스트 단계에서 실패했다.
+  원인은 `main()`의 시작 안내 `print`다. Windows 콘솔(cp1252)이 한글을 못 써서 `UnicodeEncodeError`가 났다(기존 코드지만
+  `main()`을 부르는 테스트가 처음 생기며 드러났다. 한글 설정이 아닌 Windows에서 콘솔로 실행하면 사용자도 겪을 수 있었다).
+  수정: `server.say()` — 못 쓰는 글자는 `?`로 바꿔 출력하고, 콘솔이 없는 창 모드(`sys.stdout is None`)에서는 건너뛴다.
+  테스트 `test_console_without_korean_does_not_crash` 추가. 검증: 컨테이너에서 cp1252 출력으로 원래 예외를 재현한 뒤,
+  `PYTHONIOENCODING=cp1252`로 전체 테스트 276개를 돌려 274개 통과(실패 2개는 위와 같은 키체인 문제). Windows CI 재확인 필요.
+- 팁: 콘솔 출력은 `print` 대신 `say()`를 쓴다.

@@ -1,4 +1,5 @@
 """앱 창 실행(pywebview). 실제 창은 띄우지 않고 가짜 webview로 흐름만 확인한다."""
+import io
 import json
 import tempfile
 import threading
@@ -7,7 +8,7 @@ from unittest.mock import patch
 from urllib.request import Request, urlopen
 
 from mepiti import desktop
-from mepiti.server import Application, make_server, main
+from mepiti.server import Application, make_server, main, say
 
 
 class FakeWebview:
@@ -85,6 +86,15 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(main(['--window', '--port', '0', '--data-dir', folder]), 0)
         run.assert_called_once()
         browser.assert_not_called()
+
+    def test_console_without_korean_does_not_crash(self):
+        # 실제로 겪은 문제: Windows CI 콘솔(cp1252)에서 한글 안내를 출력하다 UnicodeEncodeError로 멈췄다.
+        raw = io.BytesIO()
+        console = io.TextIOWrapper(raw, encoding='cp1252')
+        say('메피티 · http://127.0.0.1:8765', console)
+        self.assertIn(b'http://127.0.0.1:8765', raw.getvalue())
+        with patch('mepiti.server.sys.stdout', None):
+            say('창 모드에는 콘솔이 없다')
 
 
 if __name__ == '__main__':
