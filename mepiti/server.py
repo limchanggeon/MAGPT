@@ -16,7 +16,7 @@ from .adapters import Nexon, Ollama, Vault, install_ollama_mac, recognize, syste
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import earnings, history, notices, prices, starforce
+from . import desktop, earnings, history, notices, prices, starforce
 
 STATIC = Path(__file__).parent/'static'
 
@@ -271,6 +271,9 @@ def make_server(app,port=8765):
                     if self.command == 'POST' and path == '/api/shutdown':
                         self.respond(200,{'ok':True})
                         threading.Thread(target=self.server.shutdown,daemon=True).start()
+                        close = getattr(app,'on_shutdown',None)
+                        if close:   # 앱 창으로 실행 중이면 창도 닫는다.
+                            threading.Thread(target=close,daemon=True).start()
                         return
                     result = app.route(self.command,path,parse_qs(parsed.query),data)
                     return self.respond(200,result)
@@ -290,20 +293,34 @@ def make_server(app,port=8765):
     return server
 
 
-def main():
+def window_only(url):
+    webview = desktop.load_webview()
+    webview.create_window(desktop.TITLE, url, width=1440, height=940, min_size=(960, 640))
+    webview.start()
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description='메피티 로컬 앱')
     parser.add_argument('--port',type=int,default=8765)
     parser.add_argument('--data-dir',default=os.environ.get('MEPITI_DATA_DIR',str(Path.home()/'.mepiti')))
     parser.add_argument('--no-browser',action='store_true')
-    args = parser.parse_args()
+    parser.add_argument('--window',action='store_true',help='브라우저 대신 앱 창으로 연다(pywebview 필요)')
+    args = parser.parse_args(argv)
     app = Application(args.data_dir)
     try:
         server = make_server(app,args.port)
     except OSError:
+        if args.window and desktop.load_webview():
+            # 이미 켜져 있는 메피티가 있으면 그 화면을 새 창으로 연다.
+            window_only(f'http://127.0.0.1:{args.port}')
+            return 0
         print('포트를 사용 중입니다. 다른 --port 값으로 실행해 주세요.',file=sys.stderr)
         return 1
     url = f'http://127.0.0.1:{server.server_port}'
     print(f'메피티 {__version__} · {url}\n저장 위치: {args.data_dir}\n종료: Ctrl+C',flush=True)
+    if args.window and desktop.run(server,app,url):
+        server.server_close()
+        return 0
     if not args.no_browser: webbrowser.open(url)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

@@ -813,3 +813,17 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   공개 상태이므로 README 스크린샷의 캐릭터 외형·장비(이름 제외)가 누구에게나 보인다.
 - 미검증: 실제 Windows PC에서 마법사 흐름(VRAM 감지, Ollama 1.5GB 다운로드·무인 설치, setup.json → 첫 실행 자동 다운로드)과
   Mac에서 Ollama 자동 설치는 아직 실기로 돌려 보지 않았다.
+
+### 2026-09-29 — 앱 창으로 실행 (사용자 요청: "응용프로그램으로 못 만드나")
+
+- 사용자 보고: 릴리스(v0.2.0)를 실행하니 서버가 뜨고 브라우저로 여는 방식이다. 응용 프로그램처럼 만들 수 없나.
+- 변경: `mepiti/desktop.py`(신규) — pywebview로 OS 웹 화면(macOS WKWebView, Windows WebView2)을 창에 넣어 같은 로컬 화면을 띄운다.
+  창을 닫으면 서버를 끄고, 설정의 '로컬 앱 종료'는 창도 닫는다(`app.on_shutdown`). 외부 링크는 기본 브라우저로 연다.
+  창을 못 만들면(pywebview 없음·실패) 지금처럼 브라우저로 연다. 포트가 이미 쓰이면 떠 있는 메피티를 새 창으로 연다.
+  `mepiti/server.py`(`main(argv)`, `--window`), `scripts/desktop_entry.py`(패키지 앱은 기본 `--window`),
+  `scripts/build.py`(`--collect-all webview`, Windows도 `--windowed`로 콘솔 창 숨김), `pyproject.toml`(`desktop`·`build`에 pywebview),
+  `README.md`(창 안내, WebView2 문제 해결), `tests/test_desktop.py`(가짜 webview 4개).
+- 이 작업은 PR 병합 뒤 `main`(v0.2.0 포함)에서 브랜치를 새로 만들어 올렸다. README 충돌은 main 쪽을 두고 창 안내만 얹었다.
+- 검증(2026-09-29, 클라우드 컨테이너): 테스트 275개 중 273개 통과. 실패 2개(`ModelChoiceTests`)는 이 컨테이너의 키체인 라이브러리
+  충돌(`cryptography` 패닉)로, 변경 전 main에서도 똑같이 실패한다. **실제 창은 이 환경에 화면이 없어 띄워 보지 못했다.**
+  CI의 macOS·Windows 빌드가 pywebview를 포함해 통과하는지, Mac·Windows에서 창이 뜨는지 확인이 필요하다.

@@ -10,7 +10,8 @@ requires-python = ">=3.9"
 dependencies = ["keyring>=25,<26", "Pillow>=11,<12", "psutil>=7,<8"]
 
 [project.optional-dependencies]
-build = ["pyinstaller>=6,<7"]
+desktop = ["pywebview>=5,<6"]
+build = ["pyinstaller>=6,<7", "pywebview>=5,<6"]
 
 [project.scripts]
 mepiti = "mepiti.server:main"

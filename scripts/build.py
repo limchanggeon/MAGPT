@@ -6,9 +6,11 @@ from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
 os_name=platform.system()
-args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','Mepiti','--collect-data','mepiti','--collect-submodules','keyring.backends']
+args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','Mepiti','--collect-data','mepiti','--collect-submodules','keyring.backends',
+      # 앱 창(pywebview). 운영체제별 창 모듈을 빠뜨리지 않게 통째로 넣는다.
+      '--collect-all','webview']
 if os_name=='Darwin':args+=['--windowed','--onedir','--osx-bundle-identifier','local.mepiti.app']
-elif os_name=='Windows':args+=['--onedir']
+elif os_name=='Windows':args+=['--windowed','--onedir']   # 앱 창이 있으니 콘솔 창은 띄우지 않는다
 else:raise SystemExit('Windows 또는 macOS에서 빌드하세요.')
 subprocess.run(args+['scripts/desktop_entry.py'],cwd=root,check=True)
 if os_name=='Darwin':
