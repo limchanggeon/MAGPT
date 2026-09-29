@@ -85,6 +85,7 @@ class Application:
         self.cloud_vault = Vault('gemini-api-key', 'Gemini API 키')
         self.gemini = Gemini(self.cloud_vault)
         self.model = ModelRouter(Ollama(), self.gemini)   # 고른 모델에 따라 로컬·클라우드로 보낸다
+        self.auction = None                               # 앱 창으로 실행하면 desktop.run이 붙인다(mepiti/auction.py)
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
         self.ollama_setup = {'running':False}
@@ -146,6 +147,24 @@ class Application:
         except AppError as e:
             return {'state':key_problem(e),'message':str(e)}
         return {'state':'ok'}
+
+    def main_character_name(self):
+        chars = self.store.characters()
+        main = next((c for c in chars if c['main']), None) or (chars[0] if chars else None)
+        return main['name'] if main else None
+
+    def auction_route(self, path):
+        if self.auction is None:
+            return {'available': False,
+                    'reason': '경매장 연결은 메피티를 앱 창으로 실행했을 때만 쓸 수 있습니다(브라우저로 연 경우 제외).'}
+        if path == '/api/auction/open':
+            return self.auction.open()
+        if path == '/api/auction/check':
+            state = self.auction.check()
+            if state['logged_in'] and not state['error'] and state['character']:
+                self.store.set_setting(prices.FETCH_SETTING, '1')   # 연결을 확인하면 노작값 자동 조회를 켠다
+            return state
+        return self.auction.status()
 
     def cloud_status(self):
         try:
@@ -214,6 +233,7 @@ class Application:
                                                'alert': s.setting(notices.ALERT) or None, 'synced_at': s.setting(notices.SYNCED) or None}
             if path == '/api/earnings': return earnings.overview(s)
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
+            if path == '/api/auction/status': return self.auction_route(path)
         if method == 'POST':
             if path == '/api/chat':
                 if not self.chat_lock.acquire(blocking=False):
@@ -271,6 +291,8 @@ class Application:
             if path == '/api/settings/key/delete':
                 self.vault.delete()
                 return {'ok':True}
+            if path in ('/api/auction/open', '/api/auction/check'):
+                return self.auction_route(path)
             if path == '/api/cloud/key/connect':
                 return self.connect_cloud_key(required(data,'key',200), bool(data.get('use')))
             if path == '/api/cloud/key/delete':

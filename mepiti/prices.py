@@ -2,11 +2,10 @@
 
 값을 얻는 순서는 셋이다.
   1. 저장된 값 — 한 번 알아낸 값은 계속 쓴다. 조회 횟수를 아끼는 것이 목적이다.
-  2. 외부 조회기 — 등록되어 있고 켜져 있을 때만 부른다. 경매장 MCP 같은 것이 여기 붙는다.
+  2. 외부 조회기 — 등록되어 있고 켜져 있을 때만 부른다. 앱 창으로 실행하면 경매장(mepiti/auction.py)이 붙는다.
   3. 사용자에게 되묻기 — 위 둘이 실패하면 모르는 채로 답하지 않고 값을 물어본다.
 
-외부 조회기는 아직 없다. `register_fetcher`로 붙이면 되고, 값이 충분히 쌓이면
-설정에서 꺼서 더 이상 조회하지 않게 할 수 있다.
+값이 충분히 쌓이면 설정에서 꺼서 더 이상 조회하지 않게 할 수 있다.
 """
 import re
 
@@ -57,6 +56,9 @@ def resolve(store, item, add_grade=None):
             return {'item': item, 'known': False, 'reason': 'limit'}
         try:
             found = _fetcher(item, add_grade)
+        except AppError as e:
+            # 경매장 로그인이 풀린 경우 등. 이유를 되묻기 문구에 함께 보여 준다.
+            return {'item': item, 'known': False, 'reason': 'fetch_error', 'error': str(e)}
         except Exception:
             found = None
         if found and found.get('price'):
@@ -94,6 +96,9 @@ def ask_text(unknown):
     limited = any(u.get('reason') == 'limit' for u in unknown)
     head = ('오늘 조회 한도를 다 써서 아래 장비의 노작값을 가져오지 못했습니다.'
             if limited else '아래 장비의 노작값을 알지 못합니다.')
+    failed = next((u['error'] for u in unknown if u.get('reason') == 'fetch_error'), None)
+    if failed:
+        head += f' (경매장 조회 실패: {failed})'
     return f'{head} 값을 알려주시면 저장해 두고 다음부터는 묻지 않습니다.'
 
 

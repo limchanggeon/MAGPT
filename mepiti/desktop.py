@@ -15,6 +15,8 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from . import auction, prices
+
 TITLE = '메피티'
 BACKGROUND = '#0e1217'                       # style.css --bg와 같은 색
 ICON = Path(__file__).with_name('static') / 'icon.png'
@@ -119,17 +121,26 @@ def run(server, app, url, webview=None):
             zoomable=False)
         app.on_shutdown = lambda: window.destroy()
         app.on_focus = lambda: bring_to_front(window)
+        # 경매장은 앱 창 안의 두 번째 창에서 로그인해 쓴다(mepiti/auction.py). 노작값 조회기로 붙인다.
+        app.auction = auction.Auction(webview, app.store, app.main_character_name)
+        prices.register_fetcher(app.auction.fetch)
         events = getattr(window, 'events', None)
         if events is not None and hasattr(events, 'shown'):
             events.shown += lambda: style_native(window)
+        if events is not None and hasattr(events, 'closed'):
+            events.closed += app.auction.shutdown       # 숨겨 둔 경매장 창이 남아 있으면 앱이 끝나지 않는다
         # macOS는 메인 스레드에서 돌아야 한다. 창이 닫힐 때까지 멈춰 있다.
-        webview.start(icon=str(ICON) if ICON.exists() else None)
+        # private_mode=False: 경매장 로그인을 앱을 다시 켜도 유지한다(쿠키는 웹 엔진 저장소에만 있고 앱은 읽지 않는다).
+        webview.start(icon=str(ICON) if ICON.exists() else None, private_mode=False,
+                      storage_path=str(Path(app.store.folder) / 'webview'))
     except Exception:
         server.shutdown()
         thread.join(timeout=5)
+        prices.register_fetcher(None)
         return False
     server.shutdown()
     thread.join(timeout=5)
+    prices.register_fetcher(None)
     return True
 
 

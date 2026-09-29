@@ -59,6 +59,16 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((title, url), ('메피티', self.url + '?shell=window'))   # 화면 쪽이 앱 창임을 안다
         self.assertEqual(kw['background_color'], desktop.BACKGROUND)          # 켤 때 흰 화면이 번쩍이지 않는다
         self.assertTrue(fake.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'])   # 외부 링크는 브라우저로
+        self.assertIs(fake.start_kwargs['private_mode'], False)          # 경매장 로그인을 다시 켜도 유지
+        self.assertTrue(fake.start_kwargs['storage_path'].endswith('webview'))
+
+    def test_auction_is_attached_only_while_window_runs(self):
+        from mepiti import prices
+        seen = {}
+        fake = FakeWebview(on_start=lambda: seen.update(fetcher=prices.fetcher_available(), auction=self.app.auction))
+        desktop.run(self.server, self.app, self.url, fake)
+        self.assertTrue(seen['fetcher']); self.assertIsNotNone(seen['auction'])
+        self.assertFalse(prices.fetcher_available())                     # 앱이 끝나면 조회기도 뗀다
 
     def test_quit_button_closes_window(self):
         def press_quit():

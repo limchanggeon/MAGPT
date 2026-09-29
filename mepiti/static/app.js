@@ -22,7 +22,7 @@ async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);}location.hash=view;}
+function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
@@ -419,6 +419,27 @@ function parsePrice(text){
   if(hit)return total;
   return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
 }
+// 경매장 연결(mepiti/auction.py). 경매장 창에서 로그인하면 알아서 확인하고 노작값 자동 조회를 켠다.
+let auctionTimer;
+function renderAuction(a){
+  const state=$('#auction-state'),text=$('#auction-status');
+  $('#auction-open').disabled=$('#auction-check').disabled=!a.available;
+  if(!a.available){state.textContent='쓸 수 없음';text.textContent=a.reason||'';return;}
+  const ready=a.logged_in&&a.character&&!a.error;
+  state.textContent=ready?'연결됨':a.open?'로그인 필요':'꺼짐';state.classList.toggle('gold',!!ready);
+  text.textContent=a.error?a.error
+    :ready?`${a.character}(${a.world}) 기준으로 검색합니다 · 오늘 남은 검색 ${a.remaining??'?'}회`
+    :a.logged_in?'경매장에 로그인됐습니다. 연결 확인을 누르세요.'
+    :a.open?'경매장 창에서 넥슨 로그인을 마쳐 주세요. 로그인하면 자동으로 확인합니다.':'경매장 창을 열어 넥슨에 로그인하세요.';
+}
+async function loadAuction(){renderAuction(await api('auction/status'));}
+// 창을 연 뒤 로그인할 때까지(최대 5분) 상태를 지켜보다가, 경매장 화면이 뜨면 한 번 확인한다.
+function watchAuction(tries=100){clearTimeout(auctionTimer);auctionTimer=setTimeout(()=>guard(async()=>{
+  const a=await api('auction/status');renderAuction(a);
+  if(a.logged_in&&!a.character){renderAuction(await api('auction/check',{}));await loadPrices();return;}
+  if(a.open&&!a.logged_in&&tries>0)watchAuction(tries-1);}),3000);}
+$('#auction-open').onclick=e=>task(e.currentTarget,async()=>{renderAuction(await api('auction/open',{}));watchAuction();});
+$('#auction-check').onclick=e=>task(e.currentTarget,async()=>{renderAuction(await api('auction/check',{}));await loadPrices();});
 $('#price-fetch').onchange=e=>guard(async()=>{await api('prices/fetch',{enabled:e.target.checked});await loadPrices();});
 $('#key-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const status=$('#key-card-status');if(await connectKey(e.target,status)){$('#account-characters').replaceChildren();switchView('characters');}else throw new Error(status.textContent);});};
 $('#delete-key').onclick=e=>task(e.currentTarget,async()=>{if(!confirm('저장된 API 키를 삭제합니다.'))return;await api('settings/key/delete',{});accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='키 삭제됨 · 설정에서 등록하세요';await loadStatus();toast('키를 삭제했습니다.');});
