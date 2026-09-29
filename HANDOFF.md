@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.2.3 릴리스 + 클라우드 AI(Gemini) 작업(브랜치, 릴리스 전). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.0 릴리스(클라우드 AI Gemini 무료·2B·8B, 앱 창 스크롤 수정). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -988,3 +988,13 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 한도는 키(프로젝트)마다다(공식 문서: "Rate limits are applied per project, not per API key"). 키 하나를 여럿이 나눠 쓰면 안 되는 이유와 함께 사용자에게 설명함.
 - 참고: 이미 연결된 키는 앱을 다시 켜면 첫 질문 때 모델을 다시 고른다(Lite로 바뀜). 설정 화면의 모델 이름은 저장값(`cloud_model`)이라 그 전까지 옛 이름이 보일 수 있다.
 - 후보(미구현): Lite 하루 한도를 넘으면 Gemma 4로 넘기기(시스템 지시·JSON 모드 지원 여부 확인 필요).
+
+### 2026-09-29 — 릴리스 v0.3.0 (사용자 요청: "그럽시다")
+
+- 포함: 클라우드 AI(Gemini 무료, Flash-Lite 우선), 앱 창 스크롤 수정, 0.2.3 이후 변경 전부.
+- 사용자 확인: 실제 Gemini 키로 앱에서 답변이 나오는 것을 사용자가 확인("되긴 하네", 2026-09-29, Flash 우선이던 코드 기준).
+- 버전 0.3.0(`070d8af`), 브랜치 CI 두 OS 통과 후 `main` 빨리감기(`ad5bddb..070d8af`), 태그, 릴리스 작업 성공.
+  `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB), 한국어 설명. `latest` 링크 두 개 HTTP 200.
+  https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.0
+- 미검증: Flash-Lite 선택 후 실제 키 답변(코드상 첫 질문 때 다시 고름), Windows 설치 마법사 실제 화면, 실제 만료 넥슨 키의 오류 코드.
+- 다음: 지인 실사용 피드백. 후보 — Lite 하루 한도 초과 시 Gemma 4로 넘기기, 설정 화면의 Gemini 모델 이름을 실제 사용 모델로 갱신.
