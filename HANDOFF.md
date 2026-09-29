@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.2.2 릴리스(앱 창, 사용법 안내). 전체 요구사항 완료 아님.
+- 현재 단계: v0.2.2 릴리스(앱 창, 첫 실행 API 키 안내, 사용법 안내). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -917,3 +917,7 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   (키 없는 첫 실행, 키 `bad`는 인증 실패 응답. 키는 메모리에만), README 키 안내를 카드와 같은 문구로, 테스트 1개.
   검증: 자동 테스트 288개 통과, WebKit에서 첫 실행 흐름(키 카드 → 잘못된 키 → 맞는 키 → 모델 카드 '나중에' → 안내 시작) 확인.
   미검증: 넥슨 사이트 실제 메뉴 이름(사용자 제공 안내문 기준), `test_` 접두어는 README 기존 문구를 따름.
+- **릴리스 v0.2.2**(2026-09-29): 브랜치 CI 두 OS 통과 후 `main` 빨리감기(`a1cbd15..2ada1f2`), 태그, 릴리스 작업 성공.
+  `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB), 한국어 설명. README `latest` 링크 두 개 HTTP 200, 최신 릴리스 v0.2.2 확인.
+  https://github.com/limchanggeon/MAGPT/releases/tag/v0.2.2
+- 다음: 지인이 실제로 설치해 키 안내를 따라 할 수 있는지 확인(특히 넥슨 사이트 메뉴 이름), Windows 실기 확인.
