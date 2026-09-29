@@ -197,12 +197,12 @@ def answer(store, model, data, nexon=None):
                         passages.append({'id':len(passages),'text':p,'doc_id':d['id']})
             selected = list(range(min(3,len(passages))))
             selected_model = store.setting('model')
-            model_note = '로컬 모델을 선택하지 않아 원문 검색 결과를 표시합니다.'
+            model_note = 'AI 모델을 고르지 않아 원문 검색 결과를 표시합니다.'
             if selected_model and passages:
                 try:
                     selected, metrics = model.select(selected_model,query,passages)
                     result['metrics'] = metrics
-                    model_note = '로컬 모델이 관련 문장을 선택했습니다. 출력은 검토된 원문으로 제한됩니다.'
+                    model_note = 'AI 모델이 관련 문장을 골랐습니다. 출력은 검토된 원문으로 제한됩니다.'
                 except AppError as e:
                     model_note = str(e)
             if not selected:
@@ -301,7 +301,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         block = result.pop('starforce_text', None)
         result.update(status='context', content=block or '조회한 사실은 아래 항목에서 확인하세요.')
         result['facts'] = text
-        result['conditions'] = ['로컬 모델을 선택하지 않아 조회한 사실만 정리했습니다. 설정에서 모델을 고르면 이 정보를 바탕으로 서술합니다.']
+        result['conditions'] = ['AI 모델을 고르지 않아 조회한 사실만 정리했습니다. 설정에서 모델을 고르면 이 정보를 바탕으로 서술합니다.']
         return
     previous = [{'role':m['role'],'content':m['payload']['content']}
                 for m in history[-4:] if m['payload'].get('content')]

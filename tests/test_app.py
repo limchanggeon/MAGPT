@@ -1479,3 +1479,130 @@ class KeyConnectTests(unittest.TestCase):
         self.app.vault.key = 'offline-key-00000'; self.assertEqual(self.app.check_key()['state'], 'unverified')
         self.app.vault.key = None; self.assertEqual(self.app.check_key()['state'], 'missing')
         self.app.vault.broken = True; self.assertEqual(self.app.check_key()['state'], 'vault_error')
+
+
+class GeminiTests(unittest.TestCase):
+    """클라우드(Gemini 무료) 연결. 실제 Google은 부르지 않고 요청 모양과 오류 처리만 본다."""
+    def test_pick_prefers_flash_and_follows_renames(self):
+        from mepiti.adapters import Gemini
+        self.assertEqual(Gemini.pick(['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest']), 'gemini-flash-latest')
+        self.assertEqual(Gemini.pick(['gemini-9.0-flash', 'gemini-9.0-flash-image', 'gemini-8.0-flash']), 'gemini-9.0-flash')
+        with self.assertRaises(AppError): Gemini.pick(['gemini-2.5-pro', 'text-embedding-004'])
+    def test_errors_are_told_plainly(self):
+        from mepiti.adapters import gemini_error
+        bad = gemini_error(400, {'status': 'INVALID_ARGUMENT', 'message': 'API key not valid. Please pass a valid API key.'})
+        self.assertEqual(bad.kind, 'invalid'); self.assertIn('Google AI Studio', str(bad))
+        self.assertEqual(gemini_error(429, {'status': 'RESOURCE_EXHAUSTED'}).kind, 'quota')
+        self.assertEqual(gemini_error(400, {'message': 'User location is not supported for the API use.'}).kind, 'region')
+        self.assertEqual(gemini_error(500, {}).kind, 'unverified')
+    def test_request_shape_and_thinking_fallback(self):
+        from mepiti.adapters import Gemini, gemini_error
+        sent = []
+        def fake_call(path, body=None, key=None, timeout=60):
+            sent.append((path, json.loads(json.dumps(body)) if body else None))
+            if 'thinkingConfig' in (body or {}).get('generationConfig', {}):
+                raise gemini_error(400, {'message': 'thinking budget is not supported for this model'})
+            return {'candidates': [{'content': {'parts': [{'text': '생각', 'thought': True}, {'text': '벨트부터 보세요.'}]}}],
+                    'usageMetadata': {'candidatesTokenCount': 7}}
+        g = Gemini(KeyConnectTests.MemoryVault('AIza-test-key-000000000000')); g.model = 'gemini-x-flash'
+        with patch.object(g, 'call', side_effect=fake_call):
+            text, meta = g.analyse('gemini', '벨트: 18성', '어디부터?', [{'role': 'assistant', 'content': '이전 답'}])
+            g.analyse('gemini', '벨트: 18성', '다시')
+        self.assertEqual(text, '벨트부터 보세요.')                       # 생각(thought) 부분은 답에 넣지 않는다
+        self.assertEqual(meta['eval_count'], 7)
+        first = sent[0][1]
+        self.assertIn('[캐릭터 정보]', first['contents'][-1]['parts'][0]['text'])
+        self.assertEqual(first['contents'][0]['role'], 'model')          # assistant -> model
+        self.assertIn('메이플스토리', first['systemInstruction']['parts'][0]['text'])
+        self.assertEqual(first['generationConfig']['thinkingConfig'], {'thinkingLevel': 'low'})   # Gemini 3.x 방식 먼저
+        self.assertEqual(sent[1][1]['generationConfig']['thinkingConfig'], {'thinkingBudget': 0})  # 거절되면 2.5 방식
+        self.assertNotIn('thinkingConfig', sent[2][1]['generationConfig'])   # 그것도 거절되면 빼고
+        self.assertEqual(len(sent), 4)
+        self.assertNotIn('thinkingConfig', sent[3][1]['generationConfig'])   # 그 모델은 다음부터 통한 방식으로 바로
+    def test_connect_skips_model_without_free_quota(self):
+        from mepiti.adapters import Gemini, gemini_error
+        g = Gemini(KeyConnectTests.MemoryVault())
+        tried = []
+        def fake_call(path, body=None, key=None, timeout=60):
+            if path.startswith('/models?'):
+                return {'models': [{'name': 'models/gemini-flash-latest', 'supportedGenerationMethods': ['generateContent']},
+                                   {'name': 'models/gemini-flash-lite-latest', 'supportedGenerationMethods': ['generateContent']},
+                                   {'name': 'models/text-embedding-004', 'supportedGenerationMethods': ['embedContent']}]}
+            tried.append((path, key))
+            if 'gemini-flash-latest:' in path:
+                raise gemini_error(429, {'status': 'RESOURCE_EXHAUSTED', 'message': 'limit: 0'})
+            return {'candidates': [{'content': {'parts': [{'text': '네'}]}}]}
+        with patch.object(g, 'call', side_effect=fake_call):
+            self.assertEqual(g.check('AIza-new-key-0000000000'), 'gemini-flash-lite-latest')
+        self.assertEqual(g.model, 'gemini-flash-lite-latest')
+        self.assertTrue(all(k == 'AIza-new-key-0000000000' for _, k in tried))   # 저장 전 새 키로 시험한다
+    def test_select_uses_json_schema(self):
+        from mepiti.adapters import Gemini
+        g = Gemini(KeyConnectTests.MemoryVault('AIza-test-key-000000000000')); g.model = 'gemini-x-flash'
+        with patch.object(g, 'call', return_value={'candidates': [{'content': {'parts': [{'text': '{"ids": [1, 1, 0]}'}]}}]}) as call:
+            ids, _ = g.select('gemini', '질문', [{'id': 0, 'text': 'a'}, {'id': 1, 'text': 'b'}])
+        self.assertEqual(ids, [1, 0])
+        self.assertEqual(call.call_args[0][1]['generationConfig']['responseMimeType'], 'application/json')
+    def test_router_sends_cloud_to_gemini_and_rest_to_ollama(self):
+        from mepiti.adapters import ModelRouter
+        class Fake:
+            def __init__(self, name): self.name = name
+            def analyse(self, model, *a, **k): return self.name, {}
+            def status(self): return {'connected': True, 'models': []}
+        router = ModelRouter(Fake('local'), Fake('cloud'))
+        self.assertEqual(router.analyse('gemini', 'f', 'q')[0], 'cloud')
+        self.assertEqual(router.analyse('qwen3.5:2b', 'f', 'q')[0], 'local')
+        self.assertEqual(router.status()['connected'], True)
+
+
+class CloudChoiceTests(unittest.TestCase):
+    """세 선택지(클라우드·2B·8B), 클라우드 추천. 설치 마법사와 설정에서 바꿀 수 있다."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.app = Application(self.tmp.name)
+        self.app.cloud_vault = KeyConnectTests.MemoryVault(); self.app.gemini.vault = self.app.cloud_vault
+        self.checked = []
+        def check(key=None):
+            self.checked.append(key)
+            if key == 'AIza-rejected-key-000000':
+                from mepiti.adapters import gemini_error
+                raise gemini_error(400, {'message': 'API key not valid.'})
+            self.app.gemini.model = 'gemini-flash-latest'; return self.app.gemini.model
+        self.app.gemini.check = check
+    def tearDown(self): self.tmp.cleanup()
+    def status(self):
+        with patch.object(Ollama, 'status', return_value={'connected': False, 'models': []}):
+            return self.app.status()
+    def test_three_choices_cloud_recommended(self):
+        presets = self.status()['presets']
+        self.assertEqual([p['id'] for p in presets], ['cloud', 'light', 'quality'])
+        self.assertEqual([p['id'] for p in presets if p['recommended']], ['cloud'])
+    def test_cloud_without_key_asks_for_key(self):
+        r = self.app.route('POST', '/api/model/preset', {}, {'id': 'cloud'})
+        self.assertEqual(r, {'need_key': True}); self.assertEqual(self.app.store.setting('model'), '')
+    def test_rejected_key_not_saved(self):
+        with self.assertRaises(AppError): self.app.connect_cloud_key('AIza-rejected-key-000000', use=True)
+        self.assertIsNone(self.app.cloud_vault.key); self.assertEqual(self.app.store.setting('model'), '')
+    def test_connect_and_use_then_ready_without_ollama(self):
+        (Path(self.tmp.name) / 'setup.json').write_text('{"model_choice":"cloud"}', encoding='utf-8')
+        self.assertEqual(self.status()['setup_choice'], 'cloud')             # 설치 마법사에서 고른 클라우드
+        r = self.app.connect_cloud_key('  AIza-good-key-0000000000 ', use=True)
+        self.assertEqual(r, {'state': 'ok', 'model': 'gemini-flash-latest'})
+        st = self.status()
+        self.assertEqual(st['selected_model'], 'gemini'); self.assertTrue(st['ready'])   # Ollama가 꺼져 있어도 준비됨
+        self.assertTrue(st['cloud']['key_present']); self.assertEqual(st['cloud']['model'], 'gemini-flash-latest')
+        self.assertFalse((Path(self.tmp.name) / 'setup.json').exists())
+    def test_switch_back_to_local_in_settings(self):
+        self.app.connect_cloud_key('AIza-good-key-0000000000', use=True)
+        with patch.object(Ollama, 'status', return_value={'connected': True, 'models': ['qwen3.5:2b']}):
+            self.app.route('POST', '/api/model/preset', {}, {'id': 'light'})
+            self.assertEqual(self.app.status()['selected_model'], 'qwen3.5:2b')
+        self.app.route('POST', '/api/model/preset', {}, {'id': 'cloud'})       # 키가 있으면 바로 다시 클라우드로
+        self.assertEqual(self.app.store.setting('model'), 'gemini')
+    def test_key_change_in_settings_does_not_switch_model(self):
+        self.app.store.set_setting('model', 'qwen3.5:2b')
+        self.app.connect_cloud_key('AIza-good-key-0000000000', use=False)
+        self.assertEqual(self.app.store.setting('model'), 'qwen3.5:2b')
+    def test_delete_key(self):
+        self.app.connect_cloud_key('AIza-good-key-0000000000', use=True)
+        self.app.route('POST', '/api/cloud/key/delete', {}, {})
+        self.assertIsNone(self.app.cloud_vault.key); self.assertFalse(self.status()['ready'])

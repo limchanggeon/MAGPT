@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.2.3 릴리스(앱 창, 첫 실행 API 키 안내·키 상태별 처리, 사용법 안내). 전체 요구사항 완료 아님.
+- 현재 단계: v0.2.3 릴리스 + 클라우드 AI(Gemini) 작업(브랜치, 릴리스 전). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -942,3 +942,28 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   태그, 릴리스 작업 성공. `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB), 한국어 설명. `latest` 링크 두 개 HTTP 200.
   https://github.com/limchanggeon/MAGPT/releases/tag/v0.2.3
 - 다음: 지인 실사용 피드백(키 안내·사용법 안내), 실제 만료 키의 넥슨 오류 코드 확인, Windows 실기 확인.
+
+### 2026-09-29 — 클라우드 AI(Gemini 무료) 선택지 (사용자 요청: "클라우드 LLM으로 가볍게, 무료로", "세 개로, 클라우드 기본 추천, 설치 마법사나 설정에서 수정 가능")
+
+- 결정(사용자): 선택지 클라우드(Gemini 무료)·2B·8B, 클라우드를 기본 추천. 로컬은 개인정보를 원하는 사람용으로 남김.
+- 변경:
+  - `mepiti/adapters.py` — `Vault(account,label)`(키 이름별 보관), 지시문을 `analysis_messages`·`select_messages`·`selected_ids`·`written_text`로 분리해
+    Ollama와 공유, `CLOUD_MODEL='gemini'`, `Gemini`(REST generateContent, 모델 목록·시험 요청으로 모델 고르기, 생각 설정 순차 시도, 한도 모델 건너뛰기),
+    `gemini_error`(invalid/quota/region/unverified), `ModelRouter`.
+  - `mepiti/models.py` — `PRESETS`에 `cloud`(맨 앞), `RECOMMENDED='cloud'`, `describe(..., cloud_key)`가 `fits_device`(로컬 중 이 기기에 맞는 쪽)도 준다.
+  - `mepiti/server.py` — `cloud_vault`·`gemini`·`ModelRouter`, `status.ready`·`status.cloud`, `connect_cloud_key`(저장 전 시험, use면 사용 모델도 클라우드),
+    `/api/cloud/key/connect`·`/delete`, `/api/model/preset`에서 클라우드는 키 없으면 `need_key`.
+  - `mepiti/chat.py` — '로컬 모델' 문구를 'AI 모델'로.
+  - `mepiti/static/app.js`·`style.css`·`index.html` — `modelChooser`(첫 실행 카드·설정 공용: 카드 3개, 클라우드는 위에 넓게, Gemini 키 발급 3단계·입력,
+    연결됨이면 '키 바꾸기·키 삭제', 로컬인데 Ollama가 없으면 'Ollama 필요' → 설치 안내), 상단 표시 'Gemini · 클라우드', `s.ready` 사용.
+  - `scripts/installer.iss` — 모델 페이지 4개(클라우드 기본·2B·8B·나중에, VRAM으로 '이 PC에 맞음' 표시), 로컬을 고를 때만 Ollama 페이지·다운로드, setup.json `cloud`.
+  - `scripts/demo_server.py` — `FakeVault`를 키 이름별로, `FakeGemini`(키 `AIza-bad…`는 거절), `--cloud`.
+  - 테스트 `GeminiTests` 6개·`CloudChoiceTests` 7개. README(첫 줄의 '전부 내 컴퓨터 안에서' 정정, 설치·AI 모델 표·Gemini 키 발급·약관 요점·문제 해결),
+    `docs/images/first-run.png` 새로 찍음, 쓰지 않게 된 `docs/images/model-choice.png` 삭제. IMPLEMENTATION.
+- 사실 확인(2026-09-29, 웹): 공식 모델 문서 — `gemini-flash-latest`·`gemini-flash-lite-latest` 별칭, 현재 3.x Flash 계열. 생각 문서 — 3.x는 thinkingLevel, 생각 토큰은 출력 한도에 포함.
+  약관 — 무료 서비스는 입력·출력을 개선에 쓰고 사람이 검토할 수 있음, 만 18세 이상, 민감정보 금지. 포럼 — 일부 모델은 무료 한도가 사실상 0(→ 시험 요청으로 건너뜀).
+  **요청 필드 이름(thinkingLevel 등)은 요약 도구로 읽은 것이라 정확한 철자는 실제 키로 확인해야 한다. 틀리면 400 → 다음 방식으로 넘어가도록 만들었다.**
+- 검증(2026-09-29, 사용자 Mac): 자동 테스트 306개 통과. 실제 Google에 가짜 키 → `invalid`로 분류 확인. 데모 서버 + WebKit: 세 카드·추천 표시, 'Gemini 키 넣고 쓰기' → 발급 안내,
+  거절 키 문구, 연결 → 준비됨·상단 'Gemini · 클라우드', 대화 답변이 클라우드(가짜)로 감, 설정에서 2B로 바꿨다 클라우드로 되돌림, setup.json `cloud` → 키 입력이 바로 열림. 페이지 오류 없음.
+- 미검증: **실제 Gemini 키로 답변**(키 없음 — 사용자나 지인이 키를 넣어 한 번 확인 필요), Windows 설치 마법사 실제 화면(Pascal 컴파일은 CI로 확인).
+- 다음: CI 확인 → 사용자 확인 후 릴리스(기능 추가라 0.3.0 제안).

@@ -12,7 +12,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .adapters import FixedKey, Nexon, Ollama, Vault, install_ollama_mac, key_problem, recognize, system_info
+from .adapters import (CLOUD_MODEL, FixedKey, Gemini, ModelRouter, Nexon, Ollama, Vault, install_ollama_mac,
+                       key_problem, recognize, system_info)
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
@@ -81,7 +82,9 @@ class Application:
         self.store = Store(folder)
         self.vault = Vault()
         self.nexon = CachedNexon(Nexon(self.vault))
-        self.model = Ollama()
+        self.cloud_vault = Vault('gemini-api-key', 'Gemini API 키')
+        self.gemini = Gemini(self.cloud_vault)
+        self.model = ModelRouter(Ollama(), self.gemini)   # 고른 모델에 따라 로컬·클라우드로 보낸다
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
         self.ollama_setup = {'running':False}
@@ -98,8 +101,11 @@ class Application:
         ollama = self.model.status()
         system = system_info(self.store.folder)
         selected = self.store.setting('model')
-        return {'version':__version__,'model':ollama,'selected_model':selected,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
-                'presets':models.describe(system,ollama['models'],selected),
+        cloud = self.cloud_status()
+        # 답변을 쓸 준비가 됐는가. 클라우드는 키가 있으면, 로컬은 Ollama에 그 모델이 있으면.
+        ready = cloud['key_present'] if selected == CLOUD_MODEL else bool(selected) and selected in ollama['models']
+        return {'version':__version__,'model':ollama,'selected_model':selected,'ready':ready,'cloud':cloud,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
+                'presets':models.describe(system,ollama['models'],selected,cloud['key_present']),
                 'setup_choice':models.setup_choice(self.store.folder) if not selected else None,
                 'ollama_setup':dict(self.ollama_setup),
                 'tour_done':self.store.setting('tour_done')=='1'}
@@ -140,6 +146,35 @@ class Application:
         except AppError as e:
             return {'state':key_problem(e),'message':str(e)}
         return {'state':'ok'}
+
+    def cloud_status(self):
+        try:
+            present, error = bool(self.cloud_vault.get()), None
+        except AppError as e:
+            present, error = False, str(e)
+        return {'key_present':present,'vault_error':error,
+                'model':self.gemini.model or self.store.setting('cloud_model') or None}
+
+    def connect_cloud_key(self, key, use=False):
+        """Gemini 키를 먼저 시험하고 저장한다. Google이 거절한 키는 저장하지 않는다. use면 사용 모델도 클라우드로 정한다."""
+        key = key.strip()
+        if not 20 <= len(key) <= 200 or any(c.isspace() for c in key):
+            raise AppError('Gemini API 키 형식을 확인해 주세요. 복사한 키를 그대로 붙여 넣으면 됩니다.')
+        state = {'state':'ok'}
+        try:
+            state['model'] = self.gemini.check(key)
+        except AppError as e:
+            if getattr(e, 'kind', 'unverified') in ('invalid', 'region'):
+                raise AppError(str(e), 400)
+            # 인터넷·일시 오류면 키가 맞을 수도 있다. 저장하고 쓸 때 다시 확인한다.
+            state = {'state':'unverified','message':str(e)}
+        self.cloud_vault.save(key)
+        if state.get('model'):
+            self.store.set_setting('cloud_model', state['model'])
+        if use:
+            self.store.set_setting('model', CLOUD_MODEL)
+            models.clear_setup(self.store.folder)
+        return state
 
     def forget_nexon_cache(self):
         cache = getattr(self.nexon, 'cache', None)
@@ -236,6 +271,12 @@ class Application:
             if path == '/api/settings/key/delete':
                 self.vault.delete()
                 return {'ok':True}
+            if path == '/api/cloud/key/connect':
+                return self.connect_cloud_key(required(data,'key',200), bool(data.get('use')))
+            if path == '/api/cloud/key/delete':
+                self.cloud_vault.delete()
+                self.gemini.model = None
+                return {'ok':True}
             if path == '/api/tour':
                 # 사용법 안내를 끝냈는지. 앱 창(pywebview)은 브라우저 저장소가 남지 않을 수 있어 DB에 둔다.
                 s.set_setting('tour_done','1' if data.get('done') else '0')
@@ -252,6 +293,13 @@ class Application:
                 # 2B·8B 중 하나를 고른다. 받아 둔 모델이면 바로 쓰고, 없으면 받은 뒤 쓴다.
                 preset = models.by_id(required(data,'id',20))
                 if not preset: raise AppError('고를 수 있는 모델이 아닙니다.')
+                if preset.get('cloud'):
+                    # 클라우드는 받을 것이 없다. 키가 없으면 화면이 키 입력을 먼저 보여 준다.
+                    if not self.cloud_status()['key_present']:
+                        return {'need_key':True}
+                    s.set_setting('model',CLOUD_MODEL)
+                    models.clear_setup(s.folder)
+                    return {'selected':CLOUD_MODEL}
                 if preset['model'] in self.model.status()['models']:
                     s.set_setting('model',preset['model'])
                     models.clear_setup(s.folder)

@@ -307,3 +307,17 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
   · `vault_error`(보안 저장소를 못 읽음 — 새 키 발급을 요구하지 않고 '다시 확인') · `unverified`(인터넷·한도·점검 — 카드 안 띄움).
   새 키는 `POST /api/settings/key/connect`가 **저장 전에** 넥슨에 시험한다. 거절된 키는 저장하지 않아 쓰던 키가 남는다. 설정의 키 입력도 같은 경로.
   확인(2026-09-29): 자동 테스트 293개 통과(`KeyConnectTests` 5개), 데모 서버 4가지 상태를 WebKit으로 확인.
+
+## 2026-09-29 클라우드 AI(Gemini 무료) 추가
+
+- 선택지 세 개: **클라우드 · 무료 (Gemini)**(추천) · 2B · 8B. 설치 마법사(Windows)와 첫 실행 카드, 설정 → AI 모델에서 고르고 바꾼다.
+- `adapters.Gemini`: REST `generateContent`. 키로 모델 목록을 받아 `gemini-flash-latest` → `gemini-flash-lite-latest` → 그 밖의 Flash 순으로,
+  짧은 시험 요청으로 무료 한도(429)에 막힌 모델은 건너뛴다. 생각(thinking)은 `thinkingLevel: low` → `thinkingBudget: 0` → 설정 없음 순으로 시도해 모델별로 기억.
+  오류는 `invalid`(키) · `quota`(무료 한도) · `region` · `unverified`로 나눠 쉬운 말로 알린다. `ModelRouter`가 사용 모델이 `gemini`면 Gemini, 아니면 Ollama로 보낸다.
+  지시문(`analysis_messages`·`select_messages`)은 로컬과 같다. 숫자는 앱이 쓰고 모델은 설명만 — 검증 필터도 그대로다.
+- 키: OS 보안 저장소에 넥슨 키와 따로(`Vault('gemini-api-key')`). `POST /api/cloud/key/connect`가 **저장 전에** 시험하고 거절된 키는 저장하지 않는다.
+  `/api/cloud/key/delete`. `status.ready`·`status.cloud` 추가(클라우드는 Ollama 없이 준비됨).
+- 안내 문구: Gemini API 약관(무료 서비스) — 입력이 개선에 쓰이고 사람이 검토할 수 있음, 만 18세 이상. 화면·README·설치 마법사에 표시.
+- 확인(2026-09-29, 사용자 Mac): 자동 테스트 306개 통과. 실제 Google 엔드포인트에 가짜 키를 보내 '키 거절' 분류가 맞는 것을 확인.
+  데모 서버(가짜 Gemini)+WebKit으로 첫 실행 선택·거절 키·연결·대화 답변·설정에서 2B↔클라우드 전환·설치 마법사 선택(setup.json) 확인.
+  **실제 Gemini 키로 답변을 받아 보지는 못했다(키 없음).** 모델 이름·생각 설정·무료 한도 동작은 공식 문서와 포럼 보고 기준.

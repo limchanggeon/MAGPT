@@ -1,9 +1,11 @@
 ; 메피티 Windows 설치 프로그램 (Inno Setup 6)
 ;
-; 마법사 흐름: 설치 폴더 -> AI 모델 선택(2B/8B/나중에) -> Ollama 설치(없을 때만) -> 설치
-; 모델 파일(2.7~4.8GB)은 여기서 받지 않는다. 고른 값을 %USERPROFILE%\.mepiti\setup.json에 남기면
+; 마법사 흐름: 설치 폴더 -> AI 모델 선택(클라우드/2B/8B/나중에) -> Ollama 설치(로컬 모델을 고르고 없을 때만) -> 설치
+; 클라우드(Gemini 무료)가 기본 추천이다. 설치할 것이 없고, 첫 실행에서 Google API 키를 넣는다.
+; 로컬 모델 파일(2.7~4.8GB)은 여기서 받지 않는다. 고른 값을 %USERPROFILE%\.mepiti\setup.json에 남기면
 ; 앱이 첫 실행에서 진행률과 함께 받고 사용 모델로 정한다(mepiti/models.py). 모델을 받으려면 Ollama가
 ; 실행 중이어야 하고, 대용량 진행률은 앱 화면이 더 잘 보여 주기 때문이다.
+; 모델은 나중에 앱의 설정에서 언제든 바꿀 수 있다.
 
 #define AppVersion "0.2.3"
 
@@ -70,27 +72,44 @@ begin
   Result := FileExists(ExpandConstant('{localappdata}\Programs\Ollama\ollama.exe'));
 end;
 
+// 모델 선택지 순서. setup.json에 남기는 값과 앱(mepiti/models.py)의 id가 짝이다.
+const
+  ChoiceCloud = 0;
+  ChoiceLight = 1;
+  ChoiceQuality = 2;
+
+function LocalModelChosen: Boolean;
+begin
+  Result := (ModelPage.SelectedValueIndex = ChoiceLight) or (ModelPage.SelectedValueIndex = ChoiceQuality);
+end;
+
 procedure InitializeWizard;
 var
   Vram: Integer;
+  LightFit, QualityFit: String;
 begin
-  ModelPage := CreateInputOptionPage(wpSelectDir,
-    'AI 모델 선택', '답변에 쓸 로컬 AI 모델을 고르세요.',
-    '고른 모델은 메피티를 처음 실행할 때 내려받습니다. 나중에 앱 설정에서 언제든 바꿀 수 있습니다.',
-    True, False);
-  ModelPage.Add('2B · 가벼움 — 내려받기 2.7GB, 메모리 약 2.4GB. VRAM 4GB(GTX 1650 등)에서 게임과 함께 쓰기 좋습니다.');
-  ModelPage.Add('8B · 품질 — 내려받기 4.8GB, 메모리 약 5.2GB. VRAM 8GB 이상 권장. 2B보다 3~4배 느립니다.');
-  ModelPage.Add('나중에 고르기');
   Vram := DetectVramMiB;
+  LightFit := '';
+  QualityFit := '';
   if Vram >= 7500 then
-    ModelPage.SelectedValueIndex := 1
-  else
-    ModelPage.SelectedValueIndex := 0;
+    QualityFit := ' (이 PC에 맞음)'
+  else if Vram > 0 then
+    LightFit := ' (이 PC에 맞음)';
+  ModelPage := CreateInputOptionPage(wpSelectDir,
+    'AI 모델 선택', '답변에 쓸 AI를 고르세요.',
+    '나중에 앱의 설정에서 언제든 바꿀 수 있습니다.',
+    True, False);
+  ModelPage.Add('클라우드 · 무료 (Gemini) — 추천. 설치할 것이 없고 그래픽카드와 상관없습니다. ' +
+                '처음 실행할 때 Google API 키(무료)를 넣으면 됩니다. 질문과 캐릭터 정보가 Google로 전송됩니다(만 18세 이상).');
+  ModelPage.Add('2B · 가벼움' + LightFit + ' — 내 PC에서만 실행. 내려받기 2.7GB, 메모리 약 2.4GB. VRAM 4GB(GTX 1650 등)에서 게임과 함께 쓰기 좋습니다.');
+  ModelPage.Add('8B · 품질' + QualityFit + ' — 내 PC에서만 실행. 내려받기 4.8GB, 메모리 약 5.2GB. VRAM 8GB 이상 권장. 2B보다 3~4배 느립니다.');
+  ModelPage.Add('나중에 고르기');
+  ModelPage.SelectedValueIndex := ChoiceCloud;
 
   NeedOllama := not OllamaInstalled;
   OllamaPage := CreateInputOptionPage(ModelPage.ID,
     'Ollama 설치', 'AI 답변에는 Ollama가 필요합니다.',
-    'Ollama는 AI 모델을 이 PC에서 돌리는 무료 프로그램입니다. 공식 설치 파일(약 1.5GB)을 내려받아 함께 설치합니다. ' +
+    '로컬 모델을 고르셨습니다. Ollama는 AI 모델을 이 PC에서 돌리는 무료 프로그램입니다. 공식 설치 파일(약 1.5GB)을 내려받아 함께 설치합니다. ' +
     '끄면 메피티만 설치되고, 나중에 ollama.com에서 직접 설치할 수 있습니다.',
     False, False);
   OllamaPage.Add('Ollama 함께 설치 (권장)');
@@ -101,13 +120,14 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = OllamaPage.ID) and not NeedOllama;
+  // 클라우드·나중에를 고르면 Ollama가 필요 없다. 로컬은 나중에 앱 설정에서 골라도 된다.
+  Result := (PageID = OllamaPage.ID) and not (NeedOllama and LocalModelChosen);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if (CurPageID = wpReady) and NeedOllama and OllamaPage.Values[0] then
+  if (CurPageID = wpReady) and NeedOllama and LocalModelChosen and OllamaPage.Values[0] then
   begin
     DownloadPage.Clear;
     DownloadPage.Add(OllamaSetupUrl, 'OllamaSetup.exe', '');
@@ -147,8 +167,9 @@ begin
   end;
 
   case ModelPage.SelectedValueIndex of
-    0: Choice := 'light';
-    1: Choice := 'quality';
+    ChoiceCloud: Choice := 'cloud';
+    ChoiceLight: Choice := 'light';
+    ChoiceQuality: Choice := 'quality';
   else
     Choice := 'later';
   end;

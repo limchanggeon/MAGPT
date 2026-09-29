@@ -18,19 +18,46 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mepiti import conditions, server  # noqa: E402
+from mepiti.adapters import CLOUD_MODEL, gemini_error  # noqa: E402
 from mepiti.core import AppError, now  # noqa: E402
 
 
+NEXON = 'nexon-api-key'
+
+
 class FakeVault:
-    """키는 메모리에만 둔다. 실제 키체인을 건드리지 않는다."""
-    key = 'demo-key'
-    broken = False
+    """키는 메모리에만 둔다. 실제 키체인을 건드리지 않는다. 넥슨 키와 Gemini 키를 이름별로 따로 둔다."""
+    keys = {NEXON: 'demo-key'}
+    broken = False                           # 넥슨 키 보관소를 못 읽는 상황
+
+    def __init__(self, account=NEXON, label=''):
+        self.account = account
+
     def get(self):
-        if type(self).broken:
+        if type(self).broken and self.account == NEXON:
             raise AppError('OS 보안 저장소에 접근하지 못했습니다.', 503)
-        return type(self).key
-    def save(self, key): type(self).key = key
-    def delete(self): type(self).key = None
+        return type(self).keys.get(self.account)
+
+    def save(self, key): type(self).keys[self.account] = key
+    def delete(self): type(self).keys.pop(self.account, None)
+
+
+class FakeGemini:
+    """실제 Google을 부르지 않는 Gemini. 'AIza-bad'로 시작하는 키는 Google이 거절한 것처럼 응답한다."""
+    def __init__(self, vault):
+        self.vault, self.model = vault, None
+
+    def check(self, key=None):
+        if (key or '').startswith('AIza-bad'):
+            raise gemini_error(400, {'message': 'API key not valid. Please pass a valid API key.'})
+        self.model = 'gemini-flash-latest'
+        return self.model
+
+    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+        return '(데모) 클라우드 모델 자리입니다. 데모 서버는 실제 Gemini를 부르지 않습니다.', {}
+
+    def select(self, model, question, passages):
+        return [0], {}
 
 
 def fake_nexon_error(key):
@@ -54,7 +81,7 @@ class FakeNexon:
         return dict(self.profile, retrieved_at=now())
 
     def characters(self):
-        error = fake_nexon_error(self.key if self.key is not None else FakeVault.key)
+        error = fake_nexon_error(self.key if self.key is not None else FakeVault.keys.get(NEXON))
         if error:
             raise error
         p = self.profile
@@ -76,20 +103,25 @@ def main():
     parser.add_argument('--no-key', action='store_true', help='API 키가 없는 상태로 띄운다(키 bad-key-test는 넥슨 거절, offline-key-test는 연결 실패로 응답)')
     parser.add_argument('--bad-saved-key', action='store_true', help='넥슨이 거절하는(만료된) 키가 저장된 상태로 띄운다')
     parser.add_argument('--vault-error', action='store_true', help='보안 저장소를 읽지 못하는 상태로 띄운다')
+    parser.add_argument('--cloud', action='store_true', help='클라우드(Gemini, 가짜)를 쓰는 상태로 띄운다. --first-run과 함께 쓰면 키만 없는 상태')
     args = parser.parse_args()
 
     profile = json.loads(Path(args.profile).read_text(encoding='utf-8'))
     folder = tempfile.mkdtemp(prefix='mepiti-demo-')
     server.Vault = FakeVault
     if args.no_key:
-        FakeVault.key = None
+        FakeVault.keys.pop(NEXON, None)
     if args.bad_saved_key:
-        FakeVault.key = 'bad-key-test'
+        FakeVault.keys[NEXON] = 'bad-key-test'
     FakeVault.broken = args.vault_error
     app = server.Application(folder)
     app.vault = FakeVault()
     app.nexon = FakeNexon(profile)
     app.nexon_for = lambda key: FakeNexon(profile, key)
+    app.gemini = app.model.cloud = FakeGemini(app.cloud_vault)
+    if args.cloud and not args.first_run:
+        app.cloud_vault.save('AIza-demo-key-000000000000')
+        args.model = CLOUD_MODEL
     app.token = 'demo-token'
     store = app.store
     store.character_save({'name': profile['name'], 'budget': 30_000_000_000, 'goal': '검은 마법사 클리어', 'main': True})
