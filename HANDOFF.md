@@ -868,4 +868,8 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   Info.plist 이름 메피티·버전 0.2.0. 패키지 앱 실행 → 다른 앱을 앞으로 → 다시 실행: 두 번째 실행은 0으로 끝나고 창 1개 유지, 메피티가 앞으로 옴, 새 크래시 없음.
   스크린샷으로 어두운 제목 표시줄과 입력창 가로 막대 제거 확인. Finder 아이콘은 Launch Services 캐시 때문에 처음엔 빈 문서 모양이었고 `lsregister -f` 후 정상 표시.
   이 확인은 실제 데이터 폴더(`~/.mepiti`)로 실행했지만 데이터를 쓰는 동작은 하지 않았고, 끝나고 `/api/shutdown`으로 껐다.
-- 미검증: Windows 창(WebView2)·어두운 제목 표시줄·아이콘, Windows 두 번째 실행 시 앞으로 가져오기. CI 빌드 결과는 푸시 후 확인.
+- **Windows CI에서 찾은 문제**: 테스트가 20분 넘게 멈췄다. 원인은 `ThreadingHTTPServer`의 기본 `allow_reuse_address`(SO_REUSEADDR)가
+  Windows에서는 **다른 프로세스가 쓰는 포트도 잡게 해 줘서**, 두 번째 실행이 기존 메피티를 못 알아보고 그대로 서버를 띄운 것.
+  실제 Windows 사용자도 아이콘을 두 번 누르면 메피티가 둘 뜨고 한쪽이 먹통이 됐을 문제다. `server.Server`로 Windows에서는 재사용을 끄고
+  `SO_EXCLUSIVEADDRUSE`로 잡게 고쳤다. 테스트 `test_port_in_use_is_refused` 추가(283개 통과, Mac).
+- 미검증: Windows 창(WebView2)·어두운 제목 표시줄·아이콘, Windows 두 번째 실행 시 앞으로 가져오기(실기). CI 결과는 아래 후속에 적는다.

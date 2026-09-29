@@ -225,6 +225,18 @@ class Application:
         raise AppError('요청 경로를 찾을 수 없습니다.',404)
 
 
+class Server(ThreadingHTTPServer):
+    """이미 떠 있는 메피티와 같은 포트를 잡지 못하게 한다(두 번째 실행은 떠 있는 창을 앞으로 가져온다).
+    Windows의 SO_REUSEADDR은 다른 프로세스가 쓰는 포트도 잡게 해 줘서, 두 번째 실행이 기존 메피티를 못 알아보고 그대로 떠 있었다(CI에서 멈춤)."""
+    allow_reuse_address = sys.platform != 'win32'
+
+    def server_bind(self):
+        if sys.platform == 'win32':
+            import socket
+            self.socket.setsockopt(socket.SOL_SOCKET, getattr(socket, 'SO_EXCLUSIVEADDRUSE', -5), 1)
+        super().server_bind()
+
+
 def make_server(app,port=8765):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'Mepiti'
@@ -294,7 +306,7 @@ def make_server(app,port=8765):
                 self.respond(500,{'error':'처리 중 오류가 발생했습니다. 입력값과 앱 상태를 확인해 주세요.'})
         do_GET = handle_request
         do_POST = handle_request
-    server = ThreadingHTTPServer(('127.0.0.1',port),Handler)
+    server = Server(('127.0.0.1',port),Handler)
     server.daemon_threads = True
     return server
 

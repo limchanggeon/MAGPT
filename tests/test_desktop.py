@@ -140,6 +140,11 @@ class SingleInstanceTests(unittest.TestCase):
             self.assertEqual(main(['--window', '--port', str(self.port), '--data-dir', self.tmp.name]), 0)
         self.assertEqual(opened, [])
 
+    def test_port_in_use_is_refused(self):
+        # Windows는 기본값(SO_REUSEADDR)으로 두면 같은 포트를 또 잡아서 두 번째 실행이 기존 메피티를 못 알아봤다.
+        with self.assertRaises(OSError):
+            make_server(self.app, self.port)
+
     def test_window_url_marks_app_shell(self):
         self.assertEqual(desktop.window_url('http://127.0.0.1:8765'), 'http://127.0.0.1:8765?shell=window')
         self.assertEqual(desktop.window_url('http://x/?a=1'), 'http://x/?a=1&shell=window')
