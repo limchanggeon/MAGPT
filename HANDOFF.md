@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.6 릴리스(기록 탭 슈페리얼 판별 수정). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.7 릴리스(로딩 창). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1211,3 +1211,6 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   - 테스트: 스플래시 닫기 1개.
 - 검증(2026-09-29): 자동 테스트 통과. WebKit으로 상태 응답을 3.2초 늦춰 로딩 화면·문구 바뀜·사라짐, 첫 요청 실패 시 안내·다시 시도로 복구 확인.
   **Windows 스플래시는 CI 빌드로만 확인 — 실제 화면은 사용자 확인 필요.**
+- Windows CI 로그에서 스플래시 포함 확인('Building Splash', Tcl/Tk 수집).
+- **릴리스 v0.3.7**(2026-09-29): `bcccf7e`, CI 두 OS 통과, `main` 빨리감기, 태그, 릴리스 성공(파일 5개), API latest v0.3.7. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.7
+  주의: 자동 업데이트 zip도 스플래시가 든 새 Mepiti.exe를 넣으므로, 0.3.6 → 0.3.7 업데이트 뒤 다음 실행부터 스플래시가 뜬다(추정, Windows 실기 확인 필요).
