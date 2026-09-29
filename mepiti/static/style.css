@@ -571,10 +571,39 @@ dialog::backdrop{background:#05080bcc}
 .earnings-amount{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;color:var(--ink);text-align:right}
 .earnings-row button{color:var(--muted);font-size:16px}
 .earnings-row button:hover{color:var(--bad)}
-.earnings-weeks{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin:8px 0 10px}
-.earnings-week{border:1px solid var(--line);border-radius:4px;padding:8px 10px;display:grid;gap:2px}
-.earnings-week span,.earnings-week small{font-size:11px;color:var(--muted)}
-.earnings-week strong{font-family:var(--mono);font-size:14px;color:var(--gold)}
+/* 주·달 넘겨 보기, 캐릭터별 합계, 흐름 막대 */
+.earnings-periods{display:flex;flex-wrap:wrap;gap:8px 18px;margin:0 0 12px}
+.period-nav{display:flex;align-items:center;gap:6px}
+.period-nav strong{min-width:150px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums}
+.period-nav .secondary{margin:0;padding:5px 10px}
+.earnings-board{margin-top:14px}
+.totals-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.totals-table th{text-align:left;font-weight:500;color:var(--muted);font-size:11px;padding:4px 6px;border-bottom:1px solid var(--line)}
+.totals-table td{padding:6px;border-bottom:1px solid var(--line-soft)}
+.totals-table .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.totals-table th:not(:first-child){text-align:right}
+.totals-table .total{color:var(--gold)}
+.totals-table tr.sum td{font-weight:600;border-bottom:0}
+.earnings-trend{margin-top:14px}
+.trend-tabs{display:flex;gap:4px}
+.trend-tabs button{font-size:11.5px;padding:4px 10px;border:1px solid var(--line);border-radius:4px;color:var(--muted)}
+.trend-tabs button.active{color:var(--gold);border-color:var(--gold-dim)}
+.trend-legend{display:flex;gap:14px;align-items:center;font-size:11px;color:var(--muted);margin:6px 0 10px}
+.trend-legend span::before{content:'';display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.legend-hunt::before{background:var(--gold)}
+.legend-boss::before{background:var(--rare)}
+.trend-legend .hint::before{display:none}
+.trend-bars{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;height:190px;align-items:end}
+.trend-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;padding:4px 0;border-radius:4px}
+.trend-col:hover{background:var(--inset)}
+.trend-col.picked{background:var(--inset);box-shadow:inset 0 0 0 1px var(--gold-dim)}
+.trend-stack{display:flex;flex-direction:column-reverse;width:60%;max-width:34px;height:120px;justify-content:flex-start}
+.trend-stack span{display:block;width:100%;min-height:0}
+.trend-hunt{background:var(--gold);border-radius:2px 2px 0 0}
+.trend-boss{background:var(--rare)}
+.trend-value{font-family:var(--mono);font-size:9.5px;color:var(--muted);white-space:nowrap;min-height:1.2em}
+.trend-label{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.trend-col.picked .trend-label{color:var(--gold)}
 .boss-checklist{display:grid;gap:4px;max-height:none;margin:4px 0 12px}
 .boss-row{display:grid;grid-template-columns:118px minmax(0,1fr) 64px;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--line-soft);border-radius:4px;background:var(--inset)}
 .boss-row.picked{border-color:var(--gold-dim)}

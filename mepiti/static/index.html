@@ -42,10 +42,23 @@
 <section id="view-characters" class="view content-view" hidden><div class="page-heading"><h1>캐릭터</h1></div><div id="character-profile" aria-live="polite"><div class="profile-placeholder"><h2>불러오는 중</h2><p>저장된 키로 캐릭터와 장비를 조회한다.</p></div></div><section class="panel"><div class="account-heading"><h2>캐릭터 선택</h2><button id="discover-characters" class="primary" type="button">목록 불러오기</button></div><p id="account-status" role="status" class="muted">저장된 키로 계정 캐릭터 목록을 조회한다.</p><label for="account-search">검색<input id="account-search" type="search" placeholder="이름 · 월드 · 직업"></label><div id="account-characters" class="account-characters"></div></section><details class="character-management"><summary>관리 중인 캐릭터 · 성장 목표</summary><p id="character-feedback" role="status" class="notice" hidden></p><div id="character-list" class="character-grid"></div><form id="character-form" class="panel form-grid"><h2 id="character-form-title">캐릭터 등록</h2><input type="hidden" name="id"><label>이름<input name="name" required maxlength="30" placeholder="게임 내 캐릭터 이름"></label><label>예산 (메소)<input name="budget" type="number" min="0" max="1000000000000000" value="0" required></label><label class="full">성장 목표<input name="goal" maxlength="500" placeholder="예: 세렌 클리어"></label><label class="checkbox full"><input name="main" type="checkbox"> 대표 캐릭터</label><div class="full"><button class="primary" type="submit">저장 후 조회</button><button class="secondary" type="reset">초기화</button></div></form></details></section>
 
 <section id="view-calculator" class="view content-view" hidden><div class="page-heading"><h1>수익</h1></div>
-<div id="crystal-alert" class="notice" hidden></div><div id="earnings-summary" class="earnings-summary"></div>
-<div class="two-columns">
+<div id="crystal-alert" class="notice" hidden></div>
+<div class="earnings-periods">
+<div class="period-nav" role="group" aria-label="볼 주"><button type="button" id="week-prev" class="secondary" aria-label="지난주">◀</button><strong id="week-label">이번 주</strong><button type="button" id="week-next" class="secondary" aria-label="다음 주">▶</button><button type="button" id="week-now" class="secondary">이번 주</button></div>
+<div class="period-nav" role="group" aria-label="볼 달"><button type="button" id="month-prev" class="secondary" aria-label="지난달">◀</button><strong id="month-label">이번 달</strong><button type="button" id="month-next" class="secondary" aria-label="다음 달">▶</button><button type="button" id="month-now" class="secondary">이번 달</button></div>
+</div>
+<div id="earnings-summary" class="earnings-summary"></div>
+<div class="two-columns earnings-board">
+<section class="panel"><h2 id="week-chars-title">캐릭터별 · 이 주</h2><div id="week-characters" class="character-totals"></div></section>
+<section class="panel"><h2 id="month-chars-title">캐릭터별 · 이 달</h2><div id="month-characters" class="character-totals"></div></section>
+</div>
+<section class="panel earnings-trend"><div class="earnings-head"><h2>흐름</h2><div class="trend-tabs" role="tablist"><button type="button" data-trend="weeks" class="active" role="tab" aria-selected="true">최근 12주</button><button type="button" data-trend="months" role="tab" aria-selected="false">최근 6개월</button></div></div>
+<div class="trend-legend"><span class="legend-hunt">재획</span><span class="legend-boss">주보</span><span class="hint">막대를 누르면 그 주·달을 봅니다.</span></div>
+<div id="earnings-trend" class="trend-bars"></div></section>
+<div class="two-columns earnings-forms">
 <form id="hunt-form" class="panel earnings-form"><h2>재획 기록</h2><p class="muted">번 메소와 솔 에르다 조각을 적으면 이번 재획 총수익을 계산합니다.</p>
 <label>날짜<input name="day" type="date"></label>
+<label>캐릭터<select name="character" class="earnings-character"></select></label>
 <label>번 메소<input name="meso" inputmode="text" autocomplete="off" placeholder="예: 12억 3500만"></label>
 <div class="form-pair"><label>조각 개수<input name="pieces" type="number" min="0" step="1" placeholder="예: 42"></label>
 <label>조각 가격 (1개)<input name="piece_price" inputmode="text" autocomplete="off" placeholder="예: 650만"></label></div>
@@ -55,6 +68,7 @@
 <button class="primary" type="submit">재획 기록 저장</button></form>
 <form id="boss-form" class="panel earnings-form"><h2>주보 기록</h2><p class="muted">잡은 보스를 체크하세요. 결정석은 공식 공지 판매가를 파티 인원으로 나눠 계산합니다. 한 보스는 한 난이도만 고를 수 있습니다.</p>
 <label>날짜<input name="day" type="date"></label>
+<label>캐릭터<select name="character" class="earnings-character"></select></label>
 <div id="boss-checklist" class="boss-checklist" role="group" aria-label="잡은 보스"></div>
 <details class="boss-custom"><summary>목록에 없는 보스 직접 적기</summary>
 <div class="form-pair"><label>보스<input name="boss" maxlength="30" autocomplete="off" placeholder="보스 이름"></label>
@@ -65,8 +79,8 @@
 <p id="boss-preview" class="earnings-preview" aria-live="polite"></p>
 <button class="primary" type="submit">체크한 보스 저장</button></form>
 </div>
-<div class="two-columns earnings-lists"><section class="panel"><h2>재획 기록</h2><div id="hunt-list" class="earnings-list"></div></section>
-<section class="panel"><div class="earnings-head"><h2>주보 기록</h2><button type="button" id="boss-import-button" class="secondary">이번 주 주보 불러오기</button></div><div id="boss-import" class="boss-import" hidden></div><div id="boss-weeks" class="earnings-weeks"></div><div id="boss-list" class="earnings-list"></div></section></div>
+<div class="two-columns earnings-lists"><section class="panel"><h2 id="hunt-list-title">재획 기록</h2><div id="hunt-list" class="earnings-list"></div></section>
+<section class="panel"><div class="earnings-head"><h2 id="boss-list-title">주보 기록</h2><button type="button" id="boss-import-button" class="secondary">이번 주 주보 불러오기</button></div><div id="boss-import" class="boss-import" hidden></div><div id="boss-list" class="earnings-list"></div></section></div>
 </section>
 
 <section id="view-library" class="view content-view" hidden><div class="page-heading"><h1>기록</h1></div>

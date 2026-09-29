@@ -278,7 +278,7 @@ class Application:
             if path == '/api/history/starforce': return history.overview(s)
             if path == '/api/notices': return {'events': notices.active_events(s), 'updates': s.setting(notices.UPDATES) or [],
                                                'alert': s.setting(notices.ALERT) or None, 'synced_at': s.setting(notices.SYNCED) or None}
-            if path == '/api/earnings': return earnings.overview(s)
+            if path == '/api/earnings': return earnings.overview(s, query.get('week',[None])[0], query.get('month',[None])[0])
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
             if path == '/api/auction/status': return self.auction_route(path)
         if method == 'POST':

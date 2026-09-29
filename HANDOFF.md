@@ -1106,3 +1106,15 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   `Mepiti-macOS.dmg`(25.7MB)·`Mepiti-Windows-Setup.exe`(22.2MB, Anthropic SDK 포함으로 커짐), 한국어 설명, `latest` 링크 HTTP 200.
   https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.2
 - 미검증: 실제 유료 키(Claude·OpenAI) 답변, Windows 실기.
+
+### 2026-09-29 — 수익: 지난주·월간·캐릭터별 보기 (사용자 요청: "수익 같은 거 저장, 저번 주 것도 보고, 캐릭별·이번 달 얼마 종합적으로")
+
+- 사실: 수익 기록은 원래 로컬 DB(`~/.mepiti/mepiti.sqlite3`의 `earnings` 표)에 저장되고 있었다. 부족했던 것은 보기(이번 주/이번 달/전체 합계만)와
+  재획 기록의 캐릭터(스케줄러로 불러온 주보만 캐릭터가 있었음).
+- 변경: `mepiti/earnings.py` `overview(store, week, month)` 재작성(`breakdown`, `parse_week`, `parse_month`, `shift_month`, `NO_CHARACTER`) —
+  응답 모양이 `summary`/`boss_weeks`에서 `week`/`month`/`all`/`weeks`/`months`로 바뀜(화면·테스트 함께 수정). `server.py` 쿼리 `week`·`month`.
+  `index.html`·`app.js`·`style.css` — 주·달 넘기기, 요약 카드, 캐릭터별 표, 흐름 막대(재획 금색·주보 파랑, 누르면 이동), 입력 폼 캐릭터 고르기, 목록은 고른 주만.
+  `tour.js` — 수익 단계 2개(주·달 넘기기, 기록 입력), 대상 선택자 갱신. README·IMPLEMENTATION.
+- 검증(2026-09-29): 자동 테스트 332개 통과. 데모 서버(임시 DB)에 8건(여러 주·달, 캐릭터 둘+미지정) → WebKit: 이번 주 13.57억(세렌 하드 3.02억·루시드 하드 5,970만·재획 9.95억) 등 합계 일치,
+  지난주·지난달 이동, 6개월 막대 클릭 → 8월, 캐릭터 골라 재획 저장 → 그 캐릭터 칸에 반영, 페이지 오류 없음. 실제 사용자 DB는 건드리지 않음.
+- 참고: 예전 재획 기록은 캐릭터가 없어 '미지정'으로 묶인다(나중에 고칠 수 있게 할지 사용자 판단).

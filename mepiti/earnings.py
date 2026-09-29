@@ -158,42 +158,97 @@ def delete(store, record_id):
     return {'ok': True}
 
 
-def overview(store, limit=200):
-    """기록 목록과 합계. 주간은 목요일 시작, 월간은 달력 기준."""
+NO_CHARACTER = '미지정'     # 캐릭터를 고르지 않은 기록(예전 재획 기록 등)
+
+
+def parse_week(value):
+    """보려는 주. 아무 날짜나 받아 그 주의 목요일로 맞춘다. 없으면 이번 주."""
+    if not value:
+        return week_start(today())
+    try:
+        return week_start(date.fromisoformat(str(value)))
+    except ValueError:
+        raise AppError('주는 YYYY-MM-DD 형식의 날짜로 골라 주세요.')
+
+
+def parse_month(value):
+    """보려는 달('YYYY-MM'). 없으면 이번 달. 달의 첫날을 돌려준다."""
+    if not value:
+        return today().replace(day=1)
+    try:
+        return date.fromisoformat(str(value) + '-01')
+    except ValueError:
+        raise AppError('달은 YYYY-MM 형식으로 골라 주세요.')
+
+
+def shift_month(first, months):
+    index = first.year * 12 + first.month - 1 + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def breakdown(rows):
+    """기록 묶음의 합계: 재획·주보·전체, 그리고 캐릭터별(큰 순)."""
+    out = {'hunt': 0.0, 'boss': 0.0, 'hunt_count': 0, 'boss_count': 0}
+    people = {}
+    for r in rows:
+        out[r['kind']] += r['total']
+        out[r['kind'] + '_count'] += 1
+        who = people.setdefault(r.get('character') or NO_CHARACTER,
+                                {'name': r.get('character') or NO_CHARACTER, 'hunt': 0.0, 'boss': 0.0, 'total': 0.0})
+        who[r['kind']] += r['total']
+        who['total'] += r['total']
+    out['total'] = out['hunt'] + out['boss']
+    out['characters'] = sorted(people.values(), key=lambda c: (c['name'] == NO_CHARACTER, -c['total']))
+    return out
+
+
+def overview(store, week=None, month=None, limit=200):
+    """수익 화면 전체. 고른 주(목요일 시작)·고른 달(달력 기준)의 합계와 캐릭터별, 최근 12주·6개월 흐름, 그 주의 기록 목록.
+
+    주간은 게임의 주간 초기화(목요일 0시)에 맞춘다. 지난주·지난달도 week·month로 골라 본다.
+    """
     ensure(store)
     rows = store.rows('SELECT * FROM earnings ORDER BY day DESC, created_at DESC')
     for row in rows:
         row['total'] = total(row)
-    day = today()
-    this_week, this_month = week_start(day).isoformat(), day.replace(day=1).isoformat()
+    week_from = parse_week(week)
+    week_to = week_from + timedelta(days=6)
+    month_from = parse_month(month)
+    month_to = shift_month(month_from, 1) - timedelta(days=1)
+    in_week = [r for r in rows if week_from.isoformat() <= r['day'] <= week_to.isoformat()]
+    in_month = [r for r in rows if month_from.isoformat() <= r['day'] <= month_to.isoformat()]
 
-    def summed(kind, since=None):
-        picked = [r for r in rows if r['kind'] == kind and (since is None or r['day'] >= since)]
-        return {'count': len(picked), 'total': sum(r['total'] for r in picked)}
+    # 흐름: 고른 주까지 12주, 고른 달까지 6개월.
+    weeks = []
+    for back in range(11, -1, -1):
+        start = week_from - timedelta(weeks=back)
+        picked = [r for r in rows if start.isoformat() <= r['day'] <= (start + timedelta(days=6)).isoformat()]
+        weeks.append({'week_start': start.isoformat(), **{k: v for k, v in breakdown(picked).items() if k != 'characters'}})
+    months = []
+    for back in range(5, -1, -1):
+        start = shift_month(month_from, -back)
+        stop = shift_month(start, 1) - timedelta(days=1)
+        picked = [r for r in rows if start.isoformat() <= r['day'] <= stop.isoformat()]
+        months.append({'month': start.isoformat()[:7], **{k: v for k, v in breakdown(picked).items() if k != 'characters'}})
 
-    hunts = [r for r in rows if r['kind'] == 'hunt']
-    flasks = sum(r['flasks'] or 0 for r in hunts)
-    summary = {
-        'week_start': this_week,
-        'hunt': {'week': summed('hunt', this_week), 'month': summed('hunt', this_month), 'all': summed('hunt'),
-                 'pieces': sum(r['pieces'] or 0 for r in hunts),
-                 'average': (sum(r['total'] for r in hunts) / len(hunts)) if hunts else None,
-                 'per_flask': (sum(r['total'] for r in hunts if r['flasks']) / flasks) if flasks else None},
-        'boss': {'week': summed('boss', this_week), 'month': summed('boss', this_month), 'all': summed('boss')},
-    }
-    summary['all'] = {period: summary['hunt'][period]['total'] + summary['boss'][period]['total']
-                      for period in ('week', 'month', 'all')}
-    # 주보는 주 단위로 묶어 보여 준다.
-    weeks = {}
-    for r in rows:
-        if r['kind'] == 'boss':
-            key = week_start(date.fromisoformat(r['day'])).isoformat()
-            weeks.setdefault(key, {'week_start': key, 'count': 0, 'total': 0.0})
-            weeks[key]['count'] += 1
-            weeks[key]['total'] += r['total']
-    return {'hunts': hunts[:limit], 'bosses': [r for r in rows if r['kind'] == 'boss'][:limit],
-            'boss_weeks': sorted(weeks.values(), key=lambda w: w['week_start'], reverse=True)[:26],
-            'summary': summary, 'piece_price': store.setting(PIECE_PRICE) or None,
+    hunts_all = [r for r in rows if r['kind'] == 'hunt']
+    flasks = sum(r['flasks'] or 0 for r in hunts_all)
+    everything = breakdown(rows)
+    names = [c['name'] for c in store.characters()]
+    recorded = sorted({r['character'] for r in rows if r.get('character')} - set(names))
+    return {'week': {'start': week_from.isoformat(), 'end': week_to.isoformat(), 'current': week_from == week_start(today()),
+                     **breakdown(in_week)},
+            'month': {'month': month_from.isoformat()[:7], 'start': month_from.isoformat(), 'end': month_to.isoformat(),
+                      'current': month_from == today().replace(day=1), **breakdown(in_month)},
+            'all': {**everything, 'pieces': sum(r['pieces'] or 0 for r in hunts_all),
+                    'hunt_average': (sum(r['total'] for r in hunts_all) / len(hunts_all)) if hunts_all else None,
+                    'per_flask': (sum(r['total'] for r in hunts_all if r['flasks']) / flasks) if flasks else None,
+                    'first_day': rows[-1]['day'] if rows else None},
+            'weeks': weeks, 'months': months,
+            'hunts': [r for r in in_week if r['kind'] == 'hunt'][:limit],
+            'bosses': [r for r in in_week if r['kind'] == 'boss'][:limit],
+            'characters': names + recorded,
+            'piece_price': store.setting(PIECE_PRICE) or None,
             'boss_prices': store.setting(BOSS_PRICES) or {},
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],

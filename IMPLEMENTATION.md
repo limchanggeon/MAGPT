@@ -345,3 +345,11 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
 
 - 오른쪽 위 모델 표시를 누르면 Gemini(Flash-Lite·Flash)·Claude·ChatGPT·로컬 모델로 바로 바꾼다(`POST /api/model/select`). 키 없는 회사는 키 입력으로 보낸다.
 - 0.3.2에 Claude·ChatGPT 연결(위 항목)과 함께 들어간다. 확인: 자동 테스트 331개, 데모+WebKit. 실제 유료 키 답변은 미확인.
+
+## 2026-09-29 수익 대시보드 (지난주·월간·캐릭터별)
+
+- 기록은 원래부터 로컬 SQLite(`earnings` 표)에 쌓였다. 보는 쪽을 넓혔다.
+- `earnings.overview(store, week, month)`: 고른 주(목요일 시작, 아무 날짜나 받아 맞춤)·고른 달의 재획/주보/합계와 **캐릭터별**(캐릭터 없는 기록은 '미지정'),
+  고른 주까지 **최근 12주**·고른 달까지 **최근 6개월** 흐름, 그 주의 기록 목록, 전체 합계(시작일·조각·재획 평균·재획비당). `GET /api/earnings?week=YYYY-MM-DD&month=YYYY-MM`.
+- 화면: 주·달 ◀ ▶와 '이번 주/이번 달', 요약 카드 3개, 캐릭터별 표 2개(그 주·그 달), 흐름 막대(재획·주보 쌓기, 누르면 그 주·달로 이동), 재획·주보 입력에 캐릭터 고르기(둘이 같이 바뀜).
+- 확인(2026-09-29): 자동 테스트 332개(`test_past_week_character_and_month_views`), 데모 서버 임시 DB에 여러 주·달 기록을 넣고 WebKit으로 확인.

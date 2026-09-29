@@ -208,32 +208,89 @@ function earningsRow(r,label,detail){
   del.onclick=()=>guard(async()=>{if(!confirm('이 기록을 삭제합니다.'))return;await api('earnings/delete',{id:r.id});await loadEarnings();});
   row.append(left,right,del);return row;
 }
+// 볼 주(목요일 시작)와 달. 비어 있으면 이번 주·이번 달. 막대나 ◀ ▶로 바꾼다.
+let earningsWeek='',earningsMonth='',earningsTrend='weeks',lastEarnings=null,earningsCharacter='';
+const dayShort=(iso)=>{const [,m,d]=iso.split('-');return `${Number(m)}/${Number(d)}`;};
+const monthText=(ym)=>{const [y,m]=ym.split('-');return `${y}년 ${Number(m)}월`;};
+function addDays(iso,days){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+days);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function addMonths(ym,months){const [y,m]=ym.split('-').map(Number);const i=y*12+m-1+months;return `${Math.floor(i/12)}-${String(i%12+1).padStart(2,'0')}`;}
+function characterTable(box,data,empty){
+  box.replaceChildren();
+  if(!data.characters.length){box.append(el('p','hint',empty));return;}
+  const table=el('table','totals-table');const head=el('tr');['캐릭터','재획','주보','합계'].forEach(h=>head.append(el('th','',h)));table.append(head);
+  data.characters.forEach(c=>{const tr=el('tr');tr.append(el('td','',c.name),el('td','num',mesoText(c.hunt)),el('td','num',mesoText(c.boss)),el('td','num total',mesoText(c.total)));table.append(tr);});
+  if(data.characters.length>1){const tr=el('tr','sum');tr.append(el('td','','합계'),el('td','num',mesoText(data.hunt)),el('td','num',mesoText(data.boss)),el('td','num total',mesoText(data.total)));table.append(tr);}
+  box.append(table);
+}
+function renderTrend(d){
+  const box=$('#earnings-trend');box.replaceChildren();
+  const items=earningsTrend==='weeks'?d.weeks:d.months;const max=Math.max(1,...items.map(x=>x.total));
+  items.forEach(x=>{
+    const isWeek=earningsTrend==='weeks',key=isWeek?x.week_start:x.month;
+    const picked=isWeek?key===d.week.start:key===d.month.month;
+    const col=el('button','trend-col'+(picked?' picked':''));col.type='button';
+    col.title=`${isWeek?dayShort(key)+' 주':monthText(key)} · 합계 ${mesoText(x.total)} (재획 ${mesoText(x.hunt)} · 주보 ${mesoText(x.boss)})`;
+    col.setAttribute('aria-label',col.title);
+    const stack=el('div','trend-stack');
+    const boss=el('span','trend-boss');boss.style.height=`${x.boss/max*100}%`;const hunt=el('span','trend-hunt');hunt.style.height=`${x.hunt/max*100}%`;
+    stack.append(boss,hunt);
+    col.append(el('small','trend-value',x.total?amountText(Math.round(x.total)):''),stack,el('span','trend-label',isWeek?dayShort(key):`${Number(key.slice(5))}월`));
+    col.onclick=()=>{if(isWeek)earningsWeek=key;else earningsMonth=key;guard(loadEarnings);};
+    box.append(col);
+  });
+}
+function fillCharacterSelects(names){
+  $$('.earnings-character').forEach(select=>{
+    const keep=select.value||earningsCharacter;select.replaceChildren();
+    const none=el('option','','고르지 않음');none.value='';select.append(none);
+    names.forEach(n=>{const o=el('option','',n);o.value=n;select.append(o);});
+    select.value=names.includes(keep)?keep:'';
+    select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});};
+  });
+}
 async function loadEarnings(){
-  const d=await api('earnings');const s=d.summary;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
+  const query=new URLSearchParams();if(earningsWeek)query.set('week',earningsWeek);if(earningsMonth)query.set('month',earningsMonth);
+  const d=await api('earnings'+(query.toString()?'?'+query:''));lastEarnings=d;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
+  earningsWeek=d.week.current?'':d.week.start;earningsMonth=d.month.current?'':d.month.month;
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
-  const box=$('#earnings-summary');box.replaceChildren();
+  fillCharacterSelects(d.characters||[]);
   const alertBox=$('#crystal-alert');if(alertBox){alertBox.replaceChildren();alertBox.hidden=!d.crystal_alert;
     if(d.crystal_alert){alertBox.append(el('span','',`새 업데이트에 결정석 판매가 이야기가 있습니다: ${d.crystal_alert.title}. 앱의 결정석 가격표(업데이트 813 기준)가 바뀌었을 수 있으니 확인해 주세요. `),sourceLink(d.crystal_alert.url,'공지 보기'));}}
-  [['이번 주',s.all.week,`목요일(${s.week_start}) 기준 · 재획 ${fmt(s.hunt.week.count)}회 · 주보 ${fmt(s.boss.week.count)}건`],
-   ['이번 달',s.all.month,`재획 ${mesoText(s.hunt.month.total)} · 주보 ${mesoText(s.boss.month.total)}`],
-   ['전체',s.all.all,`조각 ${fmt(s.hunt.pieces)}개 · 재획 평균 ${mesoText(s.hunt.average)}`+(s.hunt.per_flask?` · 재획비 1개당 ${mesoText(s.hunt.per_flask)}`:'')]]
+  const w=d.week,m=d.month,a=d.all,weekText=`${dayShort(w.start)}(목) ~ ${dayShort(w.end)}(수)`;
+  $('#week-label').textContent=weekText+(w.current?' · 이번 주':'');$('#month-label').textContent=monthText(m.month)+(m.current?' · 이번 달':'');
+  $('#week-next').disabled=w.current;$('#month-next').disabled=m.current;$('#week-now').hidden=w.current;$('#month-now').hidden=m.current;
+  const box=$('#earnings-summary');box.replaceChildren();
+  [[w.current?'이번 주':`${dayShort(w.start)} 주`,w.total,`재획 ${fmt(w.hunt_count)}회 ${mesoText(w.hunt)} · 주보 ${fmt(w.boss_count)}건 ${mesoText(w.boss)}`],
+   [m.current?'이번 달':monthText(m.month),m.total,`재획 ${mesoText(m.hunt)} · 주보 ${mesoText(m.boss)}`],
+   ['전체',a.total,(a.first_day?`${a.first_day}부터 · `:'')+`조각 ${fmt(a.pieces)}개 · 재획 평균 ${mesoText(a.hunt_average)}`+(a.per_flask?` · 재획비 1개당 ${mesoText(a.per_flask)}`:'')]]
    .forEach(([label,value,sub])=>{const c=el('div','earnings-stat');c.append(el('span','',label),el('strong','',mesoText(value)),el('small','',sub));box.append(c);});
+  $('#week-chars-title').textContent=`캐릭터별 · ${w.current?'이번 주':weekText}`;$('#month-chars-title').textContent=`캐릭터별 · ${m.current?'이번 달':monthText(m.month)}`;
+  characterTable($('#week-characters'),w,'이 주에는 기록이 없습니다.');characterTable($('#month-characters'),m,'이 달에는 기록이 없습니다.');
+  renderTrend(d);
+  $('#hunt-list-title').textContent=`재획 기록 · ${weekText}`;$('#boss-list-title').textContent=`주보 기록 · ${weekText}`;
+  const who=(r)=>r.character?` · ${r.character}`:'';
   const hunts=$('#hunt-list');hunts.replaceChildren();
-  if(!d.hunts.length)hunts.append(el('p','hint','아직 기록이 없습니다.'));
-  d.hunts.forEach(r=>hunts.append(earningsRow(r,'재획'+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
+  if(!d.hunts.length)hunts.append(el('p','hint','이 주에는 재획 기록이 없습니다.'));
+  d.hunts.forEach(r=>hunts.append(earningsRow(r,'재획'+who(r)+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
     `메소 ${mesoText(r.meso)}`+(r.pieces?` · 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)}`:''))));
-  const weeks=$('#boss-weeks');weeks.replaceChildren();
-  d.boss_weeks.slice(0,6).forEach(w=>{const c=el('div','earnings-week');c.append(el('span','',`${w.week_start} 주`),el('strong','',mesoText(w.total)),el('small','',`${fmt(w.count)}건`));weeks.append(c);});
   const bosses=$('#boss-list');bosses.replaceChildren();
-  if(!d.bosses.length)bosses.append(el('p','hint','아직 기록이 없습니다.'));
-  d.bosses.forEach(r=>bosses.append(earningsRow(r,r.boss,
+  if(!d.bosses.length)bosses.append(el('p','hint','이 주에는 주보 기록이 없습니다.'));
+  d.bosses.forEach(r=>bosses.append(earningsRow(r,r.boss+who(r),
     `결정석 ${mesoText(r.crystal)}`+(r.party>1?` ÷ ${r.party}명`:'')+(r.extra?` · 드롭 ${mesoText(r.extra)}`:''))));
 }
+$('#week-prev').onclick=()=>{earningsWeek=addDays(lastEarnings?lastEarnings.week.start:todayText(),-7);guard(loadEarnings);};
+$('#week-next').onclick=()=>{earningsWeek=addDays(lastEarnings?lastEarnings.week.start:todayText(),7);guard(loadEarnings);};
+$('#week-now').onclick=()=>{earningsWeek='';guard(loadEarnings);};
+$('#month-prev').onclick=()=>{earningsMonth=addMonths(lastEarnings?lastEarnings.month.month:todayText().slice(0,7),-1);guard(loadEarnings);};
+$('#month-next').onclick=()=>{earningsMonth=addMonths(lastEarnings?lastEarnings.month.month:todayText().slice(0,7),1);guard(loadEarnings);};
+$('#month-now').onclick=()=>{earningsMonth='';guard(loadEarnings);};
+$$('.trend-tabs button').forEach(b=>b.onclick=()=>{earningsTrend=b.dataset.trend;
+  $$('.trend-tabs button').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-selected',x===b?'true':'false');});if(lastEarnings)renderTrend(lastEarnings);});
 function earningsForm(id,kind,after){
   $('#'+id).onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
     const data=formData(e.target);await api('earnings',{...data,kind});
-    const keep={day:data.day,piece_price:data.piece_price,party:data.party};
+    const keep={day:data.day,piece_price:data.piece_price,party:data.party,character:data.character};
     e.target.reset();Object.entries(keep).forEach(([k,v])=>{if(e.target.elements[k]&&v)e.target.elements[k].value=v;});
     after();await loadEarnings();toast('기록을 저장했습니다.');});};
 }
@@ -273,14 +330,14 @@ function bossPreview(){
 }
 ['crystal','party','extra','boss'].forEach(k=>$('#boss-form').elements[k].addEventListener('input',bossPreview));
 $('#boss-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
-  const f=e.target.elements;const day=f.day.value,note=f.note.value,extra=f.extra.value.trim();
+  const f=e.target.elements;const day=f.day.value,note=f.note.value,extra=f.extra.value.trim(),character=f.character.value;
   const entries=checkedBosses().map(b=>({boss:b.boss,party:b.party}));
   if(f.boss.value.trim())entries.push({boss:f.boss.value.trim(),crystal:f.crystal.value,party:f.party.value});
   if(!entries.length&&!extra)throw new Error('잡은 보스를 체크하거나 직접 적어 주세요.');
   if(!entries.length)entries.push({boss:'추가 드롭'});
   if(extra)entries[0].extra=extra;
   let saved=0;const errors=[];
-  for(const entry of entries){try{await api('earnings',{kind:'boss',day,note,...entry});saved++;}catch(err){errors.push(`${entry.boss}: ${err.message}`);}}
+  for(const entry of entries){try{await api('earnings',{kind:'boss',day,note,character,...entry});saved++;}catch(err){errors.push(`${entry.boss}: ${err.message}`);}}
   $('#boss-checklist').querySelectorAll('input:checked').forEach(i=>{i.checked=false;i.closest('.boss-row').classList.remove('picked');});
   ['boss','crystal','extra','note'].forEach(k=>f[k].value='');f.party.value=1;bossPreview();
   await loadEarnings();

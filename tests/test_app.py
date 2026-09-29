@@ -1209,15 +1209,15 @@ class EarningsTests(unittest.TestCase):
         self.assertEqual(r['total'],1_235_000_000+42*6_500_000)
         self.assertEqual(self.store.setting(earnings.PIECE_PRICE),6_500_000)   # 다음 기록 기본값
         o=earnings.overview(self.store)
-        self.assertEqual(o['summary']['hunt']['all']['total'],r['total'])
-        self.assertEqual(o['summary']['hunt']['pieces'],42)
-        self.assertEqual(o['summary']['hunt']['per_flask'],r['total']/2)
+        self.assertEqual(o['all']['hunt'],r['total'])
+        self.assertEqual(o['all']['pieces'],42)
+        self.assertEqual(o['all']['per_flask'],r['total']/2)
     def test_boss_share_split_by_party(self):
         r=earnings.add(self.store,{'kind':'boss','boss':'하드 세렌','crystal':'6억','party':'3','extra':'1000만'})
         self.assertEqual(r['total'],200_000_000+10_000_000)
         o=earnings.overview(self.store)
-        self.assertEqual(o['boss_weeks'][0]['total'],r['total'])
-        self.assertEqual(o['summary']['all']['all'],r['total'])
+        self.assertEqual(o['weeks'][-1]['total'],r['total'])              # 최근 12주 중 마지막이 이번 주
+        self.assertEqual(o['all']['total'],r['total'])
     def test_week_starts_on_thursday(self):
         from datetime import date
         self.assertEqual(earnings.week_start(date(2026,9,28)),date(2026,9,24))   # 월 -> 직전 목
@@ -1226,8 +1226,33 @@ class EarningsTests(unittest.TestCase):
     def test_old_records_leave_this_week(self):
         earnings.add(self.store,{'kind':'boss','boss':'노멀 루시드','crystal':'1억','day':'2026-01-01'})
         o=earnings.overview(self.store)
-        self.assertEqual(o['summary']['boss']['all']['count'],1)
-        self.assertEqual(o['summary']['boss']['week']['count'],0)
+        self.assertEqual(o['all']['boss_count'],1)
+        self.assertEqual(o['week']['boss_count'],0)
+    def test_past_week_character_and_month_views(self):
+        # 사용자 요청(2026-09-29): 지난주도 보고, 캐릭터별·이번 달 합계를 한눈에.
+        from datetime import date, timedelta
+        with patch('mepiti.earnings.today',return_value=date(2026,9,29)):     # 화요일 → 이번 주는 9/24(목)부터
+            earnings.add(self.store,{'kind':'hunt','meso':'10억','character':'본캐','day':'2026-09-28'})
+            earnings.add(self.store,{'kind':'boss','boss':'하드 세렌','crystal':'3억','character':'부캐','day':'2026-09-25'})
+            earnings.add(self.store,{'kind':'hunt','meso':'5억','character':'본캐','day':'2026-09-20'})   # 지난주(9/17~9/23)
+            earnings.add(self.store,{'kind':'hunt','meso':'1억','day':'2026-08-30'})                        # 지난달, 캐릭터 없음
+            this=earnings.overview(self.store)
+            last=earnings.overview(self.store,week='2026-09-20')
+            august=earnings.overview(self.store,month='2026-08')
+        self.assertEqual((this['week']['start'],this['week']['end'],this['week']['current']),('2026-09-24','2026-09-30',True))
+        self.assertEqual(this['week']['total'],1_300_000_000)
+        self.assertEqual([(c['name'],c['total']) for c in this['week']['characters']],[('본캐',1e9),('부캐',3e8)])
+        self.assertEqual([r['meso'] for r in this['hunts']],[1e9])                 # 목록도 고른 주만
+        self.assertEqual((last['week']['start'],last['week']['total'],last['week']['current']),('2026-09-17',5e8,False))
+        self.assertEqual(this['month']['total'],1_800_000_000)                     # 9월: 10억+3억+5억
+        self.assertEqual([(c['name'],c['total']) for c in this['month']['characters']],[('본캐',1.5e9),('부캐',3e8)])
+        self.assertEqual((august['month']['total'],august['month']['characters'][0]['name']),(1e8,earnings.NO_CHARACTER))
+        self.assertEqual([m['month'] for m in this['months']][-2:],['2026-08','2026-09'])
+        self.assertEqual([w['total'] for w in this['weeks']][-2:],[5e8,1.3e9])      # 지난주, 이번 주
+        self.assertEqual(len(this['weeks']),12); self.assertEqual(len(this['months']),6)
+        self.assertEqual(this['all']['total'],1_900_000_000)
+        with self.assertRaises(AppError): earnings.overview(self.store,week='어제')
+        with self.assertRaises(AppError): earnings.overview(self.store,month='2026/09')
     def test_validation(self):
         for bad in [{'kind':'x'},{'kind':'hunt'},{'kind':'hunt','meso':'abc'},{'kind':'hunt','pieces':5},
                     {'kind':'hunt','meso':'1억','day':'2999-01-01'},{'kind':'boss','crystal':'1억'},
