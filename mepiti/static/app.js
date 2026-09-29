@@ -1,5 +1,15 @@
 'use strict';
 const $ = (selector) => document.querySelector(selector);
+// 앱 창(pywebview)에서 열렸으면 웹페이지 티가 나는 동작을 막는다. 브라우저로 열었을 때는 그대로 둔다.
+const inAppWindow=new URLSearchParams(location.search).get('shell')==='window';
+if(inAppWindow){
+  document.documentElement.classList.add('in-app');
+  // 새로고침·인쇄·저장 단축키는 앱에 맞지 않는다.
+  document.addEventListener('keydown',e=>{const k=(e.key||'').toLowerCase();if(e.key==='F5'||((e.metaKey||e.ctrlKey)&&['r','p','s'].includes(k)))e.preventDefault();},true);
+  // 오른쪽 클릭의 '새로 고침·검사' 메뉴를 숨긴다. 입력칸과 고른 글자에서는 복사·붙여넣기 메뉴를 둔다.
+  document.addEventListener('contextmenu',e=>{if(e.target.closest('input,textarea,[contenteditable]')||String(window.getSelection()).trim())return;e.preventDefault();});
+  document.addEventListener('dragstart',e=>{if(e.target.closest('img,a'))e.preventDefault();});
+}
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
 let accountCatalog = null, accountLoading = false, managedNames = new Set(), managedCharacters = [];

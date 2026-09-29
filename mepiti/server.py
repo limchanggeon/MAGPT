@@ -268,6 +268,12 @@ def make_server(app,port=8765):
                             data = json.loads(self.rfile.read(size))
                             if not isinstance(data,dict): raise ValueError()
                         except (ValueError,UnicodeError): raise AppError('올바른 JSON 객체가 필요합니다.')
+                    if self.command == 'POST' and path == '/api/window/focus':
+                        # 다시 실행했을 때 새 창 대신 떠 있는 창을 앞으로 가져온다(앱 창 모드일 때만).
+                        focus = getattr(app,'on_focus',None)
+                        if focus:
+                            threading.Thread(target=focus,daemon=True).start()
+                        return self.respond(200,{'focused':bool(focus)})
                     if self.command == 'POST' and path == '/api/shutdown':
                         self.respond(200,{'ok':True})
                         threading.Thread(target=self.server.shutdown,daemon=True).start()
@@ -309,8 +315,24 @@ def say(text, stream=None):
 
 def window_only(url):
     webview = desktop.load_webview()
-    webview.create_window(desktop.TITLE, url, width=1440, height=940, min_size=(960, 640))
+    webview.create_window(desktop.TITLE, desktop.window_url(url), width=1440, height=940, min_size=(960, 640),
+                          background_color=desktop.BACKGROUND, text_select=True, zoomable=False)
     webview.start()
+
+
+def focus_existing(port):
+    """같은 포트에 떠 있는 메피티 창을 앞으로 가져온다. 앱 창이 아니거나 메피티가 아니면 False."""
+    from urllib.request import Request, urlopen
+    base = f'http://127.0.0.1:{port}'
+    try:
+        with urlopen(base + '/api/bootstrap', timeout=3) as r:
+            token = json.loads(r.read())['token']
+        request = Request(base + '/api/window/focus', data=b'{}', method='POST',
+                          headers={'Content-Type': 'application/json', 'X-Mepiti-Token': token})
+        with urlopen(request, timeout=3) as r:
+            return bool(json.loads(r.read()).get('focused'))
+    except Exception:
+        return False
 
 
 def main(argv=None):
@@ -324,8 +346,11 @@ def main(argv=None):
     try:
         server = make_server(app,args.port)
     except OSError:
+        if args.window and focus_existing(args.port):
+            # 이미 앱 창이 떠 있다. 보통 프로그램처럼 새 창 대신 그 창을 앞으로 가져온다.
+            return 0
         if args.window and desktop.load_webview():
-            # 이미 켜져 있는 메피티가 있으면 그 화면을 새 창으로 연다.
+            # 떠 있는 메피티가 브라우저 모드면 그 화면을 새 창으로 연다.
             window_only(f'http://127.0.0.1:{args.port}')
             return 0
         say('포트를 사용 중입니다. 다른 --port 값으로 실행해 주세요.',sys.stderr)

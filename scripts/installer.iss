@@ -19,6 +19,8 @@ OutputBaseFilename=Mepiti-Windows-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=icon\Mepiti.ico
+UninstallDisplayIcon={app}\Mepiti.exe
 
 ; 한국어 메시지 파일이 설치된 Inno Setup에 있을 때만 쓴다. 없으면 기본(영어) 버튼 문구로 빌드된다.
 #if FileExists(AddBackslash(CompilerPath) + "Languages\Korean.isl")

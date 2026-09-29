@@ -50,7 +50,9 @@ input,textarea,select{
 }
 input:focus,textarea:focus,select:focus{border-color:var(--gold-dim);background:#1f2733}
 input::placeholder,textarea::placeholder{color:var(--faint)}
-textarea{resize:vertical;line-height:1.7}
+/* 입력칸은 줄바꿈하므로 가로 스크롤이 필요 없다. macOS '스크롤 막대 항상 보기'에서 1px 넘침이
+   입력창 안의 회색 가로 막대로 보였다(앱 창에서 확인). */
+textarea{resize:vertical;line-height:1.7;overflow-x:hidden;overflow-wrap:anywhere}
 label{font-size:11px;color:var(--muted);display:block;margin-bottom:14px}
 label input,label textarea,label select{display:block;margin-top:6px;font-size:13px}
 .checkbox{display:flex;align-items:center;gap:8px}
@@ -647,3 +649,11 @@ dialog::backdrop{background:#05080bcc}
 .setup-card h2{margin:0 0 8px}
 .setup-card>p{font-size:12.5px;line-height:1.75;margin:0 0 10px}
 @media(max-width:820px){.model-presets{grid-template-columns:1fr}}
+
+/* ---- 앱 창 모드 (?shell=window) ----
+   웹페이지처럼 보이는 동작을 막는다: 끝에서 튕기는 스크롤, 아무 글자나 끌어 선택, 이미지 끌기.
+   답변 글과 입력칸은 그대로 고르고 복사할 수 있다. */
+html.in-app,html.in-app body{overscroll-behavior:none}
+html.in-app body{-webkit-user-select:none;user-select:none}
+html.in-app :is(input,textarea,select,.message-body,.fact-sheet pre,.doc-meta,.item-options,.conditions p){-webkit-user-select:text;user-select:text}
+html.in-app :is(img,a){-webkit-user-drag:none}

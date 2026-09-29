@@ -1,6 +1,6 @@
 # 메피티 작업 인수인계
 
-- 최종 갱신: 2026-09-28 (KST)
+- 최종 갱신: 2026-09-29 (KST)
 - 현재 단계: 로컬 알파 0.1 + 기능 확장. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
@@ -846,3 +846,26 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   **입력창 안에 회색 가로 막대(가로 스크롤바로 보임)가 보인다. 원인 미확인.** 앱 창은 WebKit이라 Chromium 자동화로는 재현하지 못했다.
 - 로컬 `.venv`에 pip가 없어 `ensurepip`로 복구하고 `pip install -e ".[desktop]"`로 pywebview를 설치했다.
 - 검증: 자동 테스트 통과(아래 커밋 시점). Windows 창(WebView2)과 패키지 빌드에서의 창은 아직 실기 확인 전.
+
+### 2026-09-29 — 앱 창을 '프로그램처럼' (사용자 요청: "앱 창만 하고 웹 창 띄우는 거 같은데, 프로그램화는 못 시키나")
+
+- 방향: 네이티브로 새로 짜지 않고(Slack·Discord와 같은 'OS 웹 화면 + 앱' 구조 유지), 웹페이지 티가 나는 부분을 없앴다.
+- 변경:
+  - `mepiti/desktop.py`: 창 바탕을 앱 색(`#0e1217`)으로(켤 때 흰 화면 번쩍임 제거), macOS 제목 표시줄을 어둡게·투명하게,
+    Windows 어두운 제목 표시줄(`DwmSetWindowAttribute` 20/19), 창 아이콘(`static/icon.png`), 확대 막기, 주소에 `?shell=window`.
+    `bring_to_front()` — 다시 실행 시 떠 있는 창을 앞으로.
+  - `mepiti/server.py`: `POST /api/window/focus`(토큰 필요), `focus_existing(port)`. `--window`로 두 번째 실행하면 새 창 대신 기존 창을 앞으로 가져오고 0으로 끝난다.
+  - `mepiti/static/app.js`·`style.css`: 앱 창에서만(`html.in-app`) 새로고침(F5·Cmd+R)·인쇄·저장 단축키, 입력칸 밖 오른쪽 클릭 메뉴,
+    이미지·링크 끌기, 튕김 스크롤, 화면 글자 드래그 선택을 막는다(답변 글·입력칸·옵션 글은 선택 가능).
+    입력창 회색 가로 막대 원인: `textarea` 가로 넘침 → `overflow-x:hidden; overflow-wrap:anywhere`로 해결.
+  - `scripts/icon/`(신규): 아이콘 SVG 원본(mac·win)과 `Mepiti.icns`·`Mepiti.ico`. `scripts/build.py`: `--icon`, macOS는
+    Info.plist에 이름 '메피티'·버전(`__version__`)·로컬 네트워크 허용 등을 넣고 **다시 서명**(`codesign --force --deep --sign -`; plist를 고치면 서명이 깨진다).
+    `scripts/installer.iss`: 설치 파일·제거 목록 아이콘.
+  - `tests/test_desktop.py`: 단일 실행 5개, macOS 메인 스레드 1개 추가.
+- **실제 패키지 앱에서 찾은 크래시**: 두 번째 실행 → 서버 스레드에서 `window.restore()` → macOS가 'Must only be used from the main thread'로
+  앱을 종료(크래시 리포트 2건). macOS에서는 창 작업을 전부 `AppHelper.callAfter`로 메인 스레드에 넘기게 고쳤다. **팁: AppKit 창은 서버 스레드에서 직접 만지지 말 것.**
+- 검증(2026-09-29, 사용자 Mac M4): 자동 테스트 282개 통과. `scripts/build.py`로 `Mepiti.app` 재빌드, `codesign --verify` 통과,
+  Info.plist 이름 메피티·버전 0.2.0. 패키지 앱 실행 → 다른 앱을 앞으로 → 다시 실행: 두 번째 실행은 0으로 끝나고 창 1개 유지, 메피티가 앞으로 옴, 새 크래시 없음.
+  스크린샷으로 어두운 제목 표시줄과 입력창 가로 막대 제거 확인. Finder 아이콘은 Launch Services 캐시 때문에 처음엔 빈 문서 모양이었고 `lsregister -f` 후 정상 표시.
+  이 확인은 실제 데이터 폴더(`~/.mepiti`)로 실행했지만 데이터를 쓰는 동작은 하지 않았고, 끝나고 `/api/shutdown`으로 껐다.
+- 미검증: Windows 창(WebView2)·어두운 제목 표시줄·아이콘, Windows 두 번째 실행 시 앞으로 가져오기. CI 빌드 결과는 푸시 후 확인.
