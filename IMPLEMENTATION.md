@@ -340,3 +340,8 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
 - 서버: 키는 회사별 보관(`anthropic-api-key`, `openai-api-key`), `status.clouds`, `/api/cloud/key/connect|delete`에 provider, `/api/cloud/model`.
 - 확인(2026-09-29): 자동 테스트 326개. 패키지한 Mac 앱에서 가짜 키 → Anthropic·OpenAI 실제 서버가 거절, 쉬운 문구로 표시(SDK 번들 확인). 데모 서버(가짜 회사)+WebKit으로
   키 입력·거절·연결·모델 변경·대화 답변 경로 확인. **실제 유료 키로 답변은 미확인.**
+
+## 2026-09-29 화면 위쪽 모델 선택 — 0.3.2
+
+- 오른쪽 위 모델 표시를 누르면 Gemini(Flash-Lite·Flash)·Claude·ChatGPT·로컬 모델로 바로 바꾼다(`POST /api/model/select`). 키 없는 회사는 키 입력으로 보낸다.
+- 0.3.2에 Claude·ChatGPT 연결(위 항목)과 함께 들어간다. 확인: 자동 테스트 331개, 데모+WebKit. 실제 유료 키 답변은 미확인.
