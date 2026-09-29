@@ -1804,3 +1804,51 @@ class ModelSelectTests(unittest.TestCase):
         self.assertEqual(clouds['openai']['chosen'], 'gpt-6-luna')
         self.assertEqual(clouds['gemini']['chosen'], 'gemini-flash-lite-latest')
         self.assertEqual([c['id'] for c in clouds['gemini']['choices']], ['gemini-flash-lite-latest', 'gemini-flash-latest'])
+
+
+class BackupTests(unittest.TestCase):
+    """업데이트로 데이터가 사라지지 않게(사용자 요청 2026-09-29). 데이터는 설치 폴더 밖, 버전이 바뀌면 먼저 백업."""
+    def setUp(self): self.tmp = tempfile.TemporaryDirectory()
+    def tearDown(self): self.tmp.cleanup()
+    def test_update_keeps_data_and_backs_up_first(self):
+        from mepiti import backup
+        with patch('mepiti.server.__version__', '0.3.2'):
+            old = Application(self.tmp.name)
+        self.assertIsNone(old.startup_backup)                                    # 처음 설치: 백업할 것 없음
+        earnings.add(old.store, {'kind': 'hunt', 'meso': '10억', 'character': '본캐'})
+        old.store.set_setting('model', 'gemini')
+        with patch('mepiti.server.__version__', '0.3.2'):
+            self.assertIsNone(Application(self.tmp.name).startup_backup)        # 같은 버전 재실행: 백업 안 함
+        with patch('mepiti.server.__version__', '0.3.3'):
+            new = Application(self.tmp.name)                                     # 새 버전으로 처음 켬
+        self.assertIn('v0.3.2-to-v0.3.3', new.startup_backup.name)
+        self.assertEqual(earnings.overview(new.store)['all']['total'], 1e9)       # 데이터 그대로
+        self.assertEqual(new.store.setting('model'), 'gemini')
+        self.assertEqual(new.store.setting('app_version'), '0.3.3')
+        copy = Store.__new__(Store); copy.path = new.startup_backup               # 백업 파일에도 기록이 있다
+        with copy.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM earnings').fetchone()[0], 1)
+    def test_manual_backup_keeps_latest_five(self):
+        from mepiti import backup
+        app = Application(self.tmp.name)
+        for i in range(7):
+            with patch('mepiti.backup.datetime') as clock:
+                clock.now.return_value = datetime(2026, 9, 29, 12, 0, i)
+                clock.fromtimestamp = datetime.fromtimestamp
+                app.route('POST', '/api/data/backup', {}, {})
+        names = [b['name'] for b in backup.listing(self.tmp.name)]
+        self.assertEqual(len(names), 5); self.assertTrue(names[0] > names[-1])  # 최신이 먼저
+    def test_data_status_never_shows_key_values(self):
+        app = Application(self.tmp.name)
+        app.vault = KeyConnectTests.MemoryVault('secret-nexon-key-000')
+        for engine in (app.gemini, app.claude, app.openai): engine.vault = KeyConnectTests.MemoryVault()
+        app.claude.vault.key = 'sk-ant-secret'
+        st = app.route('GET', '/api/data', {}, {})
+        self.assertEqual(st['keys'], {'넥슨': True, 'Gemini': False, 'Claude': True, 'ChatGPT': False})
+        self.assertNotIn('secret', json.dumps(st))
+        self.assertTrue(st['data_file'].endswith('mepiti.sqlite3'))
+    def test_backup_failure_does_not_block_start(self):
+        from mepiti import backup
+        Application(self.tmp.name).store.set_setting('app_version', '0.0.1')
+        with patch('mepiti.backup.make', side_effect=OSError('disk full')):
+            self.assertIsNone(backup.on_start(self.tmp.name, '9.9.9'))

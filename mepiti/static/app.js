@@ -22,7 +22,7 @@ async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);}location.hash=view;}
+function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
@@ -476,6 +476,18 @@ function parsePrice(text){
   if(hit)return total;
   return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
 }
+// 데이터 보관 — 데이터 위치, OS 보안 저장소의 키, 백업. 키 값은 보여 주지 않는다.
+function renderDataPanel(d){
+  const info=$('#data-info');info.replaceChildren();
+  const pair=(k,v)=>{info.append(el('dt','',k),el('dd','',v));};
+  pair('데이터 파일',`${d.data_file} (${fmt(d.size_kb)} KB)`);
+  pair('API 키',`${d.key_store}에 따로 보관 · `+Object.entries(d.keys).map(([n,v])=>`${n} ${v===null?'읽기 실패':v?'있음':'없음'}`).join(' · '));
+  const list=$('#backup-list');list.replaceChildren();
+  list.append(el('p','hint',d.backups.length?`백업 ${d.backups.length}개 (최근 ${d.keep}개까지 보관) · ${d.folder}/backups`:'아직 백업이 없습니다.'));
+  d.backups.forEach(b=>{const row=el('div','backup-row');row.append(el('span','',b.created.replace('T',' ').slice(0,16)),el('code','',b.name),el('small','',`${fmt(b.size_kb)} KB`));list.append(row);});
+}
+async function loadDataPanel(){renderDataPanel(await api('data'));}
+$('#backup-now').onclick=e=>task(e.currentTarget,async()=>{const d=await api('data/backup',{});renderDataPanel(d);toast(`백업했어요: ${d.made}`);});
 // 경매장 연결(mepiti/auction.py). 경매장 창에서 로그인하면 알아서 확인하고 노작값 자동 조회를 켠다.
 let auctionTimer;
 function renderAuction(a){

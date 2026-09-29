@@ -733,3 +733,12 @@ html.in-app :is(img,a){-webkit-user-drag:none}
 .tour-skip:hover{color:var(--muted)}
 .tour-actions .primary,.tour-actions .secondary{padding:6px 12px;margin:0}
 @media (prefers-reduced-motion:reduce){.tour-spot,.tour-card{transition:none}.tour-spot.pulse{animation:none}}
+
+/* 설정 — 데이터 보관 */
+.data-info{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0;font-size:12px}
+.data-info dt{color:var(--muted)}
+.data-info dd{margin:0;overflow-wrap:anywhere;font-family:var(--mono);font-size:11.5px;color:var(--ink-dim)}
+.backup-list{display:grid;gap:4px}
+.backup-row{display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:11.5px;padding:5px 8px;border:1px solid var(--line-soft);border-radius:4px;background:var(--inset)}
+.backup-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--muted)}
+.backup-row small{color:var(--faint)}

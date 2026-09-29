@@ -2,6 +2,7 @@ import argparse
 import json
 import mimetypes
 import os
+import platform
 import secrets
 import sys
 import threading
@@ -17,7 +18,7 @@ from .adapters import (CLOUD_MODEL, CLOUD_PROVIDERS, Claude, FixedKey, Gemini, M
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import desktop, earnings, history, notices, prices, starforce
+from . import backup, desktop, earnings, history, notices, prices, starforce
 
 STATIC = Path(__file__).parent/'static'
 
@@ -79,7 +80,10 @@ class CachedNexon:
 
 class Application:
     def __init__(self, folder):
+        # 새 버전으로 처음 켜면 표를 고치기 전에 데이터를 백업한다(mepiti/backup.py). 데이터는 설치 폴더 밖이라 업데이트로 지워지지 않는다.
+        self.startup_backup = backup.on_start(folder, __version__)
         self.store = Store(folder)
+        self.store.set_setting(backup.VERSION_SETTING, __version__)
         self.vault = Vault()
         self.nexon = CachedNexon(Nexon(self.vault))
         self.cloud_vault = Vault('gemini-api-key', 'Gemini API 키')
@@ -151,6 +155,23 @@ class Application:
         except AppError as e:
             return {'state':key_problem(e),'message':str(e)}
         return {'state':'ok'}
+
+    def data_status(self):
+        """설정의 '데이터 보관': 데이터 위치, OS 보안 저장소에 있는 키, 백업 목록. 키 값은 돌려주지 않는다."""
+        def present(vault):
+            try:
+                return bool(vault.get())
+            except AppError:
+                return None                                  # 보안 저장소를 못 읽음
+        path = backup.data_file(self.store.folder)
+        store_name = {'Darwin': 'macOS 키체인', 'Windows': 'Windows 자격 증명 관리자'}.get(platform.system(), 'OS 보안 저장소')
+        return {'folder': str(self.store.folder), 'data_file': str(path),
+                'size_kb': round(path.stat().st_size / 1024, 1) if path.exists() else 0,
+                'key_store': store_name,
+                'keys': {'넥슨': present(self.vault), 'Gemini': present(self.gemini.vault),
+                         'Claude': present(self.claude.vault), 'ChatGPT': present(self.openai.vault)},
+                'backups': backup.listing(self.store.folder), 'keep': backup.KEEP,
+                'startup_backup': self.startup_backup.name if self.startup_backup else None}
 
     def main_character_name(self):
         chars = self.store.characters()
@@ -281,6 +302,7 @@ class Application:
             if path == '/api/earnings': return earnings.overview(s, query.get('week',[None])[0], query.get('month',[None])[0])
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
             if path == '/api/auction/status': return self.auction_route(path)
+            if path == '/api/data': return self.data_status()
         if method == 'POST':
             if path == '/api/chat':
                 if not self.chat_lock.acquire(blocking=False):
@@ -352,6 +374,9 @@ class Application:
                 return self.select_model(required(data,'provider',20), data.get('model'))
             if path == '/api/cloud/model':
                 return self.choose_cloud_model(required(data,'provider',20), required(data,'model',60))
+            if path == '/api/data/backup':
+                made = backup.make(s.folder, 'manual')
+                return {'made': made.name, **self.data_status()}
             if path == '/api/tour':
                 # 사용법 안내를 끝냈는지. 앱 창(pywebview)은 브라우저 저장소가 남지 않을 수 있어 DB에 둔다.
                 s.set_setting('tour_done','1' if data.get('done') else '0')

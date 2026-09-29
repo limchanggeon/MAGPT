@@ -50,6 +50,14 @@ var
   DownloadPage: TDownloadWizardPage;
   NeedOllama: Boolean;
   OllamaDownloaded: Boolean;
+  Updating: Boolean;       // 이미 쓰던 데이터가 있다 = 업데이트. 모델을 다시 묻지 않고 설정을 건드리지 않는다.
+
+// 데이터는 설치 폴더가 아니라 %USERPROFILE%\.mepiti에 있어 설치·업데이트·제거로 지워지지 않는다.
+// 키는 Windows 자격 증명 관리자에 있다. 새 버전을 처음 켤 때 앱이 데이터를 자동 백업한다(mepiti/backup.py).
+function HasExistingData: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{%USERPROFILE}\.mepiti\mepiti.sqlite3'));
+end;
 
 // NVIDIA GPU의 VRAM(MiB). nvidia-smi가 없거나 실패하면 0.
 function DetectVramMiB: Integer;
@@ -109,6 +117,7 @@ begin
   ModelPage.Add('8B · 품질' + QualityFit + ' — 내 PC에서만 실행. 내려받기 4.8GB, 메모리 약 5.2GB. VRAM 8GB 이상 권장. 2B보다 3~4배 느립니다.');
   ModelPage.Add('나중에 고르기');
   ModelPage.SelectedValueIndex := ChoiceCloud;
+  Updating := HasExistingData;
 
   NeedOllama := not OllamaInstalled;
   OllamaPage := CreateInputOptionPage(ModelPage.ID,
@@ -125,7 +134,8 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   // 클라우드·나중에를 고르면 Ollama가 필요 없다. 로컬은 나중에 앱 설정에서 골라도 된다.
-  Result := (PageID = OllamaPage.ID) and not (NeedOllama and LocalModelChosen);
+  Result := ((PageID = OllamaPage.ID) and not (NeedOllama and LocalModelChosen))
+            or (Updating and ((PageID = ModelPage.ID) or (PageID = OllamaPage.ID)));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -161,6 +171,8 @@ var
 begin
   if CurStep <> ssPostInstall then
     exit;
+  if Updating then
+    exit;                  // 업데이트: 쓰던 모델·설정을 그대로 둔다
 
   if OllamaDownloaded then
   begin
