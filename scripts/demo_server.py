@@ -44,13 +44,20 @@ class FakeVault:
 
 class FakeGemini:
     """실제 Google을 부르지 않는 Gemini. 'AIza-bad'로 시작하는 키는 Google이 거절한 것처럼 응답한다."""
-    def __init__(self, vault):
+    def __init__(self, vault, real=None):
         self.vault, self.model = vault, None
+        self.MODELS = getattr(real, 'MODELS', ())
+        self.model_setting = getattr(real, 'model_setting', lambda: None)
+
+    @property
+    def chosen(self):
+        picked = self.model_setting()
+        return picked if picked in dict(self.MODELS) else (self.MODELS[0][0] if self.MODELS else None)
 
     def check(self, key=None):
         if (key or '').startswith('AIza-bad'):
             raise gemini_error(400, {'message': 'API key not valid. Please pass a valid API key.'})
-        self.model = 'gemini-flash-latest'
+        self.model = self.chosen or 'gemini-flash-lite-latest'
         return self.model
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False):
@@ -140,7 +147,7 @@ def main():
     app.vault = FakeVault()
     app.nexon = FakeNexon(profile)
     app.nexon_for = lambda key: FakeNexon(profile, key)
-    app.gemini = FakeGemini(app.cloud_vault)
+    app.gemini = FakeGemini(app.cloud_vault, app.gemini)
     app.claude = FakePaidCloud(app.claude, 'Claude')
     app.openai = FakePaidCloud(app.openai, 'ChatGPT')
     if args.cloud and not args.first_run:

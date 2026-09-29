@@ -83,7 +83,7 @@ class Application:
         self.vault = Vault()
         self.nexon = CachedNexon(Nexon(self.vault))
         self.cloud_vault = Vault('gemini-api-key', 'Gemini API 키')
-        self.gemini = Gemini(self.cloud_vault)
+        self.gemini = Gemini(self.cloud_vault, lambda: self.store.setting('gemini_model') or None)
         # 유료 클라우드. 키는 회사마다 따로, 모델은 설정값 claude_model·openai_model(없으면 첫 항목).
         self.claude = Claude(Vault('anthropic-api-key', 'Claude API 키'), lambda: self.store.setting('claude_model') or None)
         self.openai = OpenAI(Vault('openai-api-key', 'OpenAI API 키'), lambda: self.store.setting('openai_model') or None)
@@ -181,11 +181,14 @@ class Application:
             present, error = bool(engine.vault.get()), None
         except AppError as e:
             present, error = False, str(e)
+        choices = [{'id': m, 'label': label} for m, label in getattr(engine, 'MODELS', ())]
         if provider == CLOUD_MODEL:
-            model, choices = engine.model or self.store.setting('cloud_model') or None, []
+            # model: 실제로 쓰는 이름(한도에 막히면 다른 모델일 수 있다), chosen: 사용자가 고른 것
+            model = engine.model or self.store.setting('cloud_model') or None
+            chosen = getattr(engine, 'chosen', None)
         else:
-            model, choices = engine.model, [{'id': m, 'label': label} for m, label in engine.MODELS]
-        return {'key_present':present,'vault_error':error,'model':model,'choices':choices}
+            model = chosen = engine.model
+        return {'key_present':present,'vault_error':error,'model':model,'chosen':chosen,'choices':choices}
 
     def connect_cloud_key(self, key, use=False, provider=CLOUD_MODEL):
         """클라우드 키를 먼저 시험하고 저장한다. 회사가 거절한 키는 저장하지 않는다. use면 사용 모델도 그 클라우드로 정한다."""
@@ -214,10 +217,30 @@ class Application:
     def choose_cloud_model(self, provider, model):
         """Claude·ChatGPT 중 쓸 모델(예: Opus 5·Sonnet 5). 목록에 있는 것만."""
         engine = self.clouds.get(provider)
-        if provider == CLOUD_MODEL or engine is None or model not in dict(engine.MODELS):
+        if engine is None or model not in dict(getattr(engine, 'MODELS', ())):
             raise AppError('고를 수 있는 모델이 아닙니다.')
         self.store.set_setting(f'{provider}_model', model)
+        if provider == CLOUD_MODEL:
+            engine.model = None                    # 다음 질문 때 고른 모델로 다시 확인한다
         return self.cloud_status(provider)
+
+    def select_model(self, provider, model=None):
+        """화면 위쪽 모델 선택: 클라우드(회사+모델) 또는 로컬(Ollama 모델 이름)로 바로 바꾼다.
+        그 회사 키가 없으면 need_key를 돌려주고 화면이 키 입력을 연다."""
+        if provider in self.clouds:
+            if model:
+                self.choose_cloud_model(provider, model)
+            if not self.cloud_status(provider)['key_present']:
+                return {'need_key':True,'provider':provider}
+            self.store.set_setting('model', provider)
+            models.clear_setup(self.store.folder)
+            return {'selected':provider}
+        if provider == 'local':
+            if not model or model not in self.model.status()['models']:
+                raise AppError('설치된 로컬 모델을 골라 주세요.')
+            self.store.set_setting('model', model)
+            return {'selected':model}
+        raise AppError('고를 수 있는 모델이 아닙니다.')
 
     def forget_nexon_cache(self):
         cache = getattr(self.nexon, 'cache', None)
@@ -325,6 +348,8 @@ class Application:
                 self.clouds[provider].vault.delete()
                 if provider == CLOUD_MODEL: self.gemini.model = None
                 return {'ok':True}
+            if path == '/api/model/select':
+                return self.select_model(required(data,'provider',20), data.get('model'))
             if path == '/api/cloud/model':
                 return self.choose_cloud_model(required(data,'provider',20), required(data,'model',60))
             if path == '/api/tour':

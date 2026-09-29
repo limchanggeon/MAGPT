@@ -1730,3 +1730,52 @@ class PaidCloudTests(unittest.TestCase):
         self.assertEqual(o.failure(429, {'code': 'insufficient_quota'}).kind, 'billing')
         self.assertEqual(o.failure(429, {'code': 'rate_limit_exceeded'}).kind, 'quota')
         self.assertEqual(o.failure(401, {}).kind, 'invalid')
+
+
+class ModelSelectTests(unittest.TestCase):
+    """화면 위쪽 모델 선택(/api/model/select). 회사+모델을 한 번에 바꾸고, 키가 없으면 키 입력으로 보낸다."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.app = Application(self.tmp.name)
+        for engine in (self.app.claude, self.app.openai): engine.vault = KeyConnectTests.MemoryVault()
+        self.app.cloud_vault = self.app.gemini.vault = KeyConnectTests.MemoryVault('AIza-demo-key-0000000000')
+    def tearDown(self): self.tmp.cleanup()
+    def select(self, provider, model=None):
+        with patch.object(Ollama, 'status', return_value={'connected': True, 'models': ['qwen3.5:2b']}):
+            return self.app.route('POST', '/api/model/select', {}, {'provider': provider, 'model': model})
+    def test_gemini_model_choice(self):
+        self.assertEqual(self.app.gemini.chosen, 'gemini-flash-lite-latest')           # 기본은 하루 한도가 넉넉한 Lite
+        self.app.gemini.model = 'gemini-flash-lite-latest'
+        self.assertEqual(self.select('gemini', 'gemini-flash-latest'), {'selected': 'gemini'})
+        self.assertEqual(self.app.gemini.chosen, 'gemini-flash-latest')
+        self.assertIsNone(self.app.gemini.model)                                        # 다음 질문 때 고른 모델로 다시 확인
+        self.assertEqual(self.app.store.setting('model'), 'gemini')
+    def test_gemini_check_tries_chosen_first(self):
+        from mepiti.adapters import Gemini
+        g = Gemini(KeyConnectTests.MemoryVault('k'), lambda: 'gemini-flash-latest')
+        tried = []
+        def fake_call(path, body=None, key=None, timeout=60):
+            if path.startswith('/models?'):
+                return {'models': [{'name': 'models/' + n, 'supportedGenerationMethods': ['generateContent']}
+                                   for n in ('gemini-flash-lite-latest', 'gemini-flash-latest')]}
+            tried.append(path); return {'candidates': [{'content': {'parts': [{'text': '네'}]}}]}
+        with patch.object(g, 'call', side_effect=fake_call):
+            self.assertEqual(g.check('AIza-x'), 'gemini-flash-latest')
+        self.assertIn('gemini-flash-latest:', tried[0])
+    def test_paid_without_key_goes_to_key_input(self):
+        self.assertEqual(self.select('claude', 'claude-sonnet-5'), {'need_key': True, 'provider': 'claude'})
+        self.assertEqual(self.app.claude.model, 'claude-sonnet-5')                       # 고른 모델은 기억해 둔다
+        self.assertEqual(self.app.store.setting('model'), '')
+        self.app.claude.vault.key = 'sk-ant-x'
+        self.assertEqual(self.select('claude'), {'selected': 'claude'})
+    def test_local_and_invalid(self):
+        self.assertEqual(self.select('local', 'qwen3.5:2b'), {'selected': 'qwen3.5:2b'})
+        with self.assertRaises(AppError): self.select('local', 'none:1b')
+        with self.assertRaises(AppError): self.select('openai', 'claude-opus-5')
+        with self.assertRaises(AppError): self.select('nope')
+    def test_status_reports_chosen(self):
+        self.app.store.set_setting('openai_model', 'gpt-6-luna')
+        with patch.object(Ollama, 'status', return_value={'connected': False, 'models': []}):
+            clouds = self.app.status()['clouds']
+        self.assertEqual(clouds['openai']['chosen'], 'gpt-6-luna')
+        self.assertEqual(clouds['gemini']['chosen'], 'gemini-flash-lite-latest')
+        self.assertEqual([c['id'] for c in clouds['gemini']['choices']], ['gemini-flash-lite-latest', 'gemini-flash-latest'])

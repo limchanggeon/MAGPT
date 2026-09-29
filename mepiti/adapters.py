@@ -632,11 +632,20 @@ class Gemini:
     # 생각(thinking) 줄이기. Gemini 3.x는 thinkingLevel, 2.5는 thinkingBudget을 받는다. 모르는 값이면 400이 나므로
     # 차례로 시도하고, 모델마다 통한 것을 기억한다. 생각 토큰은 출력 한도에 포함되므로 한도는 넉넉히 둔다.
     THINKING = ({'thinkingLevel': 'low'}, {'thinkingBudget': 0}, None)
+    # 사용자가 고를 수 있는 것(화면의 모델 선택). 첫 항목이 기본이다. 한도는 위 AI Studio 화면 기준 어림값.
+    MODELS = (('gemini-flash-lite-latest', 'Flash-Lite · 기본 · 무료 하루 약 500회'),
+              ('gemini-flash-latest', 'Flash · 무료 하루 약 20회'))
 
-    def __init__(self, vault):
+    def __init__(self, vault, model_setting=lambda: None):
         self.vault = vault
-        self.model = None                # 고른 Gemini 모델 이름(목록을 한 번 받아 정한다)
+        self.model_setting = model_setting
+        self.model = None                # 실제로 쓰는 Gemini 모델 이름(목록을 한 번 받아 정한다)
         self.thinking = {}               # 모델별로 받아 준 생각 설정의 THINKING 순번
+
+    @property
+    def chosen(self):
+        picked = self.model_setting()
+        return picked if picked in dict(self.MODELS) else self.MODELS[0][0]
 
     def call(self, path, body=None, key=None, timeout=60):
         key = key or self.vault.get()
@@ -687,6 +696,9 @@ class Gemini:
         한도(429)에 막히면 다음 후보로 넘어간다. 모두 막히면 한도 오류를 그대로 알린다.
         """
         found = self.candidates(self.models(key))
+        if self.chosen in found:                       # 사용자가 고른 모델을 먼저 시험한다
+            found.remove(self.chosen)
+            found.insert(0, self.chosen)
         if not found:
             raise AppError('이 키로 쓸 수 있는 Gemini 모델을 찾지 못했어요.', 502)
         last = None

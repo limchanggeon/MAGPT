@@ -382,7 +382,7 @@ $('#history-fetch').onclick=e=>task(e.currentTarget,async()=>{
   toast(`${fmt(r.requested_days)}일 조회 · 새 기록 ${fmt(r.added)}건`+(r.failed.length?` · 실패 ${r.failed.length}일`:''),!!r.failed.length);
   await loadForgeHistory();
 });
-async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.ready;const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?modelLabel(s):s.selected_model?'모델 연결 필요':'모델 선택 필요'),el('span','','↗'));$('#model-status').textContent=`클라우드 키: ${Object.entries(s.clouds||{}).filter(([,c])=>c.key_present).map(([p])=>CLOUDS[p].name).join(', ')||'없음'} · 로컬: `+(s.model.connected?`Ollama 연결됨, 모델 ${s.model.models.length}개`:'Ollama 꺼짐');const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);return s;}
+async function loadStatus(){const s=await api('status');if(s.version){$('.brand .alpha').textContent=s.version.split('.').slice(0,2).join('.')+'α';$('#app-version').textContent='v'+s.version;}const ready=s.ready;const pill=$('#model-pill');pill.replaceChildren(el('span','dot'+(ready?'':' amber')),el('span','',ready?modelLabel(s):s.selected_model?'모델 연결 필요':'모델 선택 필요'),el('span','pill-go','▾'));if(!$('#model-menu').hidden)renderModelMenu(s);$('#model-status').textContent=`클라우드 키: ${Object.entries(s.clouds||{}).filter(([,c])=>c.key_present).map(([p])=>CLOUDS[p].name).join(', ')||'없음'} · 로컬: `+(s.model.connected?`Ollama 연결됨, 모델 ${s.model.models.length}개`:'Ollama 꺼짐');const select=$('#model-select');select.replaceChildren();if(!s.model.models.length){const option=el('option','','설치된 모델 없음');option.value='';select.append(option);}s.model.models.forEach(name=>{const option=el('option','',name);option.value=name;option.selected=name===s.selected_model;select.append(option);});$('#key-status').textContent=s.vault_error|| (s.key_present?'키 저장됨 · 인증은 캐릭터 조회로 확인':'등록된 키 없음');const sys=s.system;const strip=$('#system-info');strip.replaceChildren();[`${sys.os} · ${sys.architecture}`,sys.ram_gb?`RAM ${sys.ram_gb} GB`:'RAM 미확인',`여유 공간 ${sys.disk_free_gb} GB`,sys.gpu||'GPU 미확인',sys.ocr_available?'OCR 엔진 감지됨':'OCR 설치 필요'].forEach(t=>strip.append(el('span','',t)));$('#storage-path').textContent=s.storage_path+' · 키는 OS 보안 저장소에 별도 보관';renderPresets(s);renderKeyCard(s);renderSetup(s);if(typeof maybeStartTour==='function')maybeStartTour(s);if(s.download.running)pollDownload();else if(s.download.status)$$('.download-status').forEach(e=>e.textContent=s.download.status);return s;}
 $('#refresh-status').onclick=e=>task(e.currentTarget,loadStatus);
 // 노작값 — 저장된 값 목록과 직접 입력.
 function amountText(v){
@@ -475,8 +475,8 @@ const CLOUDS={
 // cloudFormOpen: 키 입력을 연 클라우드 이름(없으면 null). cloudFormUse: 연결하면 바로 사용 모델로 정할지.
 let setupSkipped=false,setupAutoStarted=false,ollamaTimer,cloudFormOpen=null,cloudFormUse=false,localHelpOpen=false;
 function rerenderModels(){if(lastStatus){renderPresets(lastStatus);renderSetup(lastStatus);}}
-function cloudModelName(s,provider){const c=(s.clouds||{})[provider]||{};const hit=(c.choices||[]).find(x=>x.id===c.model);return hit?hit.label.split(' · ')[0]:(c.model||'');}
-function modelLabel(s){const p=s.selected_model;return CLOUDS[p]?`${CLOUDS[p].name} · ${p===CLOUD?'클라우드':cloudModelName(s,p)}`:p;}
+function cloudModelName(s,provider){const c=(s.clouds||{})[provider]||{};const hit=(c.choices||[]).find(x=>x.id===(c.chosen||c.model));return hit?hit.label.split(' · ')[0]:(c.model||'');}
+function modelLabel(s){const p=s.selected_model;return CLOUDS[p]?`${CLOUDS[p].name} · ${cloudModelName(s,p)}`:p;}
 function openCloudForm(provider,use){
   cloudFormOpen=provider;cloudFormUse=use;rerenderModels();
   // 입력칸이 카드들 아래에 생기므로 보이게 하고 바로 붙여 넣게 둔다.
@@ -538,6 +538,35 @@ function ollamaHelp(s){
   }
   return box;
 }
+// 화면 위쪽 모델 선택. 어느 탭에서든 눌러 회사·모델을 바로 바꾼다. 키가 없는 회사를 고르면 설정의 키 입력으로 간다.
+function closeModelMenu(){$('#model-menu').hidden=true;$('#model-pill').setAttribute('aria-expanded','false');}
+function renderModelMenu(s){
+  const menu=$('#model-menu');menu.replaceChildren();
+  const pick=async(provider,model)=>{
+    const r=await api('model/select',{provider,model});closeModelMenu();
+    if(r.need_key){switchView('settings');requestAnimationFrame(()=>openCloudForm(r.provider,true));toast(`${CLOUDS[r.provider].name} API 키를 넣으면 바로 씁니다.`);return;}
+    await loadStatus();toast(`${modelLabel(lastStatus)}로 바꿨어요.`);
+  };
+  const item=(label,current,onclick,hint)=>{const b=el('button','model-menu-item'+(current?' current':''));b.type='button';b.setAttribute('role','menuitemradio');b.setAttribute('aria-checked',current?'true':'false');
+    b.append(el('span','model-menu-check',current?'✓':''),el('span','',label));if(hint)b.append(el('small','',hint));b.onclick=()=>guard(onclick);return b;};
+  Object.entries(s.clouds||{}).forEach(([provider,c])=>{
+    const info=CLOUDS[provider];if(!info)return;
+    const head=el('div','model-menu-head');head.append(el('strong','',info.name),el('span','',provider===CLOUD?'무료':'유료'));
+    if(!c.key_present)head.append(el('span','model-menu-need','키 필요'));
+    menu.append(head);
+    (c.choices||[]).forEach(x=>{const [name,...rest]=x.label.split(' · ');menu.append(item(name,s.selected_model===provider&&c.chosen===x.id,()=>pick(provider,x.id),rest.filter(r=>r!=='기본').join(' · ')));});
+  });
+  const local=s.model.models||[];const head=el('div','model-menu-head');head.append(el('strong','','로컬'),el('span','','내 컴퓨터'));menu.append(head);
+  if(local.length)local.forEach(name=>menu.append(item(name,s.selected_model===name,()=>pick('local',name))));
+  else menu.append(el('p','model-menu-empty',s.model.connected?'받아 둔 로컬 모델이 없어요.':'Ollama가 꺼져 있어요.'));
+  const more=el('button','model-menu-more','AI 모델 설정 열기');more.type='button';more.onclick=()=>{closeModelMenu();switchView('settings');};menu.append(more);
+}
+$('#model-pill').onclick=e=>{e.stopPropagation();const menu=$('#model-menu');
+  if(!menu.hidden){closeModelMenu();return;}
+  if(lastStatus)renderModelMenu(lastStatus);menu.hidden=false;$('#model-pill').setAttribute('aria-expanded','true');
+  guard(loadStatus);};                                    // 열 때 최신 상태로 다시 그린다
+document.addEventListener('click',e=>{if(!$('#model-menu').hidden&&!e.target.closest('.model-switch'))closeModelMenu();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#model-menu').hidden){closeModelMenu();$('#model-pill').focus();}});
 function modelChooser(s){
   const parts=[],grid=el('div','model-presets');(s.presets||[]).forEach(p=>grid.append(presetCard(p,s)));parts.push(grid);
   if(cloudFormOpen)parts.push(cloudKeyForm(cloudFormOpen));
@@ -546,10 +575,10 @@ function modelChooser(s){
     const info=CLOUDS[provider];if(!info)return;
     if(c.vault_error)parts.push(el('p','notice',c.vault_error));
     if(!c.key_present||cloudFormOpen===provider)return;
-    const row=el('div','cloud-row');row.append(el('span','',`${info.name} 키 연결됨`+(provider===CLOUD&&c.model?' · '+c.model:'')));
+    const row=el('div','cloud-row');row.append(el('span','',`${info.name} 키 연결됨`));
     if((c.choices||[]).length){
       const pick=el('select');pick.setAttribute('aria-label',`${info.name} 모델`);
-      c.choices.forEach(x=>{const o=el('option','',x.label);o.value=x.id;o.selected=x.id===c.model;pick.append(o);});
+      c.choices.forEach(x=>{const o=el('option','',x.label);o.value=x.id;o.selected=x.id===(c.chosen||c.model);pick.append(o);});
       pick.onchange=()=>guard(async()=>{await api('cloud/model',{provider,model:pick.value});await loadStatus();toast(`${info.name} 모델을 바꿨어요.`);});
       row.append(pick);
     }

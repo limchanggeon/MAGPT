@@ -125,6 +125,21 @@ main{margin-left:200px;width:calc(100% - 200px)}
 }
 .status-pill:hover{border-color:var(--gold-dim);color:var(--ink)}
 .pill-go{color:var(--faint)}
+/* 위쪽 모델 선택 메뉴 */
+.model-switch{position:relative}
+.model-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:50;width:300px;max-height:min(70vh,560px);overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.45)}
+.model-menu-head{display:flex;align-items:center;gap:6px;padding:8px 8px 4px;font-size:11px;color:var(--muted)}
+.model-menu-head strong{color:var(--ink);font-size:12px}
+.model-menu-need{margin-left:auto;color:var(--gold)}
+.model-menu-item{display:grid;grid-template-columns:16px 1fr;align-items:center;column-gap:4px;width:100%;text-align:left;padding:6px 8px;border-radius:5px;font-size:12.5px;color:var(--ink-dim)}
+.model-menu-item small{grid-column:2;font-size:10.5px;color:var(--faint)}
+.model-menu-item:hover,.model-menu-item:focus-visible{background:var(--inset);color:var(--ink)}
+.model-menu-item.current{color:var(--gold)}
+.model-menu-check{color:var(--gold);font-size:11px}
+.model-menu-empty{margin:2px 8px 6px 28px;font-size:11.5px;color:var(--faint)}
+.model-menu-more{display:block;width:100%;text-align:left;margin-top:4px;padding:8px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+.model-menu-more:hover{color:var(--ink)}
 .view[hidden],[hidden]{display:none!important}
 
 /* ---- 질의 ---- */

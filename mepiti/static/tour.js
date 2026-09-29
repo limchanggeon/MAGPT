@@ -9,6 +9,8 @@ const TOUR_STEPS = [
    text:'"모자 22성까지 기대값 얼마야?"처럼 편하게 적으면 돼요. 강화 조건이나 노작값이 필요하면 메피티가 되물어요.'},
   {view:'chat', target:'#item-button', title:'장비 골라서 대화',
    text:'착용 장비를 하나 고르면 그 장비를 주제로 이어서 이야기해요. "21성은?"처럼 짧게 물어도 알아들어요.'},
+  {view:'chat', target:'#model-pill', title:'AI 모델 바꾸기',
+   text:'여기를 누르면 Gemini(무료)·Claude·ChatGPT·내 컴퓨터 모델 중에서 바로 바꿀 수 있어요.'},
   {view:'chat', target:'[data-view="characters"]', title:'캐릭터', click:true,
    text:'캐릭터 탭을 눌러 보세요.'},
   {view:'characters', target:['#character-profile .equipment-panel','#character-profile'], title:'캐릭터와 장비창',

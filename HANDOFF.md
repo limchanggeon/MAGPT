@@ -1088,3 +1088,14 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 검증: 자동 테스트 326개 통과. `scripts/build.py`로 Mac 앱 재빌드(46MB) → 패키지 앱(임시 데이터)에 가짜 키: Anthropic·OpenAI 실제 서버가 거절 → 앱 문구로 표시, 키 저장 안 됨.
   데모 서버+WebKit: 다섯 카드, Claude 키 입력(거절·연결), 상단 'Claude · Opus 5' → 모델을 Sonnet 5로 바꾸면 반영, 대화 답변이 Claude(가짜)로 감. 페이지 오류 없음.
 - 미검증: 실제 유료 키로 답변(키 없음), 콘솔 메뉴 이름(Create Key 등)의 실제 표기, Windows 설치 마법사 새 선택지 화면. 브랜치 CI(`60b4846`) 두 OS 통과. 릴리스 전.
+
+### 2026-09-29 — 화면 위쪽 모델 선택 (사용자 요청: "모델 선택 기능도 넣어 줬으면")
+
+- 설정 안, 키를 넣은 뒤에만 보이던 모델 고르기를 **화면 오른쪽 위 모델 표시**에서 어느 탭에서든 쓰게 했다.
+  메뉴: Gemini(Flash-Lite 기본·Flash), Claude(Opus 5·Sonnet 5·Haiku 4.5), ChatGPT(GPT-6 Sol·Luna·Astra), 로컬(Ollama에 받아 둔 모델), 'AI 모델 설정 열기'.
+  현재 모델에 ✓. 키 없는 회사를 고르면 고른 모델을 기억하고 설정의 그 회사 키 입력을 연다. Esc·바깥 클릭으로 닫힘.
+- 변경: `adapters.Gemini` — `MODELS`(Flash-Lite·Flash)와 `chosen`, `check`가 고른 모델을 먼저 시험. `server.py` — `select_model`(`POST /api/model/select`),
+  `cloud_status`에 `chosen`, `choose_cloud_model`이 Gemini도 받음(고르면 다시 확인). 화면 — `#model-pill` 메뉴(`renderModelMenu`), 사용법 안내에 한 단계 추가(13단계),
+  설정의 연결된 클라우드 줄 드롭다운은 `chosen` 기준. 데모 FakeGemini가 선택지를 따름. 테스트 `ModelSelectTests` 5개. README.
+- 검증(2026-09-29): 자동 테스트 331개 통과. 데모 서버+WebKit: 메뉴 구성·✓, Gemini Flash로 전환, 키 없는 Claude Sonnet 5 → 설정 키 입력 → 연결 후 'Claude · Sonnet 5',
+  로컬 qwen3.5:2b 전환, Esc 닫힘, 페이지 오류 없음.
