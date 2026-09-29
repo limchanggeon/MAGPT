@@ -1491,6 +1491,9 @@ class GeminiTests(unittest.TestCase):
     def test_pick_prefers_flash_and_follows_renames(self):
         from mepiti.adapters import Gemini
         self.assertEqual(Gemini.pick(['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest']), 'gemini-flash-latest')
+        # 무료 한도: Flash-Lite 하루 500회, Flash 하루 20회(2026-09-29 사용자 AI Studio 화면). Lite가 먼저다.
+        self.assertEqual(Gemini.pick(['gemini-flash-latest', 'gemini-flash-lite-latest']), 'gemini-flash-lite-latest')
+        self.assertEqual(Gemini.pick(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']), 'gemini-3.5-flash-lite')
         self.assertEqual(Gemini.pick(['gemini-9.0-flash', 'gemini-9.0-flash-image', 'gemini-8.0-flash']), 'gemini-9.0-flash')
         with self.assertRaises(AppError): Gemini.pick(['gemini-2.5-pro', 'text-embedding-004'])
     def test_errors_are_told_plainly(self):
@@ -1534,12 +1537,13 @@ class GeminiTests(unittest.TestCase):
                                    {'name': 'models/gemini-flash-lite-latest', 'supportedGenerationMethods': ['generateContent']},
                                    {'name': 'models/text-embedding-004', 'supportedGenerationMethods': ['embedContent']}]}
             tried.append((path, key))
-            if 'gemini-flash-latest:' in path:
+            if 'gemini-flash-lite-latest:' in path:
                 raise gemini_error(429, {'status': 'RESOURCE_EXHAUSTED', 'message': 'limit: 0'})
             return {'candidates': [{'content': {'parts': [{'text': '네'}]}}]}
         with patch.object(g, 'call', side_effect=fake_call):
-            self.assertEqual(g.check('AIza-new-key-0000000000'), 'gemini-flash-lite-latest')
-        self.assertEqual(g.model, 'gemini-flash-lite-latest')
+            self.assertEqual(g.check('AIza-new-key-0000000000'), 'gemini-flash-latest')
+        self.assertEqual(g.model, 'gemini-flash-latest')
+        self.assertEqual([p.split(':')[0] for p, _ in tried], ['/models/gemini-flash-lite-latest', '/models/gemini-flash-latest'])
         self.assertTrue(all(k == 'AIza-new-key-0000000000' for _, k in tried))   # 저장 전 새 키로 시험한다
     def test_select_uses_json_schema(self):
         from mepiti.adapters import Gemini

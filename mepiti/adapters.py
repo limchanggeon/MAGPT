@@ -625,7 +625,9 @@ class Gemini:
     """
     BASE = 'https://generativelanguage.googleapis.com/v1beta'
     # 2026-09-29 공식 모델 문서 기준: 'latest' 별칭이 최신 Flash·Flash-Lite를 가리킨다.
-    PREFERRED = ('gemini-flash-latest', 'gemini-flash-lite-latest')
+    # 무료 한도(사용자 AI Studio 화면, 2026-09-29): Flash-Lite 15 RPM·하루 500회, Flash 5 RPM·하루 20회.
+    # 하루 20회는 몇 번 물으면 끝나므로 Flash-Lite를 먼저 쓴다. 이 앱에서 모델은 설명만 쓰므로 Lite로 충분하다.
+    PREFERRED = ('gemini-flash-lite-latest', 'gemini-flash-latest')
     SKIP = ('image', 'tts', 'audio', 'live', 'embedding', 'exp', 'preview', 'thinking', 'vision', 'learnlm', 'gemma')
     # 생각(thinking) 줄이기. Gemini 3.x는 thinkingLevel, 2.5는 thinkingBudget을 받는다. 모르는 값이면 400이 나므로
     # 차례로 시도하고, 모델마다 통한 것을 기억한다. 생각 토큰은 출력 한도에 포함되므로 한도는 넉넉히 둔다.
@@ -660,8 +662,9 @@ class Gemini:
     def candidates(cls, names):
         """키로 쓸 수 있는 모델 중 가볍고 무료 한도가 있는 flash 계열을 우선순위대로."""
         ordered = [n for n in cls.PREFERRED if n in names]
-        ordered += sorted((n for n in names if 'flash' in n and n not in ordered and not any(s in n for s in cls.SKIP)),
-                          reverse=True)
+        rest = [n for n in names if 'flash' in n and n not in ordered and not any(s in n for s in cls.SKIP)]
+        # 별칭이 없으면 Lite(한도가 넉넉함)를 먼저, 같은 종류 안에서는 최신 버전부터.
+        ordered += sorted((n for n in rest if 'lite' in n), reverse=True) + sorted((n for n in rest if 'lite' not in n), reverse=True)
         return ordered
 
     @classmethod

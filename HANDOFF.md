@@ -979,3 +979,12 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 팁: 앱 창 전용 CSS·동작은 Playwright WebKit만으로 판단하지 말고 실제 창에 진짜 입력(Quartz CGEvent)을 보내 확인할 것.
 - 검증(2026-09-29, 사용자 Mac): 자동 테스트 307개 통과, 실제 창에서 설정 탭 휠 스크롤 확인. 사용자 앱 창을 수정본으로 다시 띄움.
   0.2.1~0.2.3 릴리스에 이 문제가 있다 → 다음 릴리스에 포함 필요.
+
+### 2026-09-29 — Gemini 무료 한도에 맞춰 Flash-Lite 우선 (사용자가 AI Studio 한도 화면을 붙여 줌)
+
+- 사용자 계정의 무료 한도(AI Studio '모델별 한도', 2026-09-29): Gemini 3.x Flash 5 RPM·**하루 20회**, 3.5/3.1 Flash-Lite 15 RPM·**하루 500회**,
+  Gemma 4 30 RPM·하루 14.4K(단 TPM 16K), 2.x Flash·Pro는 0. '무제한'은 Live API(실시간 음성 스트리밍·WebSocket)뿐이라 이 앱의 텍스트 요청에 맞지 않음(권하지 않음).
+- 변경: `Gemini.PREFERRED`를 `gemini-flash-lite-latest` 먼저로, 별칭이 없을 때도 Lite를 먼저. 테스트 보강. README·IMPLEMENTATION.
+- 한도는 키(프로젝트)마다다(공식 문서: "Rate limits are applied per project, not per API key"). 키 하나를 여럿이 나눠 쓰면 안 되는 이유와 함께 사용자에게 설명함.
+- 참고: 이미 연결된 키는 앱을 다시 켜면 첫 질문 때 모델을 다시 고른다(Lite로 바뀜). 설정 화면의 모델 이름은 저장값(`cloud_model`)이라 그 전까지 옛 이름이 보일 수 있다.
+- 후보(미구현): Lite 하루 한도를 넘으면 Gemma 4로 넘기기(시스템 지시·JSON 모드 지원 여부 확인 필요).

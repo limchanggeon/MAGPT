@@ -311,7 +311,7 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
 ## 2026-09-29 클라우드 AI(Gemini 무료) 추가
 
 - 선택지 세 개: **클라우드 · 무료 (Gemini)**(추천) · 2B · 8B. 설치 마법사(Windows)와 첫 실행 카드, 설정 → AI 모델에서 고르고 바꾼다.
-- `adapters.Gemini`: REST `generateContent`. 키로 모델 목록을 받아 `gemini-flash-latest` → `gemini-flash-lite-latest` → 그 밖의 Flash 순으로,
+- `adapters.Gemini`: REST `generateContent`. 키로 모델 목록을 받아 `gemini-flash-lite-latest`(무료 하루 500회) → `gemini-flash-latest`(하루 20회) → 그 밖의 Lite·Flash 순으로,
   짧은 시험 요청으로 무료 한도(429)에 막힌 모델은 건너뛴다. 생각(thinking)은 `thinkingLevel: low` → `thinkingBudget: 0` → 설정 없음 순으로 시도해 모델별로 기억.
   오류는 `invalid`(키) · `quota`(무료 한도) · `region` · `unverified`로 나눠 쉬운 말로 알린다. `ModelRouter`가 사용 모델이 `gemini`면 Gemini, 아니면 Ollama로 보낸다.
   지시문(`analysis_messages`·`select_messages`)은 로컬과 같다. 숫자는 앱이 쓰고 모델은 설명만 — 검증 필터도 그대로다.
