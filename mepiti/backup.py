@@ -7,6 +7,7 @@
 import json
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -28,7 +29,8 @@ def last_version(folder):
     if not path.exists():
         return None
     try:
-        with sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=5) as db:
+        # sqlite3 연결의 with는 커밋만 하고 닫지 않는다. Windows에서 파일이 잠겨 남지 않게 closing으로 닫는다.
+        with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=5)) as db:
             row = db.execute('SELECT value FROM settings WHERE key=?', (VERSION_SETTING,)).fetchone()
         return json.loads(row[0]) if row else None
     except (sqlite3.Error, ValueError):
@@ -45,7 +47,7 @@ def make(folder, label):
     stamp = datetime.now(KST).strftime('%Y%m%d-%H%M%S')
     safe = re.sub(r'[^0-9A-Za-z._-]+', '-', label).strip('-') or 'manual'
     target = target_dir / f'mepiti-{stamp}-{safe}.sqlite3'
-    with sqlite3.connect(str(source), timeout=15) as src, sqlite3.connect(str(target)) as dst:
+    with closing(sqlite3.connect(str(source), timeout=15)) as src, closing(sqlite3.connect(str(target))) as dst:
         src.backup(dst)
     prune(folder)
     return target

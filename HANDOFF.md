@@ -1131,3 +1131,5 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   기록·노작값 그대로, `mepiti-…-before-v0.3.3.sqlite3` 백업 생성(0.3.2는 app_version을 안 남겨 'before'로 붙음). 데모+WebKit으로 데이터 보관 패널·지금 백업 확인.
 - 참고: 이 코드로 처음 켜면(사용자 실제 데이터 포함) app_version 기록이 없으므로 한 번 백업이 생긴다(의도).
 - 미검증: Windows 실제 업데이트 설치(설치 파일의 업데이트 감지 화면).
+- 후속: Windows CI에서 `BackupTests` 3개가 임시 폴더 삭제 실패(WinError 32). 원인: `with sqlite3.connect(...)`는 커밋만 하고 **닫지 않아** Windows에서 파일이 잠긴 채 남음
+  (앱에서도 작은 핸들 누수). `backup.py`에서 `contextlib.closing`으로 닫게 고침. **팁: sqlite3 연결은 `closing()` 또는 `Store.db()`로 연다.**
