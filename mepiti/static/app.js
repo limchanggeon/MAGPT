@@ -197,7 +197,8 @@ function huntPreview(){
   const box=$('#hunt-preview');
   if(m==null||price==null){box.textContent="금액은 '12억 3500만'처럼 적어 주세요.";return;}
   if(!m&&!n){box.textContent='';return;}
-  box.textContent=`이번 재획 총수익 ${mesoText(m+n*price)}`+(n?` (메소 ${mesoText(m)} + 조각 ${fmt(n)}개 × ${mesoText(price)})`:'');
+  if(price&&price<10000){box.textContent=`조각 가격이 ${fmt(price)}메소로 읽혀요. 1개 가격을 '650만'처럼 단위를 붙여 적어 주세요.`;return;}
+  box.textContent=`이번 재획 총수익 ${mesoText(m+n*price)}`+(n?` (메소 ${mesoText(m)} + 조각 ${fmt(n)}개 × ${mesoText(price)} = ${mesoText(n*price)})`:'');
 }
 function todayText(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 function earningsRow(r,label,detail){
@@ -283,7 +284,7 @@ async function loadEarnings(){
   const hunts=$('#hunt-list');hunts.replaceChildren();
   if(!d.hunts.length)hunts.append(el('p','hint','이 주에는 재획 기록이 없습니다.'));
   d.hunts.forEach(r=>hunts.append(earningsRow(r,'재획'+who(r)+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
-    `메소 ${mesoText(r.meso)}`+(r.pieces?` · 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)}`:''))));
+    `메소 ${mesoText(r.meso)}`+(r.pieces?` + 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)} = ${mesoText(r.pieces*(r.piece_price||0))}`:''))));
   const bosses=$('#boss-list');bosses.replaceChildren();
   if(!d.bosses.length)bosses.append(el('p','hint','이 주에는 주보 기록이 없습니다.'));
   d.bosses.forEach(r=>bosses.append(earningsRow(r,r.boss+who(r),

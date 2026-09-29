@@ -1264,6 +1264,14 @@ class EarningsTests(unittest.TestCase):
         self.assertEqual([(c['name'],c['group']) for c in o['character_choices']],
                          [('본캐','관리 중'),('부캐','계정'),('유니온캐','계정'),('지운캐','기록')])
         self.assertEqual(o['default_character'],'본캐'); self.assertTrue(o['account_loaded'])
+    def test_piece_price_without_unit_is_refused(self):
+        # 사용자 보고(2026-09-29): 조각이 수익 합계에 안 들어간다 — '650'처럼 단위 없이 적으면 650메소로 계산된다.
+        with self.assertRaises(AppError) as e:
+            earnings.add(self.store,{'kind':'hunt','meso':'8억','pieces':'30','piece_price':'650'})
+        self.assertIn('650만',str(e.exception))
+        r=earnings.add(self.store,{'kind':'hunt','meso':'8억','pieces':'30','piece_price':'650만'})
+        self.assertEqual(r['total'],800_000_000+30*6_500_000)
+        self.assertEqual(earnings.overview(self.store)['week']['hunt'],r['total'])   # 합계에 조각 몫이 들어간다
     def test_validation(self):
         for bad in [{'kind':'x'},{'kind':'hunt'},{'kind':'hunt','meso':'abc'},{'kind':'hunt','pieces':5},
                     {'kind':'hunt','meso':'1억','day':'2999-01-01'},{'kind':'boss','crystal':'1억'},

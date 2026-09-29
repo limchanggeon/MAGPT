@@ -15,6 +15,7 @@ from .prices import parse_price
 PIECE_PRICE = 'piece_price'      # 마지막으로 쓴 조각 가격. 다음 기록의 기본값이다.
 BOSS_PRICES = 'boss_prices'      # 보스별 마지막 결정석 판매가. 스케줄러로 불러올 때 채운다.
 MAX_MESO = 10_000_0000_0000      # 1경. 오타로 자릿수가 크게 넘어가는 것만 막는다.
+MIN_PIECE_PRICE = 10_000          # 솔 에르다 조각 1개가 1만 메소보다 쌀 수는 없다. 단위를 빼먹은 입력('650')을 잡는다.
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS earnings(
@@ -119,6 +120,9 @@ def add(store, data):
             raise AppError('번 메소나 조각 개수 중 하나는 적어 주세요.')
         if row['pieces'] and not row['piece_price']:
             raise AppError('조각 가격을 적어야 총수익을 계산할 수 있습니다.')
+        if row['piece_price'] and row['piece_price'] < MIN_PIECE_PRICE:
+            # '650'처럼 단위 없이 적으면 650메소가 되어 조각이 수익에 거의 안 들어간다(사용자 보고 2026-09-29).
+            raise AppError(f"조각 가격이 {row['piece_price']:,.0f}메소로 읽혔어요. 1개 가격을 '650만'처럼 단위를 붙여 적어 주세요.")
         if row['piece_price']:
             store.set_setting(PIECE_PRICE, row['piece_price'])
     elif kind == 'boss':
