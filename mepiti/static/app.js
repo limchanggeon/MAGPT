@@ -391,6 +391,18 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
 async function loadForgeHistory(){
   const d=await api('history/starforce');
   $('#history-status').textContent=d.fetched_days?`받아 둔 날짜 ${fmt(d.fetched_days)}일 · 최근 ${d.latest_day} · 강화 조건(MVP 할인) ${d.conditions}`:'아직 불러온 기록이 없습니다.';
+  // 위쪽 합계: 기대값과 비교할 수 있는 장비들의 실제 쓴 돈 − 기대값. 카드를 하나씩 보지 않아도 이득·손해를 한눈에.
+  const sum=$('#history-summary');sum.replaceChildren();
+  const compared=d.groups.filter(g=>g.difference!=null&&g.expected&&g.actual);
+  if(compared.length){
+    const diff=compared.reduce((s,g)=>s+g.difference,0),expected=compared.reduce((s,g)=>s+g.expected.cost,0),spent=compared.reduce((s,g)=>s+g.actual.to_reach,0);
+    const more=diff>0,box=el('div','panel history-total '+(more?'history-bad':'history-good'));
+    box.append(el('span','',`기대값과 비교한 장비 ${fmt(compared.length)}개 합계`),
+      el('strong','',`기대보다 ${mesoText(Math.abs(diff))} ${more?'더 씀':'덜 씀'}`),
+      el('small','',`실제 ${mesoText(spent)} · 기대 ${mesoText(expected)}`+(expected?` · 기대값의 ${fmt(Math.round(spent/expected*100))}%`:'')+
+        ` · 이득 ${fmt(compared.filter(g=>g.difference<=0).length)}개 · 손해 ${fmt(compared.filter(g=>g.difference>0).length)}개`));
+    sum.append(box);
+  }
   const list=$('#history-list');list.replaceChildren();
   if(d.missing_level)list.append(el('div','notice history-missing',`장비 레벨을 몰라 이득·손해를 계산하지 못한 장비가 ${fmt(d.missing_level)}개 있습니다. 카드에서 장비 레벨을 눌러 주세요.`));
   if(!d.groups.length)list.append(el('div','empty-state','강화 기록이 없습니다.\n기간을 고르고 기록 불러오기를 누르세요.'));
