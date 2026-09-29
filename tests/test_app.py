@@ -1115,6 +1115,32 @@ class PresetTests(CharacterAnalysisTests):
         self.assertEqual(r['starforce']['current_star'],20)
         self.assertIn('프리셋 2번 기준',' '.join(r['conditions']))
         self.assertEqual(self.store.session_topic(r['session_id'])['preset'],'2')
+    def test_pendant2_topic_is_not_taken_for_pendant1(self):
+        # 사용자 보고(2026-09-29): 프리셋 2의 펜던트2(데이브레이크, 140제 18성) 대화에서 '22성 기대값'을 묻자
+        # 질문 앞에 붙는 '펜던트2'가 '펜던트'(매커네이터, 120제 15성)로 잡혀 계산에 실패하고 '계산할 수 없다'만 나왔다.
+        profile=dict(PriceScopeTests.PROFILE); profile['equipment_preset']=1
+        base=next(i for i in profile['equipment'] if i['slot']=='모자')
+        p1=dict(base,slot='펜던트',name='매커네이터 펜던트',starforce=15,equip_level=120)
+        p2=dict(base,slot='펜던트2',name='데이브레이크 펜던트',starforce=18,equip_level=140)
+        profile['equipment_presets']={'1':profile['equipment'],'2':[p1,p2]}
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'데이브레이크 펜던트','price':5e7,'source':'user'})
+        r=answer(self.store,self.FakeModel('x'),{'message':'22성 기대값 얼마야',
+                 'topic':{'slot':'펜던트2','name':'데이브레이크 펜던트','preset':2}},self.FakeNexon(profile))
+        self.assertEqual((r['starforce']['item'],r['starforce']['current_star'],r['starforce']['target_star']),
+                         ('데이브레이크 펜던트',18,22))
+        # 대화 밖에서 부위로 물어도 '펜던트2'가 '펜던트'보다 먼저다.
+        self.assertEqual(context.starforce_item({'equipment':[p1,p2]},'펜던트2 22성')['name'],'데이브레이크 펜던트')
+        self.assertEqual(context.starforce_item({'equipment':[p1,p2]},'펜던트 15성')['name'],'매커네이터 펜던트')
+    def test_impossible_target_is_explained_by_the_app(self):
+        # 장비 레벨로 올릴 수 없는 성이면 모델이 '계산할 수 없다'로 뭉개지 않게 앱이 이유를 쓴다.
+        profile=dict(PriceScopeTests.PROFILE)
+        low=dict(next(i for i in profile['equipment'] if i['slot']=='모자'),name='낮은 모자',starforce=10,equip_level=120)
+        profile={**profile,'equipment':[low]}
+        conditions.save(self.store,dict(conditions.DEFAULTS))
+        self.store.price_save({'item':'낮은 모자','price':1e7,'source':'user'})
+        r=answer(self.store,self.FakeModel('x'),{'message':'모자 22성 기대값'},self.FakeNexon(profile))
+        self.assertIn('계산하지 못했습니다',r['content'])
     def test_invalid_preset_is_refused(self):
         with self.assertRaises(AppError):
             answer(self.store,self.FakeModel('x'),{'message':'x','topic':{'slot':'모자','name':'a','preset':7}},

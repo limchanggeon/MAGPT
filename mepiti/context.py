@@ -101,18 +101,20 @@ def starforce_gaps(profile, limit=5):
     return [{'slot': s, 'name': n, 'starforce': st} for st, s, n in rows[:limit]]
 
 
-def starforce_item(profile, question):
-    """질문이 가리키는 장비 하나. 강화 기대값을 계산할 대상이다."""
-    best = None
-    for item in profile.get('equipment') or []:
-        slot, name = item.get('slot') or '', item.get('name') or ''
-        if not item.get('equip_level') or item.get('starforce') is None:
-            continue
-        if name and name in question:
-            return item
-        if slot and slot in question and best is None:
-            best = item
-    return best
+def starforce_item(profile, question, topic_item=None):
+    """질문이 가리키는 장비 하나. 강화 기대값을 계산할 대상이다.
+
+    순서: 장비 이름을 적었으면 그 장비 → 부위를 적었으면 그 부위(다른 부위를 물을 수 있게) → 장비를 골라 연 대화면 그 장비.
+    부위는 긴 이름부터 맞춘다 — '펜던트2'가 든 질문이 '펜던트'(1번)로 잡혀, 장비 대화에서 다른 펜던트를
+    계산하던 문제(2026-09-29 사용자 보고: 레벨 120 펜던트로 22성을 계산하려다 실패)."""
+    items = [i for i in profile.get('equipment') or [] if i.get('equip_level') and i.get('starforce') is not None]
+    named = next((i for i in items if i.get('name') and i['name'] in question), None)
+    if named:
+        return named
+    by_slot = sorted((i for i in items if i.get('slot') and i['slot'] in question), key=lambda i: -len(i['slot']))
+    if by_slot:
+        return by_slot[0]
+    return topic_item
 
 
 def find_item(profile, topic):

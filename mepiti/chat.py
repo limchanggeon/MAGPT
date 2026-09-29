@@ -252,6 +252,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     if preset_note:
         text = f"[장비 프리셋] {preset_note}\n" + text
     missing_note = None
+    item = None
     if topic:
         item = context.find_item(profile, topic)
         if item:
@@ -267,7 +268,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
     # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
     if STARFORCE_INTENT.search(question):
-        computed = starforce_facts(store, profile, question, result)
+        computed = starforce_facts(store, profile, question, result, item)
         if computed is None:
             return
         text += computed
@@ -522,13 +523,16 @@ def unsupported_numbers(written, facts_text, floor=1000):
     return bad
 
 
-def starforce_facts(store, profile, question, result):
+def starforce_facts(store, profile, question, result, topic_item=None):
     """질문이 가리키는 장비의 강화 기대값을 계산해 사실 묶음에 붙일 글을 돌려준다.
 
     스페어(노작값)를 모르면 계산해도 총비용이 성립하지 않으므로 먼저 되묻는다.
     되물어야 하면 result를 ask_price로 채우고 None을 돌려준다.
+    장비를 골라 연 대화면 그 장비(topic_item)가 대상이다.
     """
-    item = context.starforce_item(profile, question)
+    if topic_item is not None and (not topic_item.get('equip_level') or topic_item.get('starforce') is None):
+        topic_item = None
+    item = context.starforce_item(profile, question, topic_item)
     if item and not context.starforce_possible(item):   # 강화 조건을 묻기 전에 걸러야 헛질문이 없다
         # 모델 서술을 버리는 경우에도 보이도록 앱이 직접 쓰는 답 머리에 둔다.
         result['starforce_text'] = f"**{item['slot']} {item['name']}**은 스타포스를 올릴 수 없는 장비라 기대값을 계산하지 않았습니다."
@@ -570,6 +574,8 @@ def starforce_facts(store, profile, question, result):
                                    'target_star': target, 'spare_cost': price['price'],
                                    **conditions.to_arguments(picked, current, target)})
     except AppError as e:
+        # 이유(예: 장비 레벨의 최대 성)를 앱이 직접 보여 준다. 모델에게만 맡기면 '계산할 수 없다'로 뭉개진다.
+        result['starforce_text'] = f"**{item['slot']} {item['name']}** {current}성 → {target}성 기대값을 계산하지 못했습니다: {e}"
         return f"\n\n[강화 기대값] 계산하지 못했다: {e}"
     result['starforce'] = {**calc, 'slot': item['slot'], 'item': item['name']}
     # 흔적 복구는 스페어가 쌀 때 오히려 훨씬 비싸다. 판단할 수 있게 복구 없이 계산한 값도 보여 준다.
