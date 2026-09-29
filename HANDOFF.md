@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: 로컬 알파 0.1 + 기능 확장. 전체 요구사항 완료 아님.
+- 현재 단계: v0.2.1 릴리스(앱 창). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -889,3 +889,8 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   맨 위로 올라왔다. 이 프로필은 새 필드가 생기기 전에 만든 것이라 그 필드가 없어 아직 걸러지지 않는다. 캐릭터를 다시 조회하면 적용된다(추정, 실응답 미확인).
   필드명은 PyPI `maplestory-openapi` 래퍼 소스에서 확인했다(넥슨 문서 직접 대조는 못 함).
 - 검증(2026-09-29, 사용자 Mac): 자동 테스트 **285개 통과**(특수 반지 기대값 질문, 시드링·업그레이드 0 판정 추가, 기존 사실 묶음 테스트 수정).
+- **릴리스 v0.2.1**(2026-09-29): 브랜치 CI 두 OS 통과 확인 후 `main`을 빨리감기(`7db1d96..c21f3dc`)하고 태그를 올렸다.
+  릴리스 작업 성공, `Mepiti-macOS.dmg`(20.0MB)·`Mepiti-Windows-Setup.exe`(17.1MB) 첨부, 한국어 설명으로 바꿈.
+  README의 `releases/latest/download/...` 두 링크 HTTP 200 확인. https://github.com/limchanggeon/MAGPT/releases/tag/v0.2.1
+- 미검증: Windows 실기(창·어두운 제목 표시줄·아이콘·다시 실행·설치 마법사·Ollama 무인 설치), 실제 넥슨 응답의 업그레이드 횟수 필드.
+- 다음: 사용자가 v0.2.1을 받아 써 보고 알려 주는 문제 수정. 가능하면 Windows PC에서 설치 흐름 확인.
