@@ -1253,6 +1253,17 @@ class EarningsTests(unittest.TestCase):
         self.assertEqual(this['all']['total'],1_900_000_000)
         with self.assertRaises(AppError): earnings.overview(self.store,week='어제')
         with self.assertRaises(AppError): earnings.overview(self.store,month='2026/09')
+    def test_character_choices_include_account(self):
+        # 사용자 보고(2026-09-29): 수익의 캐릭터 고르기에 '고르지 않음'만 나왔다(관리 캐릭터만 넣었기 때문).
+        self.store.character_save({'name':'본캐','budget':0,'main':True})
+        self.store.set_setting(earnings.ACCOUNT_CHARACTERS,[{'name':'부캐','world':'크로아','level':260},
+                                                            {'name':'본캐','world':'크로아','level':285},
+                                                            {'name':'유니온캐','world':'크로아','level':200}])
+        earnings.add(self.store,{'kind':'hunt','meso':'1억','character':'지운캐'})
+        o=earnings.overview(self.store)
+        self.assertEqual([(c['name'],c['group']) for c in o['character_choices']],
+                         [('본캐','관리 중'),('부캐','계정'),('유니온캐','계정'),('지운캐','기록')])
+        self.assertEqual(o['default_character'],'본캐'); self.assertTrue(o['account_loaded'])
     def test_validation(self):
         for bad in [{'kind':'x'},{'kind':'hunt'},{'kind':'hunt','meso':'abc'},{'kind':'hunt','pieces':5},
                     {'kind':'hunt','meso':'1억','day':'2999-01-01'},{'kind':'boss','crystal':'1억'},

@@ -312,7 +312,12 @@ class Application:
                 finally:
                     self.chat_lock.release()
             if path == '/api/characters/profile': return self.nexon.character(required(data,'name',30), details=True)
-            if path == '/api/characters/discover': return self.nexon.characters()
+            if path == '/api/characters/discover':
+                found = self.nexon.characters()
+                # 수익 기록의 캐릭터 고르기에 쓴다. 이 컴퓨터의 데이터 파일에만 둔다.
+                s.set_setting(earnings.ACCOUNT_CHARACTERS, [{'name': c.get('name'), 'world': c.get('world'), 'level': c.get('level')}
+                                                            for c in found.get('characters') or [] if c.get('name')][:200])
+                return found
             if path == '/api/characters': return s.character_save(data)
             if path == '/api/characters/refresh':
                 chars = s.rows('SELECT * FROM characters WHERE id=?',(required(data,'id',100),))

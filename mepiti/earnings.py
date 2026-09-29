@@ -159,6 +159,24 @@ def delete(store, record_id):
 
 
 NO_CHARACTER = '미지정'     # 캐릭터를 고르지 않은 기록(예전 재획 기록 등)
+ACCOUNT_CHARACTERS = 'account_characters'   # 넥슨 계정 캐릭터 목록(캐릭터 목록 불러오기 때 저장)
+
+
+def character_choices(store, rows):
+    """수익 기록에서 고를 캐릭터: 관리 중(대표 먼저) → 계정 캐릭터(레벨 높은 순) → 예전 기록에만 있는 이름."""
+    managed = sorted(store.characters(), key=lambda c: not c.get('main'))
+    account = sorted(store.setting(ACCOUNT_CHARACTERS) or [], key=lambda c: -(c.get('level') or 0))
+    seen, out = set(), []
+    for group, items in (('관리 중', managed), ('계정', account)):
+        for c in items:
+            name = c.get('name')
+            if name and name not in seen:
+                seen.add(name)
+                out.append({'name': name, 'group': group, 'world': c.get('world'), 'level': c.get('level')})
+    for name in sorted({r['character'] for r in rows if r.get('character')} - seen):
+        out.append({'name': name, 'group': '기록', 'world': None, 'level': None})
+    default = next((c['name'] for c in managed if c.get('main')), None) or (managed[0]['name'] if managed else None)
+    return out, default
 
 
 def parse_week(value):
@@ -234,8 +252,7 @@ def overview(store, week=None, month=None, limit=200):
     hunts_all = [r for r in rows if r['kind'] == 'hunt']
     flasks = sum(r['flasks'] or 0 for r in hunts_all)
     everything = breakdown(rows)
-    names = [c['name'] for c in store.characters()]
-    recorded = sorted({r['character'] for r in rows if r.get('character')} - set(names))
+    choices, default_character = character_choices(store, rows)
     return {'week': {'start': week_from.isoformat(), 'end': week_to.isoformat(), 'current': week_from == week_start(today()),
                      **breakdown(in_week)},
             'month': {'month': month_from.isoformat()[:7], 'start': month_from.isoformat(), 'end': month_to.isoformat(),
@@ -247,7 +264,8 @@ def overview(store, week=None, month=None, limit=200):
             'weeks': weeks, 'months': months,
             'hunts': [r for r in in_week if r['kind'] == 'hunt'][:limit],
             'bosses': [r for r in in_week if r['kind'] == 'boss'][:limit],
-            'characters': names + recorded,
+            'characters': [c['name'] for c in choices], 'character_choices': choices,
+            'default_character': default_character, 'account_loaded': bool(store.setting(ACCOUNT_CHARACTERS)),
             'piece_price': store.setting(PIECE_PRICE) or None,
             'boss_prices': store.setting(BOSS_PRICES) or {},
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}

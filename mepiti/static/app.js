@@ -239,14 +239,24 @@ function renderTrend(d){
     box.append(col);
   });
 }
-function fillCharacterSelects(names){
+// 기록할 캐릭터: 관리 중(대표 먼저) → 계정 캐릭터(레벨순) → 예전 기록의 이름. 처음엔 대표 캐릭터.
+function fillCharacterSelects(d){
+  const choices=d.character_choices||(d.characters||[]).map(name=>({name,group:'관리 중'}));
+  const names=choices.map(c=>c.name);
   $$('.earnings-character').forEach(select=>{
-    const keep=select.value||earningsCharacter;select.replaceChildren();
+    const keep=select.value||earningsCharacter||d.default_character||'';select.replaceChildren();
     const none=el('option','','고르지 않음');none.value='';select.append(none);
-    names.forEach(n=>{const o=el('option','',n);o.value=n;select.append(o);});
+    const groups=new Map();choices.forEach(c=>{if(!groups.has(c.group)){const g=el('optgroup');g.label=c.group==='계정'?'계정 캐릭터':c.group==='기록'?'예전 기록':'관리 중';groups.set(c.group,g);select.append(g);}
+      const o=el('option','',c.name+(c.level?` · ${c.world||''} Lv.${c.level}`:''));o.value=c.name;groups.get(c.group).append(o);});
     select.value=names.includes(keep)?keep:'';
     select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});};
   });
+}
+// 계정 캐릭터 목록을 한 번도 안 불러왔으면 한 번 불러와 고르기 목록을 채운다(넥슨 API 키가 있을 때).
+let accountListTried=false;
+async function ensureAccountCharacters(d){
+  if(d.account_loaded||accountListTried)return;accountListTried=true;
+  try{await api('characters/discover',{});await loadEarnings();}catch{}
 }
 async function loadEarnings(){
   const query=new URLSearchParams();if(earningsWeek)query.set('week',earningsWeek);if(earningsMonth)query.set('month',earningsMonth);
@@ -254,7 +264,7 @@ async function loadEarnings(){
   earningsWeek=d.week.current?'':d.week.start;earningsMonth=d.month.current?'':d.month.month;
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
-  fillCharacterSelects(d.characters||[]);
+  fillCharacterSelects(d);ensureAccountCharacters(d);
   const alertBox=$('#crystal-alert');if(alertBox){alertBox.replaceChildren();alertBox.hidden=!d.crystal_alert;
     if(d.crystal_alert){alertBox.append(el('span','',`새 업데이트에 결정석 판매가 이야기가 있습니다: ${d.crystal_alert.title}. 앱의 결정석 가격표(업데이트 813 기준)가 바뀌었을 수 있으니 확인해 주세요. `),sourceLink(d.crystal_alert.url,'공지 보기'));}}
   const w=d.week,m=d.month,a=d.all,weekText=`${dayShort(w.start)}(목) ~ ${dayShort(w.end)}(수)`;
