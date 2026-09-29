@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.5 릴리스(기록 탭 합계, 첫 자동 업데이트 대상). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 현재 단계: v0.3.6 릴리스(기록 탭 슈페리얼 판별 수정). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1196,3 +1196,5 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 수정: `adapters.superior()`(미해당·아님·해당 없음·미적용은 아님), `history.ensure`가 잘못 저장된 값을 한 번 바로잡음(`starforce_superior_fixed`, 타일런트만 1 유지),
   다시 받을 때 슈페리얼 표시를 새 값으로 덮어씀(UPSERT). 테스트 2개. 실제 응답으로 48건 중 0건 슈페리얼 확인.
 - 참고: 같은 화면에서 어센던트 펄스 링이 Windows 130레벨, Mac 140레벨로 달랐다(원인 미확인 — 레벨을 캐릭터 조회에서 가져오는데 기기별 데이터가 다름).
+- **릴리스 v0.3.6**(2026-09-29): `c562f7b`, CI 두 OS 통과, `main` 빨리감기(`df44da8..c562f7b`), 태그, 릴리스 성공(파일 5개), API latest v0.3.6.
+  사용자 Windows는 v0.3.5 → 알림으로 0.3.6 자동 업데이트 시험 대상. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.6
