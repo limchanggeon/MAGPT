@@ -434,7 +434,9 @@ function presetCard(p,busy){
 function renderPresets(s){const box=$('#model-presets');box.replaceChildren();(s.presets||[]).forEach(p=>box.append(presetCard(p,s.download.running)));}
 function renderSetup(s){
   const card=$('#setup-card');const ready=s.selected_model&&s.model.models.includes(s.selected_model);
-  card.hidden=ready||setupSkipped;if(card.hidden)return;card.replaceChildren();
+  const wasHidden=card.hidden;card.hidden=ready||setupSkipped;if(card.hidden)return;card.replaceChildren();
+  // 카드가 처음 뜰 때는 맨 위를 보여 준다. 앱 창(pywebview)에서 스크롤이 중간에 걸린 채 열려 카드 위쪽이 가려졌다.
+  if(wasHidden)requestAnimationFrame(()=>{$('#chat-scroll').scrollTop=0;});
   card.append(el('h2','','AI 모델 준비'));
   const sys=s.system||{},setup=s.ollama_setup||{};
   if(!s.model.connected){
