@@ -18,7 +18,7 @@ from .adapters import (CLOUD_MODEL, CLOUD_PROVIDERS, Claude, FixedKey, Gemini, M
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import backup, desktop, earnings, goals, history, notices, peers, prices, starforce
+from . import backup, desktop, earnings, goals, history, notices, peers, prices, starforce, statcalc
 from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
@@ -184,8 +184,9 @@ class Application:
                 'backups': backup.listing(self.store.folder), 'keep': backup.KEEP,
                 'startup_backup': self.startup_backup.name if self.startup_backup else None}
 
-    def peer_report(self, name=None, collect=False):
-        """비슷한 유저 통계와 내 장비 비교. collect면 후보를 (다시) 고르고 모으기를 시작한다."""
+    def peer_report(self, name=None, collect=False, simulate=False):
+        """비슷한 유저 통계와 내 장비 비교. collect면 후보를 (다시) 고르고 모으기를 시작한다.
+        simulate면 내 스탯 출처(넥슨 약 22회, 하루 한 번)를 받아 교체 시뮬레이션까지 한다. 아니면 받아 둔 것이 있을 때만."""
         name = name or self.main_character_name()
         if not name:
             raise AppError('캐릭터 화면에서 대표 캐릭터를 먼저 등록해 주세요.')
@@ -200,7 +201,13 @@ class Application:
         if collect and (stale or not (self.store.setting(peers.QUEUE) or [])):
             self.peers.choose(name)
         self.peers.start()
-        return {**peers.compare(self.store, profile, self.peers.status()), 'name': name}
+        ledger = None
+        try:
+            ledger = statcalc.load(self.store, self.nexon.get, name, fetch_missing=simulate)
+        except AppError:
+            if simulate:
+                raise
+        return {**peers.compare(self.store, profile, self.peers.status(), ledger), 'name': name}
 
     def main_character_name(self):
         chars = self.store.characters()
@@ -372,6 +379,7 @@ class Application:
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
             if path == '/api/goals/meso': return goals.meso_plan(s, data.get('target'), data.get('current'))
             if path == '/api/peers/collect': return self.peer_report(data.get('name') or None, collect=True)
+            if path == '/api/peers/simulate': return self.peer_report(data.get('name') or None, simulate=True)
             if path == '/api/goals/exp': return goals.exp_plan(s, self.nexon, required(data,'name',30))
             if path == '/api/earnings/capture':
                 return earnings.read_capture(self.model, s.setting('model'), required(data, 'image', 8_100_000))

@@ -55,8 +55,28 @@ def grade_rank(grade):
     return GRADES.index(grade) + 1 if grade in GRADES else 0
 
 
-def summarize(equipment):
-    """장비 목록(Nexon.equipment_item 형태)에서 통계에 쓸 것만 남긴다."""
+SIM_OPTIONS = ('str', 'dex', 'int', 'luk', 'attack_power', 'magic_power', 'all_stat', 'damage', 'boss_damage', 'ignore_monster_armor')
+
+
+def sim_item(raw):
+    """교체 시뮬레이션(statcalc.swap)에 필요한 만큼만 남긴 장비 원본. 사람을 알 수 있는 정보는 없다."""
+    total = raw.get('item_total_option') or {}
+    out = {'item_name': raw.get('item_name'), 'item_equipment_slot': raw.get('item_equipment_slot'),
+           'starforce': raw.get('starforce'), 'soul_option': raw.get('soul_option'),
+           'item_total_option': {k: total.get(k) for k in SIM_OPTIONS if total.get(k) not in (None, '0', 0)}}
+    for prefix in ('potential_option_', 'additional_potential_option_'):
+        for i in (1, 2, 3):
+            if raw.get(prefix + str(i)):
+                out[prefix + str(i)] = raw[prefix + str(i)]
+    return out
+
+
+def summarize(equipment, raw=None):
+    """장비 목록(Nexon.equipment_item 형태)에서 통계에 쓸 것만 남긴다. raw(API 원본 목록)를 주면 시뮬레이션용 옵션도 붙인다."""
+    originals = {}
+    for r in raw or []:
+        if isinstance(r, dict) and r.get('item_equipment_slot') and r['item_equipment_slot'] not in originals:
+            originals[r['item_equipment_slot']] = sim_item(r)
     out = {}
     for item in equipment or []:
         slot = item.get('slot')
@@ -65,6 +85,8 @@ def summarize(equipment):
         out[slot] = {'name': item.get('name'), 'starforce': item.get('starforce'),
                      'potential': item.get('potential_grade'), 'additional': item.get('additional_grade'),
                      'add_grade': (item.get('add_grade') or {}).get('label') or None}
+        if slot in originals and originals[slot]['item_name'] == item.get('name'):
+            out[slot]['item'] = originals[slot]
     return out
 
 
@@ -151,9 +173,9 @@ class Peers:
             return True
         from .adapters import Nexon
         equipped = self.get('character/item-equipment', {'ocid': ocid})
-        rows = [Nexon.equipment_item(item, None) for item in (equipped.get('item_equipment') or [])
-                if isinstance(item, dict) and item.get('item_name')]
-        summary = summarize(rows)
+        originals = [item for item in (equipped.get('item_equipment') or []) if isinstance(item, dict) and item.get('item_name')]
+        rows = [Nexon.equipment_item(item, None) for item in originals]
+        summary = summarize(rows, originals)
         if summary:
             with self.store.db() as db:
                 db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?) '
@@ -254,7 +276,42 @@ def top_grade(shares):
     return None
 
 
-def compare(store, profile, state=None):
+def candidate(people, slot, name):
+    """비슷한 유저가 낀 그 장비 중 스타포스가 중앙인 한 벌(옵션이 저장된 것만)."""
+    pool = [p[slot]['item'] for p in people if slot in p and p[slot].get('name') == name and p[slot].get('item')]
+    if not pool:
+        return None
+    pool.sort(key=lambda i: int(i.get('starforce') or 0))
+    return pool[len(pool) // 2]
+
+
+def simulate(people, stats, ledger):
+    """부위마다 '많이 끼는 장비(중앙 수준 한 벌)로 바꾸면' 스탯공격력·보스 기준 변화 범위."""
+    from . import statcalc
+    mine = {}
+    for item in getattr(ledger, 'items', None) or []:
+        mine.setdefault(item.get('item_equipment_slot'), item)
+    out = {}
+    for slot, s in stats.items():
+        if not s['items'] or slot not in mine:
+            continue
+        pick = candidate(people, slot, s['items'][0]['name'])
+        if not pick:
+            continue
+        result = statcalc.swap(ledger, mine[slot], pick)
+        out[slot] = {'item': pick['item_name'], 'starforce': int(pick.get('starforce') or 0),
+                     'same_item': pick['item_name'] == mine[slot].get('item_name'),
+                     'potential': [pick[k] for k in ('potential_option_1', 'potential_option_2', 'potential_option_3') if pick.get(k)],
+                     'range': result['range'], 'boss_range': result['boss_range'], 'sets': result['sets'],
+                     'unknown': result['unknown'], 'defense': result['defense']}
+    return out
+
+
+SIMULATION_NOTE = ('보스 기준은 방어율 300% 보스·크리티컬 항상 발동으로 본 상대값(전투력 아님). 설명되지 않는 스탯(헥사 스탯 등)을 '
+                   '고정치로 볼 때와 %로 볼 때의 두 값을 범위로 보인다. 교체 장비는 비슷한 유저가 낀 그 장비 중 스타포스 중앙인 한 벌.')
+
+
+def compare(store, profile, state=None, ledger=None):
     """내 장비와 비슷한 유저 통계를 부위별로 맞대어, 뒤처진 부위를 고른다. 기준 직업과 다른 캐릭터면 비교하지 않는다."""
     target = store.setting(TARGET) or None
     people = stored(store, target)
@@ -295,6 +352,28 @@ def compare(store, profile, state=None):
             result['behind'].append({'slot': slot, 'reasons': reasons, 'score': len(reasons) * 10 + max(0, gap)})
     result['behind'].sort(key=lambda b: -b['score'])
     result['people'] = len(people)
+    result['simulated'] = False
+    if ledger is not None:
+        sims = simulate(people, stats, ledger)
+        for row in result['slots']:
+            row['simulation'] = sims.get(row['slot'])
+        for b in result['behind']:
+            b['simulation'] = sims.get(b['slot'])
+        result['simulated'] = bool(sims)
+        result['simulation_note'] = SIMULATION_NOTE
+        # 시뮬레이션상 손해인 교체는 권하지 않는다: '많이 끼는 장비' 이유를 빼고, 내 장비가 더 나은 부위로 따로 둔다.
+        result['upgrades'] = sorted(({'slot': k, **v} for k, v in sims.items() if v['boss_range'][0] > 0),
+                                    key=lambda x: -x['boss_range'][0])
+        result['ahead'] = sorted(({'slot': k, **v} for k, v in sims.items() if v['boss_range'][1] < 0),
+                                 key=lambda x: x['boss_range'][1])
+        worse = {x['slot'] for x in result['ahead']}
+        kept = []
+        for b in result['behind']:
+            if b['slot'] in worse:
+                b['reasons'] = [r for r in b['reasons'] if not r.startswith('장비 ')]
+            if b['reasons']:
+                kept.append(b)
+        result['behind'] = kept
     return result
 
 
@@ -316,9 +395,32 @@ def facts_text(compared):
         me = s['mine']
         mine = f" / 내 장비: {me.get('name')} {me.get('starforce') or 0}성 윗잠 {me.get('potential') or '없음'} 아랫잠 {me.get('additional') or '없음'}" if me else ' / 내 장비: 없음'
         lines.append(f"- {s['slot']}: " + ' · '.join(parts) + mine)
+    def sim_line(sim):
+        extra = (' · 세트 ' + ', '.join(sim['sets'])) if sim['sets'] else ''
+        unknown = (' · 모름: ' + '; '.join(sim['unknown'])) if sim['unknown'] else ''
+        what = (f"같은 {sim['item']}를 비슷한 유저 수준({sim['starforce']}성, {', '.join(sim['potential']) or '잠재 없음'})으로 맞추면"
+                if sim.get('same_item') else
+                f"{sim['item']} {sim['starforce']}성({', '.join(sim['potential']) or '잠재 없음'})으로 바꾸면")
+        return (f"- {sim['slot']}: {what} "
+                f"스탯공격력 {sim['range'][0]:+.2f}~{sim['range'][1]:+.2f}%, 보스 기준 {sim['boss_range'][0]:+.2f}~{sim['boss_range'][1]:+.2f}%{extra}{unknown}")
+    head = []
+    if compared.get('simulated'):
+        head.append('[교체 시뮬레이션] 앱이 계산한 값이다. ' + SIMULATION_NOTE)
+        head.append('[바꾸면 좋아지는 부위] (보스 기준 이득이 큰 순)' if compared['upgrades'] else '[바꾸면 좋아지는 부위] 없음')
+        head += [sim_line(s) for s in compared['upgrades']]
+        if compared['ahead']:
+            head.append('[바꾸면 오히려 손해인 부위] 비슷한 유저가 많이 끼는 장비보다 지금 장비가 낫다. 이 부위의 교체는 권하지 말 것.')
+            head += [sim_line(s) for s in compared['ahead']]
+    lines[1:1] = head
     if compared['behind']:
         lines.append('[비슷한 유저보다 뒤처진 부위] (앞일수록 차이가 크다) '
                      + '; '.join(f"{b['slot']}: {', '.join(b['reasons'])}" for b in compared['behind']))
+    if compared.get('simulated'):
+        lines.append('[답변 방법] 교체 시뮬레이션을 가장 먼저 근거로 삼는다. \'바꾸면 좋아지는 부위\'에서 먼저 할 2~3개를 보스 기준 변화율과 함께 권하고, '
+                     '\'손해인 부위\'는 지금 장비를 유지하라고 짧게 말한다(비슷한 유저가 많이 낀다는 이유만으로 권하지 않는다). '
+                     '뒤처진 부위(스타포스·잠재 등급)는 강화 방향으로 덧붙인다. 비용·확률·시세는 위 사실에 없으면 말하지 않는다. '
+                     '레벨·심볼·유니온·스킬이 달라서, 같은 장비를 껴도 같은 성능이 된다고 단정하지 않는다.')
+    elif compared['behind']:
         lines.append('[답변 방법] 목록을 그대로 옮기지 말고, 먼저 손댈 부위 2~3개를 골라 비슷한 유저 비율·중앙값을 이유로 들어 '
                      '상담하듯 설명한다. 내 장비가 더 좋은 부위가 있으면 짧게 짚는다. 비용·확률·시세는 위 사실에 없으면 말하지 않는다. '
                      '레벨·심볼·유니온·스킬이 달라서, 같은 장비를 껴도 같은 성능이 된다고 단정하지 않는다.')

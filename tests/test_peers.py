@@ -168,3 +168,32 @@ class CaptureTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SimulationRankingTests(unittest.TestCase):
+    def test_worse_swaps_are_not_recommended(self):
+        store = Store(tempfile.mkdtemp())
+        store.set_setting(peers.TARGET, {'job': '렌-렌', 'level': 291, 'world_type': 0, 'at': '2026-10-01'})
+        peers.ensure(store)
+        worse = {'item_name': '아케인셰이드 나이트슈즈', 'item_equipment_slot': '신발', 'starforce': '17',
+                 'item_total_option': {'str': '50'}}
+        with store.db() as db:
+            for i in range(5):
+                data = {'신발': {'name': '아케인셰이드 나이트슈즈', 'starforce': 17, 'potential': '레전드리', 'item': worse}}
+                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?)',
+                           (f'o{i}', '렌-렌', 291, 0, peers.since()[:10] + 'T23:59:59+09:00', json.dumps(data, ensure_ascii=False)))
+        from mepiti import statcalc
+        mine = {'item_name': '도전자의 신발', 'item_equipment_slot': '신발', 'starforce': '22',
+                'item_total_option': {'str': '300', 'attack_power': '100'}, 'potential_option_1': 'STR +9%'}
+        final = [{'stat_name': k, 'stat_value': str(v)} for k, v in {'STR': 40000, 'DEX': 4000, '공격력': 5000, 'AP 배분 STR': 1400,
+                 '데미지': 90, '최종 데미지': 100, '보스 몬스터 데미지': 200, '방어율 무시': 90, '크리티컬 데미지': 70}.items()]
+        ledger = statcalc.build({'character/basic': {'character_level': 291}, 'character/stat': {'final_stat': final},
+                                 'character/item-equipment': {'item_equipment': [mine]}, 'character/set-effect': {},
+                                 'character/symbol-equipment': {}, 'character/hyper-stat': {}, 'user/union-raider': {},
+                                 'user/union-artifact': {}, 'user/union-champion': {}, 'character/pet-equipment': {}, 'skills': []})
+        profile = {'job': '렌', 'equipment': [{'slot': '신발', 'name': '도전자의 신발', 'starforce': 22, 'potential_grade': '유니크'}]}
+        result = peers.compare(store, profile, ledger=ledger)
+        self.assertTrue(result['simulated'])
+        self.assertEqual([a['slot'] for a in result['ahead']], ['신발'])
+        self.assertFalse(any(r.startswith('장비 ') for b in result['behind'] for r in b['reasons']))
+        self.assertIn('[바꾸면 오히려 손해인 부위]', peers.facts_text(result))

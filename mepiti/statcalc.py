@@ -156,10 +156,15 @@ def build(raw):
         for line in title['title_description'].splitlines():
             for k, v, pct in split_stats(line.strip('- ').replace('공격력/마력', '공격력')):
                 ledger.add(k, '장비', '칭호 ' + (title.get('title_name') or ''), v, 'pct' if pct else 'flat')
+    ledger.sets = {}
     for s in raw['character/set-effect'].get('set_effect') or []:
+        ledger.sets[s['set_name']] = {'count': num(s.get('total_set_count')), 'full': s.get('set_option_full') or [],
+                                      'verified': False, 'lucky': False}
         for o in s.get('set_effect_info') or []:
             for k, v, pct in split_stats(o.get('set_option') or ''):
                 ledger.add(k, '세트', f"{s['set_name']} {o['set_count']}세트", v, 'pct' if pct else 'flat')
+    ledger.items = equipment.get('item_equipment') or []
+    verify_sets(ledger, ledger.items)
     for y in raw['character/symbol-equipment'].get('symbol') or []:
         for s in STATS:
             ledger.add(s, '심볼', y.get('symbol_name') or '', num(y.get('symbol_' + s.lower())))
@@ -273,8 +278,159 @@ def value(model, d_applied=0, d_pct=0):
     return (model['applied'] + d_applied) * (1 + (model['pct'] + d_pct) / 100) + model['unapplied']
 
 
-def item_delta(level, old_item, new_item):
-    """장비 한 개를 바꿀 때 스탯별 (% 적용 고정치 변화, % 변화). 세트 효과 변화는 따로 계산해야 한다(아직 안 함)."""
+# 보스 장신구 계열 세트는 이름에 세트 이름이 없다. 소속을 목록으로 판별하고, 캐릭터의 실제 세트 수(API)와 맞는지 대조해서만 쓴다.
+SET_MEMBERS = {
+    '보스 장신구 세트': ('응축된 힘의 결정석', '아쿠아틱 레터 눈장식', '블랙빈 마크', '파풀라투스 마크', '데아 시두스 이어링',
+                    '지옥의 불꽃', '골든 클로버 벨트', '실버블라썸 링', '고귀한 이피아의 반지', '가디언 엔젤 링',
+                    '혼테일의 목걸이', '카오스 혼테일의 목걸이', '매커네이터 펜던트', '도미네이터 펜던트', '핑크빛 성배',
+                    '크리스탈 웬투스 뱃지', '로얄 블랙메탈 숄더'),
+    '칠흑의 보스 세트': ('루즈 컨트롤 머신 마크', '마력이 깃든 안대', '몽환의 벨트', '고통의 근원', '창세의 뱃지',
+                    '커맨더 포스 이어링', '거대한 공포', '미트라의 분노', '저주받은 적의 마도서', '저주받은 청의 마도서',
+                    '저주받은 녹의 마도서', '저주받은 황의 마도서'),
+    '여명의 보스 세트': ('트와일라이트 마크', '에스텔라 이어링', '데이브레이크 펜던트', '여명의 가디언 엔젤 링'),
+    '루타비스 세트': ('하이네스', '이글아이', '트릭스터'),
+}
+LUCKY = ('제네시스',)        # 럭키 아이템: 3세트 이상 효과가 있는 방어구 세트마다 1개로 센다(API 세트 수로 대조)
+
+
+def is_lucky(item_name):
+    return (item_name or '').startswith(LUCKY)
+
+
+def set_key(set_name):
+    """'에테르넬 세트(전사)' → '에테르넬', '도전자의 장비 세트(전사)' → '도전자의'."""
+    return re.split(r'\s*(?:장비\s*)?세트', set_name)[0].strip()
+
+
+def set_of(item_name, set_names):
+    """장비가 속한 세트(캐릭터가 아는 세트 이름 중에서). 모르면 None."""
+    name = item_name or ''
+    for set_name in set_names:
+        members = next((v for k, v in SET_MEMBERS.items() if set_name.startswith(k)), None)
+        if members:
+            if any(name.startswith(m) for m in members):
+                return set_name
+            continue
+        key = set_key(set_name)
+        if key and name.startswith(key):
+            return set_name
+    return None
+
+
+def verify_sets(ledger, items):
+    """규칙으로 센 세트 수가 API 세트 수와 같으면(럭키 아이템 1개 포함 가능) 그 세트를 믿는다."""
+    names = list(ledger.sets)
+    lucky = any(is_lucky(i.get('item_name')) for i in items)
+    counts = {}
+    for i in items:
+        s = set_of(i.get('item_name'), names)
+        if s:
+            counts[s] = counts.get(s, 0) + 1
+    for name, info in ledger.sets.items():
+        mine = counts.get(name, 0)
+        if mine == info['count']:
+            info['verified'] = True
+        elif lucky and mine + 1 == info['count']:
+            info['verified'] = info['lucky'] = True
+
+
+def set_bonus(full, count):
+    """세트 단계표에서 count개일 때 받는 효과의 합: {키: (고정, %)}, 보스%, 방무 목록."""
+    out = {'stats': {}, 'boss': 0, 'ied': []}
+    for tier in full or []:
+        if num(tier.get('set_count')) > count:
+            continue
+        text = tier.get('set_option') or ''
+        for k, v, pct in split_stats(text):
+            flat, per = out['stats'].get(k, (0, 0))
+            out['stats'][k] = (flat + (0 if pct else v), per + (v if pct else 0))
+        for m in re.finditer(r'보스 몬스터 데미지 \+(\d+)%', text):
+            out['boss'] += int(m[1])
+        for m in re.finditer(r'몬스터 방어율 무시 \+(\d+)%', text):
+            out['ied'].append(int(m[1]))
+    return out
+
+
+def set_change(ledger, old_item, new_item):
+    """한 부위 교체로 바뀌는 세트 효과. 판별 못 한 세트는 unknown에 이름을 남긴다."""
+    sets = getattr(ledger, 'sets', {})
+    names = list(sets)
+    old_set = set_of((old_item or {}).get('item_name'), names)
+    new_set = set_of((new_item or {}).get('item_name'), names)
+    change = {'stats': {}, 'boss': 0, 'ied_add': [], 'ied_remove': [], 'notes': [], 'unknown': []}
+    if is_lucky((old_item or {}).get('item_name')) != is_lucky((new_item or {}).get('item_name')):
+        change['unknown'].append('럭키 아이템(제네시스 무기)을 바꾸면 여러 세트 수가 함께 바뀌는데, 이건 아직 계산하지 않았어요')
+    if old_set == new_set:
+        return change
+    for set_name in (old_set, new_set):
+        if set_name and not sets[set_name]['verified']:
+            change['unknown'].append(f'{set_name}(착용 장비로 세트 수를 맞추지 못해 계산에서 뺐어요)')
+    old_set = old_set if old_set and sets[old_set]['verified'] else None
+    new_set = new_set if new_set and sets[new_set]['verified'] else None
+    for set_name, step in ((old_set, -1), (new_set, +1)):
+        if not set_name:
+            continue
+        info = sets[set_name]
+        a, b = set_bonus(info['full'], info['count']), set_bonus(info['full'], info['count'] + step)
+        for k in set(a['stats']) | set(b['stats']):
+            fa, pa = a['stats'].get(k, (0, 0))
+            fb, pb = b['stats'].get(k, (0, 0))
+            f0, p0 = change['stats'].get(k, (0, 0))
+            change['stats'][k] = (f0 + fb - fa, p0 + pb - pa)
+        change['boss'] += b['boss'] - a['boss']
+        extra = [x for x in b['ied']]
+        for x in a['ied']:
+            if x in extra:
+                extra.remove(x)
+            else:
+                change['ied_remove'].append(x)
+        change['ied_add'] += extra
+        change['notes'].append(f"{set_name} {info['count']}→{info['count'] + step}세트")
+    new_name = (new_item or {}).get('item_name') or ''
+    if new_item and not new_set and re.search(r'에테르넬|아케인셰이드|앱솔랩스|도전자|루타비스|하이네스|이글아이|트릭스터', new_name):
+        change['unknown'].append(new_name + '의 세트(지금 착용하지 않은 세트라 단계표를 모름)')
+    return change
+
+
+def extras(item):
+    """장비 한 개의 보스%, 방무(곱연산 목록), 크리티컬 데미지%, 데미지%."""
+    total = (item or {}).get('item_total_option') or {}
+    out = {'boss': num(total.get('boss_damage')), 'ied': [num(total.get('ignore_monster_armor'))] if num(total.get('ignore_monster_armor')) else [],
+           'crit': 0}
+    for line in potential_lines(item or {}):
+        m = re.match(r'보스 몬스터 공격 시 데미지 \+(\d+)%$', line)
+        if m:
+            out['boss'] += int(m[1])
+        m = re.match(r'몬스터 방어율 무시 \+(\d+)%$', line)
+        if m:
+            out['ied'].append(int(m[1]))
+        m = re.match(r'크리티컬 데미지 \+(\d+)%$', line)
+        if m:
+            out['crit'] += int(m[1])
+    return out
+
+
+def combine_ied(base, add=(), remove=()):
+    """방어율 무시는 곱연산: 1 - (1 - 기존) × Π(1 - 추가) ÷ Π(1 - 제거)."""
+    rest = 1 - base / 100
+    for x in remove:
+        rest /= max(1e-9, 1 - x / 100)
+    for x in add:
+        rest *= 1 - x / 100
+    return (1 - rest) * 100
+
+
+BOSS_DEFENSE = 300      # 보스 기준 비교에 쓰는 방어율(%). 검은 마법사·세렌 등 최상위 보스급.
+
+
+def boss_score(main, sub, att, damage, boss, final_damage, crit_damage, ied, defense=BOSS_DEFENSE):
+    """보스 기준 상대 딜 지표. 크리티컬은 항상 터진다고 보고 기본 크뎀 35%를 더한다."""
+    guard = max(0.0, 1 - defense / 100 * (1 - ied / 100))
+    return (4 * main + sub) * att * (1 + (damage + boss) / 100) * (1 + final_damage / 100) * (1.35 + crit_damage / 100) * guard
+
+
+def item_delta(level, old_item, new_item, sets=None):
+    """장비 한 개를 바꿀 때 스탯별 (% 적용 고정치 변화, % 변화). sets(set_change 결과)를 주면 세트 효과 변화도 더한다."""
     before, after = Ledger(), Ledger()
     if old_item:
         item_sources(before, old_item, level)
@@ -284,23 +440,89 @@ def item_delta(level, old_item, new_item):
     for stat in (*STATS, 'ATT', 'MATT', 'DAMAGE'):
         out[stat] = (after.total(stat, 'flat') - before.total(stat, 'flat'),
                      after.total(stat, 'pct') - before.total(stat, 'pct'))
+    for k, (flat, pct) in ((sets or {}).get('stats') or {}).items():
+        for stat in (STATS if k == 'ALL' else (k,)):
+            if stat in out:
+                f0, p0 = out[stat]
+                out[stat] = (f0 + flat, p0 + pct)
     return out
 
 
-def swap(ledger, old_item, new_item, classify=None):
-    """한 부위 교체 → 최대 스탯공격력 변화율(%) 범위. 보스 공격력·방무는 스탯공격력에 들어가지 않아 따로 적는다."""
+def swap(ledger, old_item, new_item, classify=None, defense=BOSS_DEFENSE):
+    """한 부위 교체 → 최대 스탯공격력 변화율과 보스 기준 변화율(%)을 범위로. 세트 효과 변화 포함."""
     report, models = calibrate(ledger, classify)
-    delta = item_delta(ledger.level, old_item, new_item)
+    sets = set_change(ledger, old_item, new_item)
+    delta = item_delta(ledger.level, old_item, new_item, sets)
+    a, b = extras(old_item), extras(new_item)
+    d_boss = b['boss'] - a['boss'] + sets['boss']
+    d_crit = b['crit'] - a['crit']
     final = ledger.final
     f = lambda k: float(str(final.get(k) or 0).replace(',', ''))
     main, sub, power = report['main'], report['sub'], report['power']
-    before = stat_attack(f(main), f(sub), f({'ATT': '공격력', 'MATT': '마력'}[power]), f('데미지'), f('최종 데미지'))
+    power_label = {'ATT': '공격력', 'MATT': '마력'}[power]
+    ied_after = combine_ied(f('방어율 무시'), b['ied'] + sets['ied_add'], a['ied'] + sets['ied_remove'])
+    before = stat_attack(f(main), f(sub), f(power_label), f('데미지'), f('최종 데미지'))
+    before_boss = boss_score(f(main), f(sub), f(power_label), f('데미지'), f('보스 몬스터 데미지'), f('최종 데미지'),
+                             f('크리티컬 데미지'), f('방어율 무시'), defense)
     results = {}
     for way in ('flat', 'pct'):
-        new = {k: value(models[k][way], *delta[k]) for k in (main, sub, power)}
-        after = stat_attack(new[main], new[sub], new[power], f('데미지') + delta['DAMAGE'][1], f('최종 데미지'))
+        new = {k: f({'ATT': '공격력', 'MATT': '마력'}.get(k, k)) + value(models[k][way], *delta[k]) - value(models[k][way])
+               for k in (main, sub, power)}
+        damage = f('데미지') + delta['DAMAGE'][1]
+        after = stat_attack(new[main], new[sub], new[power], damage, f('최종 데미지'))
+        after_boss = boss_score(new[main], new[sub], new[power], damage, f('보스 몬스터 데미지') + d_boss, f('최종 데미지'),
+                                f('크리티컬 데미지') + d_crit, ied_after, defense)
         results[way] = {'change_pct': round((after / before - 1) * 100, 3),
-                        'stats': {k: round(new[k] - value(models[k][way])) for k in new}}
+                        'boss_change_pct': round((after_boss / before_boss - 1) * 100, 3) if before_boss else None,
+                        'stats': {k: round(new[k] - f({'ATT': '공격력', 'MATT': '마력'}.get(k, k))) for k in new}}
     low, high = sorted(r['change_pct'] for r in results.values())
-    return {'range': [low, high], 'by_assumption': results, 'delta': delta,
-            'note': '세트 효과 변화·보스 데미지·방어율 무시는 이 값에 들어 있지 않다.'}
+    blow, bhigh = sorted(r['boss_change_pct'] or 0 for r in results.values())
+    return {'range': [low, high], 'boss_range': [blow, bhigh], 'by_assumption': results, 'delta': delta,
+            'boss': d_boss, 'crit': d_crit, 'ied': [round(f('방어율 무시'), 2), round(ied_after, 2)], 'defense': defense,
+            'sets': sets['notes'], 'unknown': sets['unknown'],
+            'note': f'보스 기준은 방어율 {defense}% 보스, 크리티컬 항상 발동으로 본 상대값이다. 전투력·실제 딜 시간은 아니다.'}
+
+
+CACHE = """
+CREATE TABLE IF NOT EXISTS stat_raw(name TEXT PRIMARY KEY, day TEXT NOT NULL, data TEXT NOT NULL);
+"""
+
+
+def fetch(get, name, sleep=None):
+    """스탯 출처 원본을 넥슨에서 받는다(약 22회). get(path, query)."""
+    import time
+    pause = sleep or time.sleep
+    ocid = get('id', {'character_name': name}).get('ocid')
+    raw = {}
+    for path in PATHS:
+        pause(0.3)
+        raw[path] = get(path, {'ocid': ocid})
+    raw['skills'] = []
+    for grade in SKILL_GRADES:
+        pause(0.3)
+        try:
+            raw['skills'] += get('character/skill', {'ocid': ocid, 'character_skill_grade': grade}).get('character_skill') or []
+        except Exception:
+            pass
+    return raw
+
+
+def load(store, get, name, refresh=False, fetch_missing=True, sleep=None):
+    """캐릭터의 스탯 출처(Ledger). 하루(KST)에 한 번만 넥슨에서 받고 DB에 둔다. fetch_missing=False면 캐시만 본다."""
+    import json
+    from datetime import datetime
+    from .core import KST
+    day = datetime.now(KST).date().isoformat()
+    with store.db() as db:
+        db.executescript(CACHE)
+    row = store.rows('SELECT day, data FROM stat_raw WHERE name=?', (name,))
+    if row and row[0]['day'] == day and not refresh:
+        return build(json.loads(row[0]['data']))
+    if not fetch_missing:
+        return None
+    raw = fetch(get, name, sleep)
+    with store.db() as db:
+        db.execute('INSERT INTO stat_raw(name, day, data) VALUES(?,?,?) '
+                   'ON CONFLICT(name) DO UPDATE SET day=excluded.day, data=excluded.data',
+                   (name, day, json.dumps(raw, ensure_ascii=False)))
+    return build(raw)

@@ -828,3 +828,7 @@ html.in-app :is(img,a){-webkit-user-drag:none}
 .peer-table th{color:var(--muted);font-weight:400}
 .peer-table tr.behind td:first-child{color:var(--gold)}
 .peer-panel{overflow-x:auto}
+.peer-sim{color:var(--ink-dim);font-size:11.5px}
+.peer-simbar{margin:8px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.peer-behind.ahead .peer-row{border-left-color:var(--line)}
+.peer-behind.up .peer-row{border-left-color:var(--legendary)}

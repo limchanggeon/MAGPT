@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mepiti"
-version = "0.4.0"
+version = "0.4.1"
 description = "메피티 — 로컬 근거 기반 메이플 어시스턴트"
 requires-python = ">=3.9"
 dependencies = ["keyring>=25,<26", "Pillow>=11,<12", "psutil>=7,<8", "anthropic>=1.9,<2"]

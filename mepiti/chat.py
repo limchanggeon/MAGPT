@@ -1,5 +1,5 @@
 import re
-from . import conditions, context, notices, peers, prices, starforce, union
+from . import conditions, context, notices, peers, prices, starforce, statcalc, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -270,7 +270,13 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
     if PEER_INTENT.search(question):
-        compared = peers.compare(store, profile)
+        ledger = None
+        if hasattr(nexon, 'get'):
+            try:    # 교체 시뮬레이션용 스탯 출처. 하루 한 번 넥슨에서 받는다(statcalc.load).
+                ledger = statcalc.load(store, nexon.get, managed['name'])
+            except AppError:
+                ledger = None
+        compared = peers.compare(store, profile, ledger=ledger)
         if compared.get('ready'):
             text += '\n\n' + peers.facts_text(compared)
         else:

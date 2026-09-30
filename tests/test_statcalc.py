@@ -81,3 +81,47 @@ class StatCalcTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SetAndBossTests(unittest.TestCase):
+    FULL = {'도전자의 장비 세트(전사)': [{'set_count': 5, 'set_option': '공격력  +25, 보스 몬스터 데미지 +10%'},
+                                   {'set_count': 6, 'set_option': '공격력  +30, 몬스터 방어율 무시 +10%'}],
+            '에테르넬 세트(전사)': [{'set_count': 3, 'set_option': '올스탯  +50, 공격력  +40'},
+                              {'set_count': 4, 'set_option': '공격력  +40, 보스 몬스터 데미지 +10%'}]}
+
+    def ledger(self):
+        items = [item('상의', '도전자의 상의', 100, 50, 10), item('하의', '도전자의 하의'), item('신발', '도전자의 신발'),
+                 item('망토', '도전자의 망토'), item('어깨장식', '도전자의 어깨장식'),
+                 item('모자', '에테르넬 나이트헬름'), item('장갑', '에테르넬 나이트글러브'), item('무기', '제네시스 창세검', 150, 150, 700)]
+        sets = {'set_effect': [{'set_name': k, 'total_set_count': c, 'set_option_full': v, 'set_effect_info': []}
+                               for (k, v), c in zip(self.FULL.items(), (6, 3))]}
+        final = {'STR': 20000, 'DEX': 3000, '공격력': 3000, 'AP 배분 STR': 1000, 'AP 배분 DEX': 4, '데미지': 50, '최종 데미지': 20,
+                 '보스 몬스터 데미지': 200, '방어율 무시': 90, '크리티컬 데미지': 70, '최대 스탯공격력': 0, '최소 스탯공격력': 0}
+        return sc.build(raw(final, items, **{'character/set-effect': sets})), items
+
+    def test_lucky_item_verifies_armor_sets(self):
+        ledger, _ = self.ledger()
+        self.assertTrue(all(s['verified'] and s['lucky'] for s in ledger.sets.values()))
+
+    def test_set_change_when_moving_a_piece(self):
+        ledger, items = self.ledger()
+        new = copy.deepcopy(items[0])
+        new['item_name'] = '에테르넬 나이트아머'
+        change = sc.set_change(ledger, items[0], new)
+        self.assertEqual(change['stats']['ATT'], (-30 + 40, 0))      # 도전자 6세트 잃고 에테르넬 4세트 얻음
+        self.assertEqual(change['boss'], 10)
+        self.assertEqual(change['ied_remove'], [10])
+        result = sc.swap(ledger, items[0], new)
+        self.assertLess(result['ied'][1], result['ied'][0])          # 방무 10%를 잃는다
+
+    def test_combine_ied_is_multiplicative(self):
+        self.assertAlmostEqual(sc.combine_ied(90, add=[10]), 91)
+        self.assertAlmostEqual(sc.combine_ied(91, remove=[10]), 90)
+
+    def test_crit_damage_line_raises_boss_score(self):
+        ledger, items = self.ledger()
+        new = copy.deepcopy(items[5])
+        new['potential_option_1'] = '크리티컬 데미지 +8%'
+        result = sc.swap(ledger, items[5], new)
+        self.assertEqual(result['range'], [0.0, 0.0])
+        self.assertGreater(result['boss_range'][0], 3)
