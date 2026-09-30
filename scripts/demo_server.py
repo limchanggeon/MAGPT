@@ -133,7 +133,24 @@ class FakeNexon:
     def _unavailable(self, *args, **kwargs):
         raise AppError('데모에서는 제공하지 않는 기능입니다.', 503)
 
-    union = scheduler = starforce_history = notices = notice_detail = _unavailable
+    union = scheduler = starforce_history = notices = notice_detail = get = _unavailable
+
+
+def seed_peers(store, profile):
+    """비슷한 유저 패널용 가짜 통계(실제 유저가 아니다). 프로필 장비를 조금씩 바꿔 8명을 만든다."""
+    import json as _json
+    from mepiti import peers
+    job = profile.get('job') or '히어로'
+    target = {'job': f'데모-{job}', 'level': profile.get('level') or 285, 'world_type': 0, 'rank': 1234, 'at': now()}
+    store.set_setting(peers.TARGET, target)
+    peers.ensure(store)
+    base = peers.summarize(profile.get('equipment'))
+    with store.db() as db:
+        for i in range(8):
+            data = {slot: {**item, 'starforce': max(0, (item.get('starforce') or 0) + (i % 4) - 1 + (2 if slot in ('모자', '장갑') else 0)),
+                           'potential': '레전드리' if slot == '상의' and i % 4 else item.get('potential')} for slot, item in base.items()}
+            db.execute('INSERT OR REPLACE INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?)',
+                       (f'demo-{i}', target['job'], target['level'], 0, now(), _json.dumps(data, ensure_ascii=False)))
 
 
 def main():
@@ -175,6 +192,7 @@ def main():
         hat = next((e for e in profile.get('equipment') or [] if e.get('slot') == '모자'), None)
         if hat:
             store.price_save({'item': hat['name'], 'price': 1_000_000_000, 'source': 'user', 'note': '데모 예시 값'})
+    seed_peers(store, profile)
     httpd = server.make_server(app, args.port)
     print(f'데모 서버 http://127.0.0.1:{args.port} (데이터 {folder})', flush=True)
     httpd.serve_forever()

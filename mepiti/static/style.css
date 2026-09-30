@@ -819,3 +819,12 @@ html.in-app :is(img,a){-webkit-user-drag:none}
 .capture-slot.drag{border-color:var(--gold)}
 @media (max-width:640px){.hunt-calendar{grid-template-columns:repeat(7,minmax(0,1fr))}.cal-week,.cal-head:nth-child(8){display:none}.cal-cell{min-height:48px;padding:3px}}
 .other-search .inline-form{display:flex;gap:8px}.other-search .inline-form input{flex:1}.other-search h2{margin-bottom:4px}
+.peer-behind{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.peer-row{display:flex;gap:10px;font-size:12.5px;padding:6px 10px;background:var(--inset);border-radius:4px;border-left:2px solid var(--gold-dim)}
+.peer-slot{min-width:64px;color:var(--gold)}
+.peer-more summary{cursor:pointer;color:var(--muted);font-size:12px;margin:6px 0}
+.peer-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.peer-table th,.peer-table td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.peer-table th{color:var(--muted);font-weight:400}
+.peer-table tr.behind td:first-child{color:var(--gold)}
+.peer-panel{overflow-x:auto}

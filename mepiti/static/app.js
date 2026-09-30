@@ -22,7 +22,7 @@ async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='goals')guard(loadGoals);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
+function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters'){guard(loadCharacters);guard(loadPeers);}if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='goals')guard(loadGoals);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}

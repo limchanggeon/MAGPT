@@ -169,3 +169,35 @@ function renderEquipmentDetail(box,item){
 // 다른 캐릭터 검색 — 이름으로 프로필을 본다. 관리 목록에는 사용자가 '관리 목록에 추가'를 눌러야 들어간다.
 $('#other-search').onsubmit=e=>{e.preventDefault();const name=e.target.elements.name.value.trim();if(!name)return;
   showCharacterProfile(name);$('#character-profile').scrollIntoView({behavior:'smooth',block:'start'});};
+
+// 비슷한 유저 — 같은 직업·비슷한 레벨 유저의 장비 통계와 대표 캐릭터 비교(mepiti/peers.py). 모으는 동안은 가끔 다시 불러온다.
+let peerTimer=null;
+function renderPeers(d){
+  const st=$('#peer-status'),box=$('#peer-report');box.replaceChildren();clearTimeout(peerTimer);
+  const t=d.target;
+  const parts=[];
+  if(t)parts.push(`${t.job.split('-').pop()} Lv.${t.level}±3 · 모은 유저 ${fmt(d.collected)}명`+(d.queue?` · 남은 후보 ${fmt(d.queue)}명`:''));
+  else parts.push('아직 모으지 않았습니다. \'모으기 시작\'을 누르면 대표 캐릭터 기준으로 후보를 고릅니다.');
+  if(d.running)parts.push('모으는 중(한 명에 몇 초씩)');
+  else if(d.queue&&!d.calls_left)parts.push('오늘 조회 몫을 다 써서 내일 이어서 모읍니다');
+  parts.push(`오늘 남은 조회 ${fmt(d.calls_left)}/${fmt(d.daily_calls)}회`);
+  if(d.error)parts.push(d.error);
+  st.textContent=parts.join(' · ');
+  $('#peer-collect').textContent=t?'다시 고르기':'모으기 시작';
+  if(d.running)peerTimer=setTimeout(()=>guard(loadPeers),15000);
+  if(t&&!d.same_job){box.append(el('p','hint','대표 캐릭터의 직업이 바뀌었어요. \'다시 고르기\'를 누르세요.'));return;}
+  if(!d.ready){if(t)box.append(el('p','hint',`${fmt(d.min_peers)}명 이상 모이면 비교를 보여 드려요.`));return;}
+  const behind=el('div','peer-behind');behind.append(el('strong','',d.behind.length?`비슷한 유저 ${fmt(d.people)}명보다 뒤처진 부위`:`비슷한 유저 ${fmt(d.people)}명과 비교해 뒤처진 부위가 없어요`));
+  d.behind.forEach(b=>{const row=el('div','peer-row');row.append(el('span','peer-slot',b.slot),el('span','',b.reasons.join(' · ')));behind.append(row);});
+  box.append(behind);
+  const more=el('details','peer-more');more.append(el('summary','','부위별 통계 전체'));
+  const table=el('table','peer-table');const head=el('tr');['부위','많이 끼는 장비','스타포스 중앙값','윗잠','아랫잠','내 장비'].forEach(h=>head.append(el('th','',h)));table.append(head);
+  const shares=o=>Object.entries(o).reverse().map(([g,v])=>`${g} ${v}%`).join(', ')||'—';
+  d.slots.forEach(s=>{const tr=el('tr'+(s.behind.length?' behind':''));const me=s.mine||{};
+    tr.append(el('td','',s.slot),el('td','',s.items.map(i=>`${i.name} ${i.share}%`).join(', ')),el('td','num',s.starforce_median==null?'—':`${s.starforce_median}성`),
+      el('td','',shares(s.potential)),el('td','',shares(s.additional)),el('td','',me.name?`${me.name} ${me.starforce||0}성 · ${me.potential||'—'}/${me.additional||'—'}`:'—'));table.append(tr);});
+  more.append(table,el('p','hint','넥슨 Open API 랭킹(전날 기준)에서 같은 직업·비슷한 순위의 유저를 골라 모은 통계입니다. 채팅에서 "비슷한 유저랑 비교해서 뭐부터 바꿀까?"처럼 물으면 이 통계로 상담합니다.'));
+  box.append(more);
+}
+async function loadPeers(){renderPeers(await api('peers'));}
+$('#peer-collect').onclick=e=>task(e.currentTarget,async()=>{renderPeers(await api('peers/collect',{}));});

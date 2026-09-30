@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
-- 최종 갱신: 2026-09-29 (KST)
-- 현재 단계: v0.3.9 릴리스(목표 탭). 전체 요구사항 완료 아님. 전체 요구사항 완료 아님.
+- 최종 갱신: 2026-09-30 (KST)
+- 현재 단계: v0.4.0 준비(수익 하위 탭·재획 달력·캡처 입력, 다른 캐릭터 검색, 비슷한 유저 통계). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1240,3 +1240,14 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   데모+WebKit: 메소 목표·what-if·레벨업 화면, 페이지 오류 없음.
 - 한계: 레벨업 예상은 다음 레벨까지만(더 먼 레벨은 레벨별 필요 경험치 표가 없음). 주보 평균은 이번 주(진행 중)도 넣는다.
 - **릴리스 v0.3.9**(2026-09-30): 목표 탭. CI 두 OS 통과, `main` 빨리감기(`3783880..684a78e`), 태그, 릴리스 성공, API latest v0.3.9. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.9
+
+### 2026-09-30 — 수익 [요약][재획][주보], 재획 달력·캡처 입력, 다른 캐릭터 검색, 비슷한 유저 (사용자 요청: "1,2,3 동시에, 3은 천천히 한도 안 걸리게")
+
+- 변경 파일: `mepiti/adapters.py`(이미지 입력·`read_capture`·`capture_images`·`ranking/overall` 허용), `mepiti/earnings.py`(`hunt_days`·`read_capture`), `mepiti/prices.py`('2764만 4807'),
+  `mepiti/peers.py`(신규), `mepiti/server.py`(`/api/earnings/capture`, `/api/peers`, `/api/peers/collect`, `CachedNexon.get`, 앱 시작 때 모으기 재개), `mepiti/chat.py`(`PEER_INTENT`),
+  `mepiti/static/index.html·app.js·characters.js·style.css`, `mepiti/static/sol-erda-piece.png`(사용자 캡처에서 자른 조각 아이콘, 개수 숫자 제외), `scripts/demo_server.py`(가짜 캡처·가짜 비슷한 유저 8명), `tests/test_peers.py`(14개).
+- 사용자 확인 사실: 조각 아이콘은 파랑·보라 소용돌이 구슬(사용자가 이미지로 알려 줌, 캡처의 창고 147개).
+- 검증(2026-09-30, 이번에 실행): 전체 자동 테스트 통과. 실제 Gemini로 캡처 읽기(인벤·창고 메소 정확, 조각은 기준 아이콘 추가 후 3/3 정확).
+  실제 넥슨 랭킹·장비 수집과 실제 Gemini 상담(임시 폴더 DB만 사용, 실제 사용자 DB에 쓰지 않음). 데모+WebKit 화면 확인.
+- 한계·미확인: 넥슨 개발 키의 공식 호출 한도 미확인(기능 몫 하루 60회로 보수적으로). 캡처 읽기는 Claude·ChatGPT 실제 키로는 확인 못 함.
+  스타포스·잠재 외 추옵 급 비교는 아직 안 함. 비슷한 유저 기준은 레벨(전투력 아님). 인벤 기타 탭·창고 양쪽에 조각이 있으면 모델이 '12+147'처럼 적도록 했고 앱이 더한다(실제 캡처로는 미확인).

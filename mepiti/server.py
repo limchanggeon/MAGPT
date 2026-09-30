@@ -18,7 +18,7 @@ from .adapters import (CLOUD_MODEL, CLOUD_PROVIDERS, Claude, FixedKey, Gemini, M
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import backup, desktop, earnings, goals, history, notices, prices, starforce
+from . import backup, desktop, earnings, goals, history, notices, peers, prices, starforce
 from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
@@ -35,6 +35,9 @@ class CachedNexon:
         self.nexon = nexon
         self.cache = {}
         self.lock = threading.Lock()
+
+    def get(self, path, query):
+        return self.nexon.get(path, query)
 
     def character(self, name, details=False):
         key = (name, bool(details))
@@ -98,6 +101,8 @@ class Application:
         self.model = ModelRouter(Ollama(), lambda: self.clouds)   # 고른 모델에 따라 로컬·클라우드로 보낸다
         self.auction = None                               # 앱 창으로 실행하면 desktop.run이 붙인다(mepiti/auction.py)
         self.updater = Updater(folder)                     # 새 버전 확인·업데이트(mepiti/updater.py)
+        self.peers = peers.Peers(self.store, lambda: self.nexon)   # 비슷한 유저 장비 통계(천천히 모은다, mepiti/peers.py)
+        self.peers.start()                                 # 어제 모으다 만 후보가 있으면 이어서(오늘 몫 안에서)
         self.quit_app = None                              # make_server가 붙인다. 업데이트 때 메피티를 끈다
         self.token = secrets.token_urlsafe(32)
         self.download = {'running':False}
@@ -178,6 +183,24 @@ class Application:
                          'Claude': present(self.claude.vault), 'ChatGPT': present(self.openai.vault)},
                 'backups': backup.listing(self.store.folder), 'keep': backup.KEEP,
                 'startup_backup': self.startup_backup.name if self.startup_backup else None}
+
+    def peer_report(self, name=None, collect=False):
+        """비슷한 유저 통계와 내 장비 비교. collect면 후보를 (다시) 고르고 모으기를 시작한다."""
+        name = name or self.main_character_name()
+        if not name:
+            raise AppError('캐릭터 화면에서 대표 캐릭터를 먼저 등록해 주세요.')
+        target = self.store.setting(peers.TARGET) or {}
+        profile = None
+        try:
+            profile = self.nexon.character(name, details=True)
+        except AppError:
+            pass
+        stale = not target or (profile and target.get('job', '').split('-', 1)[-1] != profile.get('job')) \
+            or str(target.get('at', ''))[:10] < peers.since()[:10]
+        if collect and (stale or not (self.store.setting(peers.QUEUE) or [])):
+            self.peers.choose(name)
+        self.peers.start()
+        return {**peers.compare(self.store, profile, self.peers.status()), 'name': name}
 
     def main_character_name(self):
         chars = self.store.characters()
@@ -310,6 +333,7 @@ class Application:
             if path == '/api/auction/status': return self.auction_route(path)
             if path == '/api/data': return self.data_status()
             if path == '/api/goals': return goals.meso_plan(s)
+            if path == '/api/peers': return self.peer_report(query.get('name',[None])[0])
             if path == '/api/update': return self.updater.public()
         if method == 'POST':
             if path == '/api/chat':
@@ -347,6 +371,7 @@ class Application:
             if path == '/api/earnings': return earnings.add(s, data)
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
             if path == '/api/goals/meso': return goals.meso_plan(s, data.get('target'), data.get('current'))
+            if path == '/api/peers/collect': return self.peer_report(data.get('name') or None, collect=True)
             if path == '/api/goals/exp': return goals.exp_plan(s, self.nexon, required(data,'name',30))
             if path == '/api/earnings/capture':
                 return earnings.read_capture(self.model, s.setting('model'), required(data, 'image', 8_100_000))
