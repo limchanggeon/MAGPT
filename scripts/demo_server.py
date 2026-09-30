@@ -117,6 +117,12 @@ class FakeNexon:
         return {'characters': [{'name': p['name'], 'world': p.get('world'), 'job': p.get('job'), 'level': p.get('level')}],
                 'retrieved_at': now(), 'source_url': 'demo'}
 
+    def basic_on(self, name, day=None):
+        # 데모용 경험치 흐름: 하루 약 5%씩 오른다(목표 탭).
+        from datetime import date
+        back = (date.today() - date.fromisoformat(day)).days if day else 0
+        return {'level': self.profile.get('level') or 285, 'exp': int((60 - back * 5) / 100 * 3.2e14), 'rate': 60 - back * 5}
+
     def _unavailable(self, *args, **kwargs):
         raise AppError('데모에서는 제공하지 않는 기능입니다.', 503)
 

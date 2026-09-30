@@ -1230,3 +1230,12 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 기준 월드: 경매장 검색 기준 캐릭터(대표 캐릭터와 이름이 같은 캐릭터, 없으면 최고 레벨)의 월드 — 사용자는 크로아.
 - 실제 경매장 확인은 못 함: Mac 앱의 경매장 로그인이 풀려 있었다(사용자가 Windows에서 경매장을 써서 Mac 세션이 끝난 것으로 추정). Windows에서 사용자 확인 필요.
 - **릴리스 v0.3.8**(2026-09-29): 조각 가격 단위 확인 + 조각 시세 경매장. CI 두 OS 통과, `main` 빨리감기, 태그, 릴리스 성공(파일 5개), API latest v0.3.8. https://github.com/limchanggeon/MAGPT/releases/tag/v0.3.8
+
+### 2026-09-30 — 목표 탭 (사용자 요청: "목표 메소를 입력하면 평균 사냥시간(7일)으로 얼마나 걸릴지, 경험치 상승폭으로 렙업까지 얼마나")
+
+- 변경: `mepiti/goals.py`(신규), `adapters.Nexon.basic_on`(날짜별 레벨·경험치·%, ocid 캐시, 큰 경험치는 float을 거치지 않음), `CachedNexon.basic_on`,
+  `server.py` `GET /api/goals`·`POST /api/goals/meso`·`/api/goals/exp`, 화면 목표 탭(`view-goals`, 사이드바 수익 다음), `tour.js` 2단계, 데모 `FakeNexon.basic_on`, 테스트 `GoalTests` 3개, README·IMPLEMENTATION.
+- 사실 확인(2026-09-30, 실제 API): `character/basic?date=`가 그날 0시 기준 `character_level`·`character_exp`(정수)·`character_exp_rate`('56.556')를 준다.
+- 검증: 자동 테스트 통과. 사용자 대표 캐릭터 실제 계산: Lv.291, 하루 +4.88%, 다음 레벨까지 약 8.5일(10/9). 첫 실행 때 한 날이 빠졌다가(연속 호출 한도로 추정) 다음 실행에 채워짐.
+  데모+WebKit: 메소 목표·what-if·레벨업 화면, 페이지 오류 없음.
+- 한계: 레벨업 예상은 다음 레벨까지만(더 먼 레벨은 레벨별 필요 경험치 표가 없음). 주보 평균은 이번 주(진행 중)도 넣는다.

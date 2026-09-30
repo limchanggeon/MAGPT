@@ -18,7 +18,7 @@ from .adapters import (CLOUD_MODEL, CLOUD_PROVIDERS, Claude, FixedKey, Gemini, M
 from . import models
 from .chat import answer
 from .core import AppError, Store, identifier, now, required
-from . import backup, desktop, earnings, history, notices, prices, starforce
+from . import backup, desktop, earnings, goals, history, notices, prices, starforce
 from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
@@ -58,6 +58,9 @@ class CachedNexon:
 
     def scheduler(self, name, day=None):
         return self.nexon.scheduler(name, day)
+
+    def basic_on(self, name, day=None):
+        return self.nexon.basic_on(name, day)
 
     def starforce_history(self, day):
         return self.nexon.starforce_history(day)
@@ -306,6 +309,7 @@ class Application:
             if path == '/api/prices': return {'prices':s.prices(),**prices.status(s)}
             if path == '/api/auction/status': return self.auction_route(path)
             if path == '/api/data': return self.data_status()
+            if path == '/api/goals': return goals.meso_plan(s)
             if path == '/api/update': return self.updater.public()
         if method == 'POST':
             if path == '/api/chat':
@@ -342,6 +346,8 @@ class Application:
                 return {'ok':True}
             if path == '/api/earnings': return earnings.add(s, data)
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
+            if path == '/api/goals/meso': return goals.meso_plan(s, data.get('target'), data.get('current'))
+            if path == '/api/goals/exp': return goals.exp_plan(s, self.nexon, required(data,'name',30))
             if path == '/api/earnings/piece-price': return earnings.piece_price(s, self.auction, bool(data.get('refresh')))
             if path == '/api/earnings/scheduler':
                 names = [c['name'] for c in s.characters()]

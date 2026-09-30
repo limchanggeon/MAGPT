@@ -11,6 +11,7 @@
 <button data-view="chat" class="nav-item active"><span>대화</span></button>
 <button data-view="characters" class="nav-item"><span>캐릭터</span></button>
 <button data-view="calculator" class="nav-item"><span>수익</span></button>
+<button data-view="goals" class="nav-item"><span>목표</span></button>
 <button data-view="library" class="nav-item"><span>기록</span></button>
 </nav>
 <div class="history-label">최근 대화</div><div id="history" class="history"></div>
@@ -85,6 +86,19 @@
 <div class="two-columns earnings-lists"><section class="panel"><h2 id="hunt-list-title">재획 기록</h2><div id="hunt-list" class="earnings-list"></div></section>
 <section class="panel"><div class="earnings-head"><h2 id="boss-list-title">주보 기록</h2><button type="button" id="boss-import-button" class="secondary">이번 주 주보 불러오기</button></div><div id="boss-import" class="boss-import" hidden></div><div id="boss-list" class="earnings-list"></div></section></div>
 </section>
+
+<section id="view-goals" class="view content-view" hidden><div class="page-heading"><h1>목표</h1></div>
+<div class="two-columns goals">
+<section class="panel goal-panel"><h2>메소 목표</h2><p class="muted">목표 메소를 적으면 수익 기록(재획·조각·주보)으로 하루 평균 수익을 내서, 얼마나 걸릴지 계산합니다. 재획비 1개는 30분으로 봅니다.</p>
+<form id="meso-goal-form" class="form-grid"><label>목표 메소<input name="target" inputmode="text" autocomplete="off" placeholder="예: 100억" required></label>
+<label>지금 가진 메소 (선택)<input name="current" inputmode="text" autocomplete="off" placeholder="예: 12억"></label>
+<div class="full"><button class="primary" type="submit">계산</button></div></form>
+<div id="meso-plan" class="goal-result"></div></section>
+<section class="panel goal-panel"><h2>레벨업 예상</h2><p class="muted">넥슨 Open API의 날짜별 경험치로 최근 7일 하루 평균 경험치를 내서, 다음 레벨까지 걸릴 날을 계산합니다.</p>
+<div class="form-grid"><label>캐릭터<select id="exp-character"></select></label>
+<div class="full"><button id="exp-load" class="primary" type="button">최근 7일 경험치로 계산</button></div></div>
+<div id="exp-plan" class="goal-result"></div></section>
+</div></section>
 
 <section id="view-library" class="view content-view" hidden><div class="page-heading"><h1>기록</h1></div>
 <div class="panel history-toolbar"><div><h2>스타포스 강화 기록</h2><p class="muted">넥슨 Open API의 계정 스타포스 기록을 불러와, 장비마다 실제로 쓴 돈과 기대값을 비교합니다.</p><p id="history-status" class="hint"></p></div>

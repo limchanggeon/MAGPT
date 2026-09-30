@@ -1968,3 +1968,63 @@ class UpdaterTests(unittest.TestCase):
         with patch.object(updater, 'fetch', side_effect=OSError('offline')):
             info = updater.Updater(self.root).check()
         self.assertIn('확인하지 못했어요', info['error'])
+
+
+class GoalTests(unittest.TestCase):
+    """목표 탭(사용자 요청 2026-09-30): 메소 목표까지 기간, 다음 레벨까지 기간."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.store = Store(self.tmp.name)
+    def tearDown(self): self.tmp.cleanup()
+    def test_meso_plan_from_records(self):
+        from datetime import date
+        from mepiti import goals
+        with patch('mepiti.earnings.today', return_value=date(2026, 9, 30)):
+            # 7일 동안 재획비 14개(하루 2개 = 1시간), 1개당 1억(조각 포함) → 사냥 하루 2억
+            for i in range(7):
+                earnings.add(self.store, {'kind': 'hunt', 'meso': '1억 5000만', 'pieces': '10', 'piece_price': '500만',
+                                          'flasks': '2', 'day': f'2026-09-{24 + i}'})
+            earnings.add(self.store, {'kind': 'boss', 'boss': '직접 적은 보스', 'crystal': '7억', 'day': '2026-09-25'})  # 이번 주 7억
+            p = goals.meso_plan(self.store, '100억', '16억')
+        self.assertEqual(p['data_days'], 7); self.assertEqual(p['per_flask'], 100_000_000)
+        self.assertEqual(p['flasks_per_day'], 2); self.assertEqual(p['hours_per_day'], 1)
+        self.assertEqual(p['boss_per_week'], 700_000_000)
+        self.assertEqual(p['daily'], 300_000_000)                      # 사냥 2억 + 주보 7억/7
+        self.assertEqual((p['remaining'], p['days'], p['eta']), (8_400_000_000, 28, '2026-10-28'))
+        self.assertEqual(p['notes'], [])
+        self.assertEqual(goals.meso_plan(self.store)['target'], 10_000_000_000)   # 저장해 둔 목표
+    def test_meso_plan_short_history_warns(self):
+        from datetime import date
+        from mepiti import goals
+        with patch('mepiti.earnings.today', return_value=date(2026, 9, 30)):
+            earnings.add(self.store, {'kind': 'hunt', 'meso': '3억', 'day': '2026-09-29'})
+            p = goals.meso_plan(self.store, '30억')
+        self.assertEqual(p['data_days'], 2); self.assertEqual(p['daily'], 150_000_000)
+        self.assertTrue(any('7일' in n for n in p['notes'])); self.assertTrue(any('재획비 개수' in n for n in p['notes']))
+        self.assertEqual(p['days'], 20)
+    def test_exp_plan_with_level_up(self):
+        from datetime import date, datetime as real_dt
+        from mepiti import goals
+        # 필요 경험치 100억인 레벨 → 하루 10억(10%)씩. 9/27에 레벨업(전 레벨 필요 80억).
+        history = {'2026-09-23': (290, 4_000_000_000, 50.0), '2026-09-24': (290, 5_000_000_000, 62.5),
+                   '2026-09-25': (290, 6_000_000_000, 75.0), '2026-09-26': (290, 7_000_000_000, 87.5),
+                   '2026-09-27': (291, 0, 0.0), '2026-09-28': (291, 1_000_000_000, 10.0), '2026-09-29': (291, 2_000_000_000, 20.0)}
+        class Fake:
+            calls = []
+            def basic_on(self, name, day=None):
+                self.calls.append(day)
+                level, exp, rate = history[day] if day else (291, 3_000_000_000, 30.0)
+                return {'level': level, 'exp': exp, 'rate': rate}
+        earnings.add(self.store, {'kind': 'hunt', 'meso': '1억', 'flasks': '4', 'character': '본캐', 'day': '2026-09-28'})
+        now = real_dt(2026, 9, 30, 0, 0, tzinfo=goals.KST)
+        with patch('mepiti.earnings.today', return_value=date(2026, 9, 30)), patch('mepiti.goals.datetime') as clock:
+            clock.now.return_value = now; clock.fromisoformat = real_dt.fromisoformat
+            fake = Fake(); p = goals.exp_plan(self.store, fake, '본캐')
+            again = goals.exp_plan(self.store, fake, '본캐')
+        self.assertEqual(p['required'], 10_000_000_000)
+        # 9/23 40억 → 레벨업 전날 70억 → 레벨업(80억-70억=10억 + 0) → 현재 30억: 총 70억 / 7일 = 하루 10억
+        self.assertEqual(p['gain'], 7_000_000_000); self.assertEqual(p['span_days'], 7)
+        self.assertAlmostEqual(p['per_day_percent'], 10.0)
+        self.assertAlmostEqual(p['days'], 7.0); self.assertEqual(p['eta'], '2026-10-07')
+        self.assertAlmostEqual(p['per_flask_percent'], 7_000_000_000 / 4 / 10_000_000_000 * 100)
+        self.assertEqual(sum(1 for d in Fake.calls if d), 7)             # 지난날은 한 번만 부른다
+        self.assertEqual(again['gain'], p['gain'])

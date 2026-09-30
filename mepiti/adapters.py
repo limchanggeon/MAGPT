@@ -284,6 +284,25 @@ class Nexon:
         characters.sort(key=lambda c:(-c['level'],c['name']))
         return {'characters':characters,'retrieved_at':now(),'source_url':self.BASE+'character/list'}
 
+    def basic_on(self, name, day=None):
+        """그날(없으면 지금)의 레벨·경험치·경험치 %. 목표 탭의 레벨업 예상에 쓴다.
+        필드는 2026-09-30 실제 응답으로 확인: character_exp(정수), character_exp_rate('58.695')."""
+        ocids = self.__dict__.setdefault('_ocids', {})
+        if name not in ocids:
+            ocids[name] = self.get('id',{'character_name':name}).get('ocid')
+        if not ocids[name]:
+            raise AppError('캐릭터 식별자를 확인하지 못했습니다.',502)
+        basic = self.get('character/basic',{'ocid':ocids[name],**({'date':day} if day else {})})
+        raw = basic.get('character_exp')
+        level, exp = integer(basic.get('character_level')), (raw if isinstance(raw, int) else integer(raw))   # 큰 수라 float을 거치지 않는다
+        try:
+            rate = float(str(basic.get('character_exp_rate')).replace('%',''))
+        except ValueError:
+            rate = None
+        if level is None or exp is None:
+            raise AppError('그날의 캐릭터 경험치 정보가 없습니다.',404)
+        return {'level': level, 'exp': exp, 'rate': rate}
+
     def character(self,name, details=False):
         identity = self.get('id',{'character_name':name})
         ocid = identity.get('ocid')

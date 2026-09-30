@@ -13,7 +13,7 @@ if(inAppWindow){
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
 let accountCatalog = null, accountLoading = false, managedNames = new Set(), managedCharacters = [];
-const titles = {chat:'대화',characters:'캐릭터',calculator:'수익',library:'기록',settings:'설정'};
+const titles = {chat:'대화',characters:'캐릭터',calculator:'수익',goals:'목표',library:'기록',settings:'설정'};
 const fmt = (n) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:3}).format(n);
 const el = (tag,cls,text) => { const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e; };
 function toast(message,error=false){const e=$('#toast');e.textContent=message;e.classList.toggle('error',error);e.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.hidden=true,6500);}
@@ -22,7 +22,7 @@ async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
+function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters')guard(loadCharacters);if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='goals')guard(loadGoals);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
@@ -538,6 +538,58 @@ function watchUpdate(){clearTimeout(updateTimer);updateTimer=setTimeout(()=>guar
   const u=await api('update');renderUpdate(u);if(u.state&&(u.state.running||u.state.restarting))watchUpdate();}),1000);}
 async function checkUpdate(){renderUpdate(await api('update/check',{}));}
 $('#update-check').onclick=e=>task(e.currentTarget,async()=>{updateDismissed=false;await checkUpdate();const u=await api('update');toast(u.error||(u.newer?`새 버전 v${u.latest}이 있어요.`:'최신 버전이에요.'),!!u.error);});
+// 목표 — 메소 목표까지 걸릴 날(수익 기록 기준), 다음 레벨까지 걸릴 날(최근 7일 경험치).
+let lastMesoPlan=null;
+const dayText=(iso)=>{if(!iso)return '';const [y,m,d]=iso.split('-');return `${Number(m)}월 ${Number(d)}일`;};
+const daysText=(n)=>n>=14?`${fmt(n)}일 (약 ${fmt(Math.round(n/7*10)/10)}주)`:`${fmt(n)}일`;
+function renderMesoPlan(p,flasksOverride){
+  lastMesoPlan=p;const box=$('#meso-plan');box.replaceChildren();
+  const f=$('#meso-goal-form').elements;if(p.target&&!f.target.value)f.target.value=amountText(p.target);if(p.current&&!f.current.value)f.current.value=amountText(p.current);
+  const flasks=flasksOverride??p.flasks_per_day;
+  const huntDay=p.per_flask!=null?p.per_flask*flasks+(p.hunt_per_day-p.per_flask*p.flasks_per_day):p.hunt_per_day;
+  const daily=huntDay+p.boss_per_week/7;
+  if(p.target){
+    const days=p.remaining===0?0:daily>0?Math.ceil(p.remaining/daily):null;
+    const head=el('div','goal-head');
+    head.append(el('span','',`목표 ${mesoText(p.target)}까지 남은 ${mesoText(p.remaining)}`));
+    if(days===0)head.append(el('strong','','이미 목표에 닿았어요'));
+    else if(days==null)head.append(el('strong','','수익 기록이 있어야 계산돼요'));
+    else{const eta=new Date();eta.setDate(eta.getDate()+days);head.append(el('strong','',`약 ${daysText(days)}`),el('small','',`${eta.getMonth()+1}월 ${eta.getDate()}일쯤 · 하루 평균 ${mesoText(daily)}`));}
+    box.append(head);
+  }
+  const basis=el('dl','goal-basis');const pair=(k,v)=>basis.append(el('dt','',k),el('dd','',v));
+  pair('사냥',p.per_flask!=null?`하루 재획비 ${fmt(Math.round(flasks*10)/10)}개(${fmt(Math.round(flasks*p.flask_minutes/6)/10)}시간) × 1개당 ${mesoText(p.per_flask)} = 하루 ${mesoText(huntDay)}`:`하루 ${mesoText(huntDay)} (재획비 개수를 적은 기록이 없어 시간은 몰라요)`);
+  pair('주보',p.boss_weeks?`주 ${mesoText(p.boss_per_week)} (최근 ${fmt(p.boss_weeks)}주 평균) = 하루 ${mesoText(p.boss_per_week/7)}`:'기록 없음');
+  pair('기준',`최근 ${fmt(p.data_days)}일 기록 · 조각은 기록한 가격으로 포함`);
+  box.append(basis);
+  if(p.per_flask!=null){
+    const whatif=el('label','goal-whatif');const input=el('input');input.type='number';input.min=0;input.max=48;input.step=0.5;input.value=Math.round(flasks*10)/10;
+    input.oninput=()=>renderMesoPlan(lastMesoPlan,Number(input.value)||0);
+    whatif.append(document.createTextNode('하루 재획비를 '),input,document.createTextNode('개 쓰면'));box.append(whatif);
+    if(flasksOverride!=null)requestAnimationFrame(()=>box.querySelector('.goal-whatif input').focus());   // 다시 그려도 계속 입력하게
+  }
+  p.notes.forEach(n=>box.append(el('p','hint',n)));
+}
+async function loadGoals(){
+  renderMesoPlan(await api('goals'));
+  const select=$('#exp-character');if(!select.childElementCount){
+    const d=await api('earnings');(d.character_choices||[]).forEach(c=>{const o=el('option','',c.name+(c.level?` · Lv.${c.level}`:''));o.value=c.name;select.append(o);});
+    if(d.default_character)select.value=d.default_character;
+  }
+}
+$('#meso-goal-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const f=formData(e.target);renderMesoPlan(await api('goals/meso',{target:f.target,current:f.current}));});};
+$('#exp-load').onclick=e=>task(e.currentTarget,async()=>{
+  const box=$('#exp-plan');box.replaceChildren(el('p','hint','넥슨에서 최근 7일 경험치를 불러오는 중'));
+  const p=await api('goals/exp',{name:$('#exp-character').value});box.replaceChildren();
+  const head=el('div','goal-head');head.append(el('span','',`${p.name} · Lv.${p.level} · ${p.rate!=null?p.rate.toFixed(3)+'%':''}`));
+  if(p.days!=null)head.append(el('strong','',`다음 레벨까지 약 ${p.days<1?Math.max(1,Math.round(p.days*24))+'시간':daysText(Math.ceil(p.days))}`),el('small','',`${dayText(p.eta)}쯤 · 하루 평균 +${p.per_day_percent.toFixed(2)}%`));
+  box.append(head);
+  if(p.per_day!=null){const basis=el('dl','goal-basis');const pair=(k,v)=>basis.append(el('dt','',k),el('dd','',v));
+    pair('최근',`${p.since}부터 ${fmt(p.span_days)}일 동안 +${(p.gain/p.required*100).toFixed(2)}% (현재 레벨 기준)`);
+    if(p.per_flask_percent!=null)pair('재획비 1개당',`약 +${p.per_flask_percent.toFixed(2)}% (이 캐릭터 재획 기록 ${fmt(p.flasks)}개 기준)`);
+    box.append(basis);}
+  (p.notes||[]).forEach(n=>box.append(el('p','hint',n)));
+});
 // 데이터 보관 — 데이터 위치, OS 보안 저장소의 키, 백업. 키 값은 보여 주지 않는다.
 function renderDataPanel(d){
   const info=$('#data-info');info.replaceChildren();
