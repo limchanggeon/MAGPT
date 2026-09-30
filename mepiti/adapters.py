@@ -640,6 +640,47 @@ def analysis_messages(facts, question, history=None, numbers_shown=False):
     return messages
 
 
+# 재획 캡처 읽기(수익 탭). 모델은 화면에 보이는 글자를 그대로 옮기기만 하고, 숫자 변환은 앱이 한다(prices.parse_price).
+CAPTURE_FIELDS = ('inventory_meso', 'storage_meso', 'sol_erda_pieces', 'maple_points')
+
+
+CAPTURE_SCHEMA = {'type': 'object', 'properties': {k: {'type': ['string', 'null']} for k in CAPTURE_FIELDS},
+                  'required': list(CAPTURE_FIELDS), 'additionalProperties': False}
+
+
+def capture_messages():
+    return [{'role': 'system', 'content': (
+                '메이플스토리 게임 화면 캡처에서 숫자만 옮겨 적는다. 보이는 글자를 그대로 적고, 계산하거나 추측하지 않는다.\n'
+                '- inventory_meso: 인벤토리(장비·소비·기타 탭이 있는 창) 아래쪽 메소 표시. 예: "2764만 4807"\n'
+                '- storage_meso: 창고(STORAGE) 창 아래쪽 메소 표시. 예: "11억"\n'
+                '- sol_erda_pieces: "솔 에르다 조각" 아이템의 개수. 첫 번째 그림이 그 아이콘(기준 그림)이다. 인벤토리 기타 탭이나 '
+                '창고 칸에 이름 없이 아이콘과 칸 왼쪽 아래 개수 숫자로 보인다. 파랑·보라빛 소용돌이 구슬 모양이며, 보라색 눈·청록 결정 등 '
+                '다른 아이콘과 헷갈리지 않는다. 인벤토리와 창고 양쪽에 있으면 둘을 더하지 말고 "인벤 개수+창고 개수"처럼 적는다. '
+                '기준 그림과 같은 아이콘이 확실히 보일 때만 적고 아니면 null\n'
+                '- maple_points: 메이플포인트 표시. 보이지 않으면 null\n'
+                '보이지 않거나 확실하지 않은 값은 null. 숫자를 지어내지 않는다.')},
+            {'role': 'user', 'content': '첫 번째 그림은 솔 에르다 조각 아이콘(기준), 두 번째 그림이 게임 캡처다. 캡처에서 위 항목을 JSON으로 옮겨 적어라.'}]
+
+
+PIECE_ICON = Path(__file__).resolve().parent / 'static' / 'sol-erda-piece.png'
+
+
+def capture_images(mime, data):
+    """캡처 앞에 솔 에르다 조각 기준 아이콘을 붙인다(아이콘만으로 다른 아이템과 구분하게)."""
+    try:
+        return [('image/png', base64.b64encode(PIECE_ICON.read_bytes()).decode()), (mime, data)]
+    except OSError:
+        return [(mime, data)]
+
+
+def capture_result(text):
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        raise AppError('캡처에서 숫자를 읽지 못했어요. 메소가 보이게 다시 캡처하거나 직접 적어 주세요.', 502)
+    return {k: (str(data.get(k)).strip()[:40] if data.get(k) not in (None, '', 'null') else None) for k in CAPTURE_FIELDS}
+
+
 # 클라우드 모델을 고르면 설정의 사용 모델 값이 이 이름이 된다. 실제 Gemini 모델 이름은 키로 목록을 받아 고른다.
 CLOUD_MODEL = 'gemini'
 
@@ -743,13 +784,15 @@ class Gemini:
             return name
         raise last
 
-    def generate(self, messages, config, key=None, model=None):
+    def generate(self, messages, config, key=None, model=None, images=None):
         if not model and not self.model:
             self.check()
         model = model or self.model
         system = '\n'.join(m['content'] for m in messages if m['role'] == 'system')
         contents = [{'role': 'model' if m['role'] == 'assistant' else 'user', 'parts': [{'text': m['content']}]}
                     for m in messages if m['role'] != 'system']
+        for mime, data in reversed(images or ()):                  # (MIME, base64) 목록 — 마지막 사용자 메시지 앞에 차례로 붙인다
+            contents[-1]['parts'].insert(0, {'inlineData': {'mimeType': mime, 'data': data}})
         body = {'contents': contents, 'generationConfig': dict(config)}
         if system:
             body['systemInstruction'] = {'parts': [{'text': system}]}
@@ -782,6 +825,13 @@ class Gemini:
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown),
                                    {'temperature': 0.3, 'maxOutputTokens': 4096})
         return written_text(text), meta
+
+    def read_capture(self, mime, data):
+        schema = {'type': 'OBJECT', 'properties': {k: {'type': 'STRING', 'nullable': True} for k in CAPTURE_FIELDS},
+                  'required': list(CAPTURE_FIELDS)}
+        text, meta = self.generate(capture_messages(), {'temperature': 0, 'maxOutputTokens': 2048,
+                                   'responseMimeType': 'application/json', 'responseSchema': schema}, images=capture_images(mime, data))
+        return capture_result(text), meta
 
     def select(self, model, question, passages):
         text, meta = self.generate(select_messages(question, passages), {
@@ -884,10 +934,14 @@ class Claude:
             raise self.failure(e, model)
         return model
 
-    def generate(self, messages, output_config=None, max_tokens=16000):
+    def generate(self, messages, output_config=None, max_tokens=16000, images=None):
         import anthropic
         model = self.model
         system, turns = cloud_messages(messages)
+        if images:
+            turns[-1] = {'role': 'user', 'content': [
+                *({'type': 'image', 'source': {'type': 'base64', 'media_type': m, 'data': d}} for m, d in images),
+                {'type': 'text', 'text': turns[-1]['content']}]}
         config = dict(output_config or {})
         if not model.startswith('claude-haiku'):
             config.setdefault('effort', 'low')
@@ -912,6 +966,11 @@ class Claude:
     def analyse(self, model, facts, question, history=None, numbers_shown=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
         return written_text(text), meta
+
+    def read_capture(self, mime, data):
+        text, meta = self.generate(capture_messages(), {'format': {'type': 'json_schema', 'schema': CAPTURE_SCHEMA}},
+                                   max_tokens=2000, images=capture_images(mime, data))
+        return capture_result(text), meta
 
     def select(self, model, question, passages):
         schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
@@ -974,9 +1033,13 @@ class OpenAI:
         self.call('GET', f'/models/{model}', key=key, timeout=20)
         return model
 
-    def generate(self, messages, extra=None, max_output_tokens=8000):
+    def generate(self, messages, extra=None, max_output_tokens=8000, images=None):
         model = self.model
         system, turns = cloud_messages(messages)
+        if images:
+            turns[-1] = {'role': 'user', 'content': [
+                *({'type': 'input_image', 'image_url': f'data:{m};base64,{d}'} for m, d in images),
+                {'type': 'input_text', 'text': turns[-1]['content']}]}
         body = {'model': model, 'input': ([{'role': 'system', 'content': system}] if system else []) + turns,
                 'max_output_tokens': max_output_tokens, **(extra or {})}
         if model not in self.plain:
@@ -1004,6 +1067,11 @@ class OpenAI:
     def analyse(self, model, facts, question, history=None, numbers_shown=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
         return written_text(text), meta
+
+    def read_capture(self, mime, data):
+        text, meta = self.generate(capture_messages(), {'text': {'format': {
+            'type': 'json_schema', 'name': 'capture', 'schema': CAPTURE_SCHEMA, 'strict': True}}}, images=capture_images(mime, data))
+        return capture_result(text), meta
 
     def select(self, model, question, passages):
         schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
@@ -1034,6 +1102,13 @@ class ModelRouter:
 
     def select(self, model, *args, **kwargs):
         return self._for(model).select(model, *args, **kwargs)
+
+    def read_capture(self, model, mime, data):
+        """캡처에서 메소·조각 수 읽기. 로컬 모델은 이미지를 못 읽으므로 직접 입력하게 한다."""
+        target = self._for(model)
+        if target is self.local or not hasattr(target, 'read_capture'):
+            raise AppError('캡처 읽기는 클라우드 모델(Gemini·Claude·ChatGPT)에서만 돼요. 숫자를 직접 적어 주세요.', 400)
+        return target.read_capture(mime, data)
 
     def __getattr__(self, name):
         return getattr(self.local, name)

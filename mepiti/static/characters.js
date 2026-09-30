@@ -165,3 +165,7 @@ function renderEquipmentDetail(box,item){
     box.append(add);}
   [['잠재능력',item.potential_grade,item.potential],['에디셔널 잠재능력',item.additional_grade,item.additional_potential]].filter(([,grade,lines])=>grade||lines?.length).forEach(([label,grade,lines])=>{const section=el('div','potential '+gradeClass(grade));section.append(el('h4','',label+(grade?' · '+grade:'')));if(lines?.length)lines.forEach(line=>section.append(el('p','',line)));else section.append(el('p','hint','제공된 옵션 없음'));box.append(section);});
 }
+
+// 다른 캐릭터 검색 — 이름으로 프로필을 본다. 관리 목록에는 사용자가 '관리 목록에 추가'를 눌러야 들어간다.
+$('#other-search').onsubmit=e=>{e.preventDefault();const name=e.target.elements.name.value.trim();if(!name)return;
+  showCharacterProfile(name);$('#character-profile').scrollIntoView({behavior:'smooth',block:'start'});};

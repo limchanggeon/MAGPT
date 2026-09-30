@@ -244,6 +244,41 @@ def breakdown(rows):
     return out
 
 
+def hunt_days(rows):
+    """날짜별 재획 합계: {날짜: {total, meso, pieces, flasks, count}}."""
+    days = {}
+    for r in rows:
+        d = days.setdefault(r['day'], {'total': 0.0, 'meso': 0.0, 'pieces': 0, 'flasks': 0.0, 'count': 0})
+        d['total'] += r['total']
+        d['meso'] += r['meso'] or 0
+        d['pieces'] += r['pieces'] or 0
+        d['flasks'] += r['flasks'] or 0
+        d['count'] += 1
+    return days
+
+
+CAPTURE_TYPES = ('image/png', 'image/jpeg', 'image/webp')
+
+
+def read_capture(model, selected, image):
+    """게임 캡처(data URL)에서 인벤토리·창고 메소와 조각 개수를 읽는다. 저장하지 않는다 — 사용자가 확인한 뒤 기록한다."""
+    head, _, data = str(image or '').partition(',')
+    mime = head[5:].split(';')[0] if head.startswith('data:') else ''
+    if mime not in CAPTURE_TYPES or ';base64' not in head or not data:
+        raise AppError('PNG·JPG 캡처 이미지를 붙여 넣어 주세요.')
+    raw, meta = model.read_capture(selected, mime, data)
+    values = {}
+    for k, v in raw.items():
+        if k == 'sol_erda_pieces':
+            # '12+147'(인벤+창고)처럼 나눠 적을 수 있다. 숫자 묶음을 더한다.
+            parts = [int(n) for n in re.findall(r'\d+', (v or '').replace(',', ''))]
+            values[k] = sum(parts) if parts and sum(parts) <= 100000 else None
+        else:
+            amount = parse_price(v) if v else None
+            values[k] = amount if amount is not None and amount <= MAX_MESO else None
+    return {'raw': raw, 'values': values, 'model': meta.get('model') if isinstance(meta, dict) else None}
+
+
 def overview(store, week=None, month=None, limit=200):
     """수익 화면 전체. 고른 주(목요일 시작)·고른 달(달력 기준)의 합계와 캐릭터별, 최근 12주·6개월 흐름, 그 주의 기록 목록.
 
@@ -287,6 +322,9 @@ def overview(store, week=None, month=None, limit=200):
                     'first_day': rows[-1]['day'] if rows else None},
             'weeks': weeks, 'months': months,
             'hunts': [r for r in in_week if r['kind'] == 'hunt'][:limit],
+            # 재획 달력: 고른 달의 재획 기록과 날짜별 합계(화면이 목요일 시작 주로 칸을 나눈다)
+            'month_hunts': [r for r in in_month if r['kind'] == 'hunt'][:limit * 3],
+            'hunt_days': hunt_days(r for r in in_month if r['kind'] == 'hunt'),
             'bosses': [r for r in in_week if r['kind'] == 'boss'][:limit],
             'characters': [c['name'] for c in choices], 'character_choices': choices,
             'default_character': default_character, 'account_loaded': bool(store.setting(ACCOUNT_CHARACTERS)),

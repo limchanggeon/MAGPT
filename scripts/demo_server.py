@@ -66,6 +66,13 @@ class FakeGemini:
     def select(self, model, question, passages):
         return [0], {}
 
+    def read_capture(self, mime, data):
+        # 데모: 부를 때마다 사냥 전·후를 번갈아 흉내 낸다(실제 이미지를 읽지 않는다).
+        self.captures = getattr(self, 'captures', 0) + 1
+        more = self.captures % 2 == 0
+        return {'inventory_meso': '2764만 4807' if not more else '15억 2764만 4807', 'storage_meso': '11억',
+                'sol_erda_pieces': '147' if not more else '189', 'maple_points': None}, {'model': 'demo'}
+
 
 class FakePaidCloud:
     """실제 회사를 부르지 않는 Claude·ChatGPT. 'sk-bad'로 시작하는 키는 거절한 것처럼 응답한다."""

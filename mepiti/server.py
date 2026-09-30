@@ -348,6 +348,8 @@ class Application:
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
             if path == '/api/goals/meso': return goals.meso_plan(s, data.get('target'), data.get('current'))
             if path == '/api/goals/exp': return goals.exp_plan(s, self.nexon, required(data,'name',30))
+            if path == '/api/earnings/capture':
+                return earnings.read_capture(self.model, s.setting('model'), required(data, 'image', 8_100_000))
             if path == '/api/earnings/piece-price': return earnings.piece_price(s, self.auction, bool(data.get('refresh')))
             if path == '/api/earnings/scheduler':
                 names = [c['name'] for c in s.characters()]

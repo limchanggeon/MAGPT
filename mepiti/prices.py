@@ -134,9 +134,12 @@ def parse_price(text):
             total += float(found.group(1)) * scale
             matched = True
             cleaned = cleaned[:found.start()] + ' ' + cleaned[found.end():]
-    if matched:
-        return total or None
     plain = re.findall(r'\d+(?:\.\d+)?', cleaned)
+    if matched:
+        # '2764만 4807'처럼 만 아래 자리가 붙은 표기(게임 화면의 메소 표시). 남은 숫자가 하나이고 1만보다 작으면 더한다.
+        if len(plain) == 1 and float(plain[0]) < 10000:
+            total += float(plain[0])
+        return total or None
     if len(plain) == 1 and float(plain[0]) > 0:
         return float(plain[0])
     return None

@@ -294,7 +294,7 @@ async function loadEarnings(){
    .forEach(([label,value,sub])=>{const c=el('div','earnings-stat');c.append(el('span','',label),el('strong','',mesoText(value)),el('small','',sub));box.append(c);});
   $('#week-chars-title').textContent=`캐릭터별 · ${w.current?'이번 주':weekText}`;$('#month-chars-title').textContent=`캐릭터별 · ${m.current?'이번 달':monthText(m.month)}`;
   characterTable($('#week-characters'),w,'이 주에는 기록이 없습니다.');characterTable($('#month-characters'),m,'이 달에는 기록이 없습니다.');
-  renderTrend(d);
+  renderTrend(d);renderCalendar(d);
   $('#hunt-list-title').textContent=`재획 기록 · ${weekText}`;$('#boss-list-title').textContent=`주보 기록 · ${weekText}`;
   const who=(r)=>r.character?` · ${r.character}`:'';
   const hunts=$('#hunt-list');hunts.replaceChildren();
@@ -322,6 +322,99 @@ function earningsForm(id,kind,after){
     after();await loadEarnings();toast('기록을 저장했습니다.');});};
 }
 earningsForm('hunt-form','hunt',huntPreview);
+// 수익 하위 탭 — 요약 · 재획(달력·캡처) · 주보.
+let earnTab='summary';
+function showEarnTab(name){earnTab=name;$$('.earn-tabs button').forEach(b=>{const on=b.dataset.earn===name;b.classList.toggle('active',on);b.setAttribute('aria-selected',on?'true':'false');});
+  ['summary','hunt','boss'].forEach(n=>$('#earn-'+n).hidden=n!==name);}
+$$('.earn-tabs button').forEach(b=>b.onclick=()=>showEarnTab(b.dataset.earn));
+// 정확한 금액 표기(입력 칸 채우기용): 1234567890 -> '12억 3456만 7890'
+function exactAmount(v){v=Math.round(Math.abs(v));const parts=[];[[1e12,'조'],[1e8,'억'],[1e4,'만']].forEach(([s,u])=>{const n=Math.floor(v/s);if(n){parts.push(n+u);v-=n*s;}});if(v||!parts.length)parts.push(String(v));return parts.join(' ');}
+function shortAmount(v){if(!v)return '';if(v>=1e8)return (Math.round(v/1e7)/10)+'억';if(v>=1e4)return Math.round(v/1e4)+'만';return fmt(v);}
+// 재획 달력: 고른 달을 목요일 시작 주로 나눈다. 칸에는 그날 재획 합계·재획비, 오른쪽 끝은 주 합계. 날짜를 누르면 그날 기록을 보고 그 날짜로 적는다.
+let calendarDay='';
+function renderCalendar(d){
+  const box=$('#hunt-calendar');if(!box)return;box.replaceChildren();
+  const days=d.hunt_days||{},m=d.month,first=m.start,last=m.end;
+  $('#calendar-title').textContent=`재획 달력 · ${monthText(m.month)}`;
+  const monthTotal=Object.values(days).reduce((s,x)=>s+x.total,0),flasks=Object.values(days).reduce((s,x)=>s+x.flasks,0);
+  $('#calendar-total').textContent=`이 달 재획 ${mesoText(monthTotal)}`+(flasks?` · 재획비 ${fmt(flasks)}개`:'');
+  ['목','금','토','일','월','화','수','주 합계'].forEach(w=>box.append(el('div','cal-head',w)));
+  const dow=new Date(first+'T00:00:00').getDay();let cursor=addDays(first,-((dow-4+7)%7));const today=todayText();
+  while(cursor<=last){
+    let week=0;
+    for(let i=0;i<7;i++){
+      const day=cursor,inMonth=day>=first&&day<=last,info=days[day];
+      const cell=el('button','cal-cell'+(inMonth?'':' outside')+(info?' has':'')+(day===today?' today':'')+(day===calendarDay?' selected':''));cell.type='button';
+      cell.append(el('span','cal-date',String(Number(day.slice(8)))));
+      if(info){week+=info.total;cell.append(el('strong','',shortAmount(info.total)));if(info.flasks)cell.append(el('small','',`재획비 ${fmt(info.flasks)}`));}
+      cell.title=info?`${day} · ${mesoText(info.total)} · ${info.count}회`:day;
+      cell.disabled=day>today;
+      cell.onclick=()=>{calendarDay=day;renderCalendar(d);};
+      box.append(cell);cursor=addDays(cursor,1);
+    }
+    box.append(el('div','cal-week',week?shortAmount(week):''));
+  }
+  renderCalendarDay(d);
+}
+function renderCalendarDay(d){
+  const box=$('#calendar-day');box.replaceChildren();if(!calendarDay)return;
+  const rows=(d.month_hunts||[]).filter(r=>r.day===calendarDay);
+  const head=el('div','earnings-head');head.append(el('strong','',`${calendarDay} 재획`));
+  const add=el('button','secondary','이 날짜로 기록');add.type='button';
+  add.onclick=()=>{$('#hunt-form').elements.day.value=calendarDay;$('#hunt-form').scrollIntoView({behavior:'smooth',block:'center'});};
+  head.append(add);box.append(head);
+  if(!rows.length){box.append(el('p','hint',calendarDay>=d.month.start&&calendarDay<=d.month.end?'이 날은 재획 기록이 없습니다.':'다른 달의 날짜입니다. ◀ ▶로 그 달을 보세요.'));return;}
+  rows.forEach(r=>box.append(earningsRow(r,'재획'+(r.character?` · ${r.character}`:'')+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
+    `메소 ${mesoText(r.meso)}`+(r.pieces?` + 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)}`:''))));
+}
+// 캡처로 입력 — 사냥 전·후 캡처를 클라우드 모델이 읽고(메소·조각), 차이를 재획 기록 칸에 채운다. 저장은 사용자가 확인하고 누른다.
+const captures={before:null,after:null};let captureSlot='before';
+function captureReport(){
+  const out=$('#capture-result'),b=captures.before?.values,a=captures.after?.values;
+  const line=(v)=>[v.inventory_meso!=null?`인벤 ${exactAmount(v.inventory_meso)}`:null,v.storage_meso!=null?`창고 ${exactAmount(v.storage_meso)}`:null,v.sol_erda_pieces!=null?`조각 ${fmt(v.sol_erda_pieces)}개`:'조각 못 찾음'].filter(Boolean).join(' · ');
+  $$('.capture-slot').forEach(s=>{const c=captures[s.dataset.slot];const body=s.querySelector('.capture-body');
+    if(c&&c.values)body.textContent=line(c.values);else if(c&&c.loading)body.textContent='읽는 중…';else body.textContent='여기를 누르고 붙여 넣기';
+    s.classList.toggle('filled',!!(c&&c.values));s.classList.toggle('active',s.dataset.slot===captureSlot);});
+  $('#capture-apply').disabled=true;out.textContent='';
+  if(!(b&&a))return;
+  const both=(k)=>b[k]!=null&&a[k]!=null;
+  const meso=both('inventory_meso')?(a.inventory_meso-b.inventory_meso)+(both('storage_meso')?a.storage_meso-b.storage_meso:0):null;
+  const pieces=both('sol_erda_pieces')?a.sol_erda_pieces-b.sol_erda_pieces:null;
+  captures.diff={meso,pieces};
+  out.textContent=(meso!=null?`번 메소 ${meso<0?'-':''}${exactAmount(meso)}`:'메소 차이를 못 구했어요(두 캡처에 인벤 메소가 보여야 해요)')
+    +(pieces!=null?` · 조각 ${pieces>=0?'+':''}${fmt(pieces)}개`:' · 조각 차이 없음(한쪽에서 못 찾음)')
+    +(both('storage_meso')?' · 창고 메소 변화 포함':'')+(meso!=null&&meso<0?' — 메소가 줄었어요. 캡처 순서를 확인하세요.':'');
+  $('#capture-apply').disabled=!(meso>0||pieces>0);
+}
+async function readCaptureFile(file,slot){
+  if(!file||!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('PNG·JPG 이미지를 넣어 주세요.');
+  let url=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file);});
+  if(url.length>7_500_000){ // 너무 크면 JPEG로 다시 담는다(서버 요청 한도 8MB)
+    const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=url;});
+    const scale=Math.min(1,2560/Math.max(img.width,img.height)),c=document.createElement('canvas');c.width=img.width*scale;c.height=img.height*scale;
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);url=c.toDataURL('image/jpeg',0.92);}
+  captures[slot]={loading:true};captureReport();
+  try{captures[slot]=await api('earnings/capture',{image:url});}catch(e){captures[slot]=null;captureReport();throw e;}
+  if(slot==='before'&&!captures.after)captureSlot='after';
+  captureReport();
+}
+$$('.capture-slot').forEach(s=>{
+  s.onclick=()=>{captureSlot=s.dataset.slot;captureReport();};
+  s.ondblclick=()=>{captureSlot=s.dataset.slot;$('#capture-file').click();};
+  s.ondragover=e=>{e.preventDefault();s.classList.add('drag');};s.ondragleave=()=>s.classList.remove('drag');
+  s.ondrop=e=>{e.preventDefault();s.classList.remove('drag');captureSlot=s.dataset.slot;guard(()=>readCaptureFile(e.dataTransfer.files[0],s.dataset.slot));};
+});
+$('#capture-file').onchange=()=>{const f=$('#capture-file').files[0];$('#capture-file').value='';if(f)guard(()=>readCaptureFile(f,captureSlot));};
+document.addEventListener('paste',e=>{
+  if($('#earn-hunt').hidden||$('#view-calculator').hidden)return;
+  if(e.target.closest&&e.target.closest('input,textarea'))return;
+  const item=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(!item)return;
+  e.preventDefault();guard(()=>readCaptureFile(item.getAsFile(),captureSlot));
+});
+$('#capture-apply').onclick=()=>{const f=$('#hunt-form').elements,d=captures.diff||{};
+  if(d.meso>0)f.meso.value=exactAmount(d.meso);if(d.pieces>0)f.pieces.value=d.pieces;
+  if(!f.day.value)f.day.value=todayText();huntPreview();toast('캡처 차이를 채웠어요. 확인한 뒤 저장하세요.');f.meso.focus();};
+$('#capture-reset').onclick=()=>{captures.before=captures.after=captures.diff=null;captureSlot='before';captureReport();};
 // 보스별로 기억한 결정석 가격을 직접 입력 칸에도 채운다.
 let bossPrices={};
 // 주보 체크리스트 — 보스 이름별 한 줄, 난이도마다 체크박스. 같은 보스는 한 난이도만 고른다.
@@ -511,8 +604,8 @@ $('#price-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
 function parsePrice(text){
   if(!text)return null;let c=String(text).replaceAll(',','').trim().replace(/(\d+(?:\.\d+)?)\s*천/g,(_,n)=>String(parseFloat(n)*1000));let total=0,hit=false;
   [['조',1e12],['억',1e8],['만',1e4]].forEach(([u,scale])=>{
-    const m=c.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*'+u));if(m){total+=parseFloat(m[1])*scale;hit=true;}});
-  if(hit)return total;
+    const m=c.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*'+u));if(m){total+=parseFloat(m[1])*scale;hit=true;c=c.replace(m[0],' ');}});
+  if(hit){const rest=c.match(/\d+(?:\.\d+)?/g)||[];if(rest.length===1&&parseFloat(rest[0])<10000)total+=parseFloat(rest[0]);return total;}  // '2764만 4807'
   return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
 }
 // 업데이트 — 새 버전이 있으면 위쪽에 알린다. '업데이트'를 누르면 받아서 확인한 뒤 업데이터가 바꾸고 다시 켠다.
