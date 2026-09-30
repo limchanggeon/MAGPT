@@ -253,6 +253,8 @@ class Nexon:
 
     def get(self, path, query):
         if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce','ranking/overall',
+                        'character/set-effect','character/symbol-equipment','character/hyper-stat','user/union-artifact','user/union-champion',
+                        'character/pet-equipment','character/skill','character/hexamatrix-stat',
                         'notice','notice/detail','notice-update','notice-update/detail',
                         'notice-event','notice-event/detail','notice-cashshop','notice-cashshop/detail'):
             raise AppError('허용되지 않은 API입니다.')
