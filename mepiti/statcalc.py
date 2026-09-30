@@ -140,8 +140,8 @@ def skill_sources(ledger, skills):
                 ledger.add('MATT', '스킬', name, int(m[1]), 'pct' if m[2] else 'flat')
 
 
-def build(raw):
-    """raw = {API 경로: 응답, 'skills': [스킬...]} → Ledger."""
+def build(raw, tables=None):
+    """raw = {API 경로: 응답, 'skills': [스킬...]} → Ledger. tables: 착용하지 않은 세트의 단계표(배운 것)."""
     ledger = Ledger()
     ledger.anima = 0
     stat = {x['stat_name']: x['stat_value'] for x in (raw['character/stat'].get('final_stat') or [])}
@@ -163,6 +163,9 @@ def build(raw):
         for o in s.get('set_effect_info') or []:
             for k, v, pct in split_stats(o.get('set_option') or ''):
                 ledger.add(k, '세트', f"{s['set_name']} {o['set_count']}세트", v, 'pct' if pct else 'flat')
+    for set_name, full in (tables or {}).items():
+        if set_name not in ledger.sets and full:
+            ledger.sets[set_name] = {'count': 0, 'full': full, 'verified': False, 'lucky': False}
     ledger.items = equipment.get('item_equipment') or []
     verify_sets(ledger, ledger.items)
     for y in raw['character/symbol-equipment'].get('symbol') or []:
@@ -290,11 +293,25 @@ SET_MEMBERS = {
     '여명의 보스 세트': ('트와일라이트 마크', '에스텔라 이어링', '데이브레이크 펜던트', '여명의 가디언 엔젤 링'),
     '루타비스 세트': ('하이네스', '이글아이', '트릭스터'),
 }
-LUCKY = ('제네시스',)        # 럭키 아이템: 3세트 이상 효과가 있는 방어구 세트마다 1개로 센다(API 세트 수로 대조)
+LUCKY = ('제네시스',)
+# 럭키 아이템(제네시스 무기) 규칙 — 사용자 설명(2026-10-01)과 세 캐릭터 API 세트 수가 일치:
+#   - 제네시스 무기 자체는 에테르넬 세트 1개로 센다.
+#   - 다른 방어구 세트는 3개 이상 착용하면 1개를 더 센다. 장신구 세트(보스 장신구·칠흑·여명·광휘)는 제외.
+LUCKY_SET = '에테르넬'
+LUCKY_MIN = 3
+ACCESSORY_SETS = ('보스 장신구', '칠흑의 보스', '여명의 보스', '광휘의 보스')
+SET_TABLES = 'set_tables'     # 비슷한 유저에게서 배운 세트 단계표 {세트 이름: set_option_full}
 
 
 def is_lucky(item_name):
     return (item_name or '').startswith(LUCKY)
+
+
+def set_count(set_name, pieces, lucky_worn):
+    """착용 개수 → 세트 수(럭키 아이템 포함)."""
+    bonus = (lucky_worn and pieces >= LUCKY_MIN and not set_name.startswith(ACCESSORY_SETS)
+             and not set_name.startswith(LUCKY_SET))
+    return pieces + (1 if bonus else 0)
 
 
 def set_key(set_name):
@@ -305,6 +322,8 @@ def set_key(set_name):
 def set_of(item_name, set_names):
     """장비가 속한 세트(캐릭터가 아는 세트 이름 중에서). 모르면 None."""
     name = item_name or ''
+    if is_lucky(name):
+        return next((s for s in set_names if s.startswith(LUCKY_SET)), None)
     for set_name in set_names:
         members = next((v for k, v in SET_MEMBERS.items() if set_name.startswith(k)), None)
         if members:
@@ -321,17 +340,16 @@ def verify_sets(ledger, items):
     """규칙으로 센 세트 수가 API 세트 수와 같으면(럭키 아이템 1개 포함 가능) 그 세트를 믿는다."""
     names = list(ledger.sets)
     lucky = any(is_lucky(i.get('item_name')) for i in items)
+    ledger.lucky = lucky
     counts = {}
     for i in items:
         s = set_of(i.get('item_name'), names)
         if s:
             counts[s] = counts.get(s, 0) + 1
     for name, info in ledger.sets.items():
-        mine = counts.get(name, 0)
-        if mine == info['count']:
-            info['verified'] = True
-        elif lucky and mine + 1 == info['count']:
-            info['verified'] = info['lucky'] = True
+        info['pieces'] = counts.get(name, 0)
+        info['verified'] = set_count(name, info['pieces'], lucky) == info['count']
+        info['lucky'] = info['verified'] and info['count'] > info['pieces']
 
 
 def set_bonus(full, count):
@@ -358,8 +376,6 @@ def set_change(ledger, old_item, new_item):
     old_set = set_of((old_item or {}).get('item_name'), names)
     new_set = set_of((new_item or {}).get('item_name'), names)
     change = {'stats': {}, 'boss': 0, 'ied_add': [], 'ied_remove': [], 'notes': [], 'unknown': []}
-    if is_lucky((old_item or {}).get('item_name')) != is_lucky((new_item or {}).get('item_name')):
-        change['unknown'].append('럭키 아이템(제네시스 무기)을 바꾸면 여러 세트 수가 함께 바뀌는데, 이건 아직 계산하지 않았어요')
     if old_set == new_set:
         return change
     for set_name in (old_set, new_set):
@@ -371,7 +387,10 @@ def set_change(ledger, old_item, new_item):
         if not set_name:
             continue
         info = sets[set_name]
-        a, b = set_bonus(info['full'], info['count']), set_bonus(info['full'], info['count'] + step)
+        lucky = getattr(ledger, 'lucky', False)
+        before = set_count(set_name, info['pieces'], lucky)
+        after = set_count(set_name, info['pieces'] + step, lucky)
+        a, b = set_bonus(info['full'], before), set_bonus(info['full'], after)
         for k in set(a['stats']) | set(b['stats']):
             fa, pa = a['stats'].get(k, (0, 0))
             fb, pb = b['stats'].get(k, (0, 0))
@@ -385,10 +404,10 @@ def set_change(ledger, old_item, new_item):
             else:
                 change['ied_remove'].append(x)
         change['ied_add'] += extra
-        change['notes'].append(f"{set_name} {info['count']}→{info['count'] + step}세트")
+        change['notes'].append(f"{set_name} {before}→{after}세트")
     new_name = (new_item or {}).get('item_name') or ''
     if new_item and not new_set and re.search(r'에테르넬|아케인셰이드|앱솔랩스|도전자|루타비스|하이네스|이글아이|트릭스터', new_name):
-        change['unknown'].append(new_name + '의 세트(지금 착용하지 않은 세트라 단계표를 모름)')
+        change['unknown'].append(new_name + '의 세트(단계표를 아직 못 배움 — 그 세트를 끼는 비교 유저를 모으면 채워짐)')
     return change
 
 
@@ -517,7 +536,7 @@ def load(store, get, name, refresh=False, fetch_missing=True, sleep=None):
         db.executescript(CACHE)
     row = store.rows('SELECT day, data FROM stat_raw WHERE name=?', (name,))
     if row and row[0]['day'] == day and not refresh:
-        return build(json.loads(row[0]['data']))
+        return build(json.loads(row[0]['data']), store.setting(SET_TABLES) or {})
     if not fetch_missing:
         return None
     raw = fetch(get, name, sleep)
@@ -525,4 +544,33 @@ def load(store, get, name, refresh=False, fetch_missing=True, sleep=None):
         db.execute('INSERT INTO stat_raw(name, day, data) VALUES(?,?,?) '
                    'ON CONFLICT(name) DO UPDATE SET day=excluded.day, data=excluded.data',
                    (name, day, json.dumps(raw, ensure_ascii=False)))
-    return build(raw)
+    return build(raw, store.setting(SET_TABLES) or {})
+
+
+def learn_sets(store, set_effect):
+    """다른 캐릭터의 세트 응답에서 단계표를 배워 둔다. 새로 배운 세트 이름 목록을 돌려준다."""
+    tables = store.setting(SET_TABLES) or {}
+    added = []
+    for s in (set_effect or {}).get('set_effect') or []:
+        name, full = s.get('set_name'), s.get('set_option_full')
+        if name and full and name not in tables:
+            tables[name] = full
+            added.append(name)
+    if added:
+        store.set_setting(SET_TABLES, tables)
+    return added
+
+
+FAMILIES = re.compile(r'^(에테르넬|아케인셰이드|앱솔랩스|도전자의|하이네스|이글아이|트릭스터)')
+
+
+def unknown_sets(items, known):
+    """세트 장비인데 단계표를 모르는 것이 있는가(비교 유저의 세트 응답을 받을지 정할 때)."""
+    names = list(known)
+    for i in items or []:
+        name = i.get('item_name') or ''
+        if FAMILIES.match(name) and not set_of(name, names):
+            return True
+        if any(name.startswith(m) for v in SET_MEMBERS.values() for m in v) and not set_of(name, names):
+            return True
+    return False

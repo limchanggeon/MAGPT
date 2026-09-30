@@ -101,7 +101,27 @@ class SetAndBossTests(unittest.TestCase):
 
     def test_lucky_item_verifies_armor_sets(self):
         ledger, _ = self.ledger()
-        self.assertTrue(all(s['verified'] and s['lucky'] for s in ledger.sets.values()))
+        self.assertTrue(all(s['verified'] for s in ledger.sets.values()))
+        self.assertTrue(ledger.sets['도전자의 장비 세트(전사)']['lucky'])        # 5개 착용(3개 이상) → +1
+        self.assertEqual(ledger.sets['에테르넬 세트(전사)']['pieces'], 3)       # 2개 + 제네시스 무기
+
+    def test_lucky_needs_three_pieces_and_skips_accessory_sets(self):
+        self.assertEqual(sc.set_count('아케인셰이드 세트(전사)', 2, True), 2)
+        self.assertEqual(sc.set_count('아케인셰이드 세트(전사)', 3, True), 4)
+        self.assertEqual(sc.set_count('보스 장신구 세트', 5, True), 5)
+        self.assertEqual(sc.set_count('에테르넬 세트(전사)', 3, True), 3)
+
+    def test_learned_table_for_unworn_set(self):
+        ledger, items = self.ledger()
+        tables = {'아케인셰이드 세트(전사)': [{'set_count': 2, 'set_option': '공격력  +30'}]}
+        ledger = sc.build({**raw(ledger.final, items, **{'character/set-effect': {'set_effect': [
+            {'set_name': k, 'total_set_count': c, 'set_option_full': v, 'set_effect_info': []}
+            for (k, v), c in zip(self.FULL.items(), (6, 3))]}})}, tables)
+        new = copy.deepcopy(items[1])
+        new['item_name'] = '아케인셰이드 나이트팬츠'
+        change = sc.set_change(ledger, items[1], new)
+        self.assertIn('아케인셰이드 세트(전사) 0→1세트', change['notes'])     # 1개로는 세트 효과 없음
+        self.assertEqual(change['unknown'], [])
 
     def test_set_change_when_moving_a_piece(self):
         ledger, items = self.ledger()

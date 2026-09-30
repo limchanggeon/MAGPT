@@ -1,7 +1,10 @@
-"""비슷한 유저 장비 통계 — 같은 직업·비슷한 레벨 유저들은 부위마다 무엇을 끼고 어디까지 강화했나.
+"""목표 전투력대 유저 장비 통계 — 같은 직업에서 내가 목표로 하는 전투력(예: 2억 5천만)대 유저들은 부위마다 무엇을 끼나.
 
-넥슨 Open API 랭킹(직업별 레벨 순)에서 내 캐릭터 근처 순위의 같은 직업 유저를 고르고, 한 명씩 천천히
-장비를 조회해 요약만 저장한다(이름은 저장하지 않는다). 한도에 걸리지 않게:
+넥슨 Open API에는 전투력 랭킹이 없다. 레벨 순 랭킹은 전투력과 거의 안 맞고(2026-10-01 실측: 1쪽 1.29억, 24쪽 1.9억),
+무릉도장 층수 랭킹이 훨씬 잘 맞는다(92층 4.6억, 74~79층 1.1~1.3억, 52~61층 0.9~1.0억). 그래서 직업의 무릉 랭킹 전체를 후보로 두고,
+층마다 몇 명의 전투력을 찍어 목표 전투력에 해당하는 층을 어림한 뒤, 그 층에 가까운 사람부터 확인해 목표 ±CP_BAND 안인 사람만
+장비를 저장한다(이름은 저장하지 않는다; 확인한 전투력은 이름의 해시로 캐시).
+세트 단계표는 비교 유저의 세트 응답에서 배운다(statcalc.learn_sets). 한도에 걸리지 않게:
   - 이 기능은 하루 DAILY_CALLS회까지만 부른다(넥슨 키의 다른 기능 몫을 남긴다).
   - 호출 사이 GAP_SECONDS초 이상 쉰다.
   - 429(한도 초과)를 받으면 그날은 멈춘다.
@@ -22,11 +25,17 @@ CREATE TABLE IF NOT EXISTS peers(
   ocid TEXT PRIMARY KEY, job TEXT NOT NULL, level INTEGER, world_type INTEGER,
   fetched_at TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS peers_job ON peers(job);
+CREATE TABLE IF NOT EXISTS peer_power(key TEXT PRIMARY KEY, ocid TEXT, cp REAL, at TEXT NOT NULL);
 '''
+DOJANG_PAGES = 5              # 무릉 랭킹에서 볼 최대 쪽 수(쪽당 200명)
+PROBE_COUNT = 6               # 층-전투력 관계를 어림할 표본 수
+CP_BAND = 0.15                # 목표 전투력 ±15%
+PROBES = 7                    # 목표 전투력 쪽 찾기에서 볼 랭킹 쪽 수(쪽마다 2명 확인)
+DAILY_SETTING = 'peer_daily_calls'
 TARGET = 'peer_target'        # {job, level, world_type, rank, at} — 마지막으로 고른 기준
 QUEUE = 'peer_queue'          # 아직 장비를 보지 않은 후보 [{name, level}]
 CALLS = 'peer_calls'          # {day, count, blocked}
-DAILY_CALLS = 60
+DAILY_CALLS = 120             # 넥슨 개발 키 하루 한도(약 1,000회로 알려짐, 미확인) 중 이 기능 몫. 설정 peer_daily_calls로 바꿀 수 있다.
 GAP_SECONDS = 3
 KEEP_DAYS = 14
 LEVEL_BAND = 3                # 후보: 내 레벨 ±3
@@ -41,6 +50,43 @@ NO_STARFORCE_SLOTS = ('보조무기', '엠블렘', '뱃지', '훈장', '포켓 �
 def ensure(store):
     with store.db() as db:
         db.executescript(SCHEMA)
+        if 'cp' not in [r['name'] for r in db.execute('PRAGMA table_info(peers)')]:
+            db.execute('ALTER TABLE peers ADD COLUMN cp REAL')
+
+
+def parse_cp(text):
+    """'2억5천', '2억 5000', '2.5억', '250000000' → 전투력. 억 뒤의 천·숫자는 만 단위로 본다(2억5천 = 2억 5천만)."""
+    import re
+    from .prices import parse_price
+    s = str(text or '').replace(',', '').replace(' ', '')
+    m = re.fullmatch(r'(\d+(?:\.\d+)?)억(?:(\d+)(천)?만?)?', s)
+    if m:
+        value = float(m[1]) * 1e8
+        if m[2]:
+            value += int(m[2]) * (1000 if m[3] else 1) * 1e4
+        return value
+    value = parse_price(s)
+    return value if value and value >= 1e6 else None
+
+
+def target_floor(points, cp):
+    """(층, 전투력) 표본으로 목표 전투력의 층을 어림한다. 층 순으로 이웃한 두 점 사이를 직선으로 잇고, 범위 밖이면 끝 층."""
+    pts = sorted(points)
+    if not pts:
+        return 0
+    if len(pts) == 1:
+        return pts[0][0]
+    best = min(pts, key=lambda p: abs(p[1] - cp))[0]
+    for (f1, c1), (f2, c2) in zip(pts, pts[1:]):
+        if min(c1, c2) <= cp <= max(c1, c2) and c1 != c2:
+            best = f1 + (cp - c1) * (f2 - f1) / (c2 - c1)
+    if cp > max(c for _, c in pts):
+        best = max(pts, key=lambda p: p[1])[0]
+    return round(best)
+
+
+def in_band(cp, target):
+    return cp is not None and target and abs(cp - target) <= target * CP_BAND
 
 
 def today():
@@ -112,7 +158,7 @@ class Peers:
 
     def get(self, path, query):
         if self.left() <= 0:
-            raise AppError('오늘 비슷한 유저 조회 몫을 다 썼어요. 내일 이어서 모읍니다.', 429)
+            raise AppError('오늘 목표 전투력대 유저 조회 몫을 다 썼어요. 내일 이어서 모읍니다.', 429)
         wait = GAP_SECONDS - (time.monotonic() - self.last_call)
         if wait > 0:
             self.sleep(wait)
@@ -129,60 +175,107 @@ class Peers:
             raise
 
     # 후보 고르기 ---------------------------------------------------------
-    def choose(self, name):
-        """내 캐릭터의 직업 랭킹 순위 근처에서 같은 직업·비슷한 레벨 후보를 큐에 넣는다(넥슨 호출 4회)."""
+    def power(self, name):
+        """이름 → (ocid, 전투력). 7일 안에 확인한 사람은 캐시(이름 해시)에서, 아니면 2회."""
+        import hashlib
+        key = hashlib.sha256(name.encode()).hexdigest()
+        hit = self.store.rows('SELECT ocid, cp FROM peer_power WHERE key=? AND at>=?',
+                              (key, (datetime.now(KST) - timedelta(days=7)).isoformat(timespec='seconds')))
+        if hit:
+            return hit[0]['ocid'], hit[0]['cp']
+        ocid = self.get('id', {'character_name': name}).get('ocid')
+        if not ocid:
+            return None, None
+        final = self.get('character/stat', {'ocid': ocid}).get('final_stat') or []
+        cp = next((x.get('stat_value') for x in final if x.get('stat_name') == '전투력'), None)
+        try:
+            cp = float(str(cp).replace(',', '')) if cp is not None else None
+        except ValueError:
+            cp = None
+        with self.store.db() as db:
+            db.execute('INSERT OR REPLACE INTO peer_power(key, ocid, cp, at) VALUES(?,?,?,?)', (key, ocid, cp, now()))
+        return ocid, cp
+
+    def choose(self, name, cp):
+        """목표 전투력대 후보를 큐에 넣는다. 무릉 랭킹(층 순)을 후보로, 표본 몇 명의 전투력으로 목표 층을 어림한다(약 20회)."""
+        if not cp or cp < 1e6:
+            raise AppError("목표 전투력을 '2억5천'처럼 적어 주세요.")
         ocid = self.get('id', {'character_name': name}).get('ocid')
         if not ocid:
             raise AppError('캐릭터 식별자를 확인하지 못했습니다.', 502)
         mine = (self.get('ranking/overall', {'date': yesterday(), 'ocid': ocid}).get('ranking') or [None])[0]
         if not mine or not mine.get('class_name'):
             raise AppError('랭킹에서 이 캐릭터를 찾지 못했어요(랭킹은 전날 기준이라 새 캐릭터는 하루 뒤에 나와요).', 404)
-        # 직업 값은 '계열-전직'(전사-히어로). 전직이 없는 직업(렌 등)은 같은 이름을 두 번 쓴다(렌-렌).
         job = f"{mine['class_name']}-{mine.get('sub_class_name') or mine['class_name']}"
-        world_type = 1 if mine.get('world_name') in REBOOT_WORLDS else 0
-        level = int(mine.get('character_level') or 0)
-        # 위 순위는 전체 순위다. 직업을 넣어 직업 안 순위를 다시 받는다.
-        in_job = (self.get('ranking/overall', {'date': yesterday(), 'ocid': ocid, 'class': job}).get('ranking') or [None])[0]
-        rank = int((in_job or {}).get('ranking') or 1)
-        page = max(1, math.ceil(rank / 200))
-        found = self.get('ranking/overall', {'date': yesterday(), 'class': job, 'page': page}).get('ranking') or []
-        fresh = {r['ocid'] for r in self.store.rows(
-            'SELECT ocid FROM peers WHERE job=? AND fetched_at>=?', (job, since()))}
-        pool = [r for r in found if isinstance(r, dict) and r.get('character_name') and r.get('character_name') != name
-                and abs(int(r.get('character_level') or 0) - level) <= LEVEL_BAND]
-        pool.sort(key=lambda r: abs(int(r.get('character_level') or 0) - level))
-        queue = [{'name': r['character_name'], 'level': int(r['character_level'])} for r in pool][:MAX_QUEUE]
-        self.store.set_setting(TARGET, {'job': job, 'level': level, 'world_type': world_type, 'rank': rank, 'at': now(),
-                                        'known': len(fresh)})
+        pool = []
+        for page in range(1, DOJANG_PAGES + 1):
+            rows = self.get('ranking/dojang', {'date': yesterday(), 'difficulty': 1, 'class': job, 'page': page}).get('ranking') or []
+            pool += [{'name': r['character_name'], 'floor': int(r.get('dojang_floor') or 0), 'level': int(r.get('character_level') or 0)}
+                     for r in rows if r.get('character_name') and r['character_name'] != name]
+            if len(rows) < 200:
+                break
+        if len(pool) < PROBE_COUNT:
+            raise AppError('이 직업의 무릉도장 랭킹이 너무 적어 목표 전투력대를 찾기 어려워요.', 404)
+        pool.sort(key=lambda r: -r['floor'])
+        # 층 분포에서 고르게 표본을 뽑아 층-전투력 점을 얻는다.
+        points, hits, probed = [], [], set()
+        for i in range(PROBE_COUNT):
+            r = pool[round(i * (len(pool) - 1) / (PROBE_COUNT - 1))]
+            if r['name'] in probed:
+                continue
+            probed.add(r['name'])
+            p_ocid, p_cp = self.power(r['name'])
+            if p_cp:
+                points.append((r['floor'], p_cp))
+                if in_band(p_cp, cp):
+                    hits.append({**r, 'ocid': p_ocid, 'cp': p_cp})
+        floor = target_floor(points, cp)
+        rest = [r for r in pool if r['name'] not in probed]
+        rest.sort(key=lambda r: abs(r['floor'] - floor))
+        queue = hits + rest[:MAX_QUEUE * 6]
+        self.store.set_setting(TARGET, {'job': job, 'cp': cp, 'band': CP_BAND, 'level': int(mine.get('character_level') or 0),
+                                        'floor': floor, 'points': [{'floor': f, 'cp': c} for f, c in sorted(points)],
+                                        'pool': len(pool), 'screened': 0, 'matched': len(hits), 'at': now()})
         self.store.set_setting(QUEUE, queue)
         return self.status()
 
     # 모으기 --------------------------------------------------------------
     def step(self):
-        """큐에서 한 명의 장비를 본다. 더 할 게 없으면 False."""
+        """큐에서 한 명을 확인한다: 전투력이 목표대면 장비(필요하면 세트 단계표도)를 저장. 더 할 게 없으면 False."""
+        from . import statcalc
         queue = self.store.setting(QUEUE) or []
         target = self.store.setting(TARGET) or {}
-        if not queue or not target or self.left() < 2:
+        if not queue or not target.get('cp') or self.left() < 3:
+            return False
+        if len(stored(self.store, target)) >= MAX_QUEUE:
+            self.store.set_setting(QUEUE, [])          # 충분히 모였다
             return False
         person = queue.pop(0)
         self.store.set_setting(QUEUE, queue)
-        ocid = self.get('id', {'character_name': person['name']}).get('ocid')
-        if not ocid:
+        ocid, cp = person.get('ocid'), person.get('cp')
+        if not cp:
+            ocid, cp = self.power(person['name'])
+            target['screened'] = int(target.get('screened') or 0) + 1
+        if not ocid or not in_band(cp, target['cp']):
+            self.store.set_setting(TARGET, target)
             return True
+        target['matched'] = int(target.get('matched') or 0) + 1
+        self.store.set_setting(TARGET, target)
         if self.store.rows('SELECT 1 FROM peers WHERE ocid=? AND fetched_at>=?', (ocid, since())):
             return True
         from .adapters import Nexon
         equipped = self.get('character/item-equipment', {'ocid': ocid})
         originals = [item for item in (equipped.get('item_equipment') or []) if isinstance(item, dict) and item.get('item_name')]
+        if statcalc.unknown_sets(originals, self.store.setting(statcalc.SET_TABLES) or {}):
+            statcalc.learn_sets(self.store, self.get('character/set-effect', {'ocid': ocid}))
         rows = [Nexon.equipment_item(item, None) for item in originals]
         summary = summarize(rows, originals)
         if summary:
             with self.store.db() as db:
-                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?) '
+                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data,cp) VALUES(?,?,?,?,?,?,?) '
                            'ON CONFLICT(ocid) DO UPDATE SET job=excluded.job, level=excluded.level, '
-                           'fetched_at=excluded.fetched_at, data=excluded.data',
-                           (ocid, target['job'], person['level'], target.get('world_type'), now(),
-                            json.dumps(summary, ensure_ascii=False)))
+                           'fetched_at=excluded.fetched_at, data=excluded.data, cp=excluded.cp',
+                           (ocid, target['job'], person.get('level'), 0, now(), json.dumps(summary, ensure_ascii=False), cp))
         return True
 
     def run(self):
@@ -193,7 +286,7 @@ class Peers:
         except AppError as e:
             self.error = str(e)
         except Exception as e:              # 모으기 실패가 앱을 멈추게 하지 않는다
-            self.error = f'비슷한 유저 조회 중 오류: {e}'
+            self.error = f'목표 전투력대 유저 조회 중 오류: {e}'
 
     def start(self):
         """뒤에서 모으기를 시작한다(이미 돌고 있으면 그대로)."""
@@ -220,9 +313,16 @@ def calls(store):
     return state
 
 
+def daily_calls(store):
+    try:
+        return int(store.setting(DAILY_SETTING) or DAILY_CALLS)
+    except (TypeError, ValueError):
+        return DAILY_CALLS
+
+
 def left(store):
     state = calls(store)
-    return 0 if state.get('blocked') else max(0, DAILY_CALLS - state['count'])
+    return 0 if state.get('blocked') else max(0, daily_calls(store) - state['count'])
 
 
 def since():
@@ -230,19 +330,20 @@ def since():
 
 
 def stored(store, target):
-    """기준(직업·레벨) 근처로 모아 둔 유저 요약들."""
-    if not target:
+    """목표 전투력대(직업 같고 ±CP_BAND)로 모아 둔 유저 요약들. 전투력을 모르는 예전 기록은 쓰지 않는다."""
+    if not target or not target.get('cp'):
         return []
     ensure(store)
-    rows = store.rows('SELECT level, data FROM peers WHERE job=? AND fetched_at>=? AND level BETWEEN ? AND ?',
-                      (target['job'], since(), target['level'] - LEVEL_BAND - 2, target['level'] + LEVEL_BAND + 2))
+    cp = target['cp']
+    rows = store.rows('SELECT data FROM peers WHERE job=? AND fetched_at>=? AND cp BETWEEN ? AND ?',
+                      (target['job'], since(), cp * (1 - CP_BAND), cp * (1 + CP_BAND)))
     return [json.loads(r['data']) for r in rows]
 
 
 def status(store):
     target = store.setting(TARGET) or None
     return {'target': target, 'queue': len(store.setting(QUEUE) or []), 'collected': len(stored(store, target)),
-            'running': False, 'error': None, 'calls_left': left(store), 'daily_calls': DAILY_CALLS, 'min_peers': MIN_PEERS}
+            'running': False, 'error': None, 'calls_left': left(store), 'daily_calls': daily_calls(store), 'min_peers': MIN_PEERS}
 
 
 def slot_stats(people):
@@ -277,7 +378,7 @@ def top_grade(shares):
 
 
 def candidate(people, slot, name):
-    """비슷한 유저가 낀 그 장비 중 스타포스가 중앙인 한 벌(옵션이 저장된 것만)."""
+    """목표 전투력대 유저가 낀 그 장비 중 스타포스가 중앙인 한 벌(옵션이 저장된 것만)."""
     pool = [p[slot]['item'] for p in people if slot in p and p[slot].get('name') == name and p[slot].get('item')]
     if not pool:
         return None
@@ -295,6 +396,8 @@ def simulate(people, stats, ledger):
     for slot, s in stats.items():
         if not s['items'] or slot not in mine:
             continue
+        if statcalc.is_lucky(mine[slot].get('item_name')):
+            continue        # 제네시스 무기는 바꾸지 않는다(해방으로 같은 럭키 아이템을 강화할 뿐)
         pick = candidate(people, slot, s['items'][0]['name'])
         if not pick:
             continue
@@ -308,11 +411,12 @@ def simulate(people, stats, ledger):
 
 
 SIMULATION_NOTE = ('보스 기준은 방어율 300% 보스·크리티컬 항상 발동으로 본 상대값(전투력 아님). 설명되지 않는 스탯(헥사 스탯 등)을 '
-                   '고정치로 볼 때와 %로 볼 때의 두 값을 범위로 보인다. 교체 장비는 비슷한 유저가 낀 그 장비 중 스타포스 중앙인 한 벌.')
+                   '고정치로 볼 때와 %로 볼 때의 두 값을 범위로 보인다. 교체 장비는 목표 전투력대 유저가 낀 그 장비 중 스타포스 중앙인 한 벌. '
+                   '각 줄은 그 부위 하나만 바꿀 때다 — 여러 부위를 함께 바꾸면 세트 효과가 겹쳐 줄들의 합과 다르다. 제네시스 무기는 바꾸지 않는 것으로 본다.')
 
 
 def compare(store, profile, state=None, ledger=None):
-    """내 장비와 비슷한 유저 통계를 부위별로 맞대어, 뒤처진 부위를 고른다. 기준 직업과 다른 캐릭터면 비교하지 않는다."""
+    """내 장비와 목표 전투력대 유저 통계를 부위별로 맞대어, 뒤처진 부위를 고른다. 기준 직업과 다른 캐릭터면 비교하지 않는다."""
     target = store.setting(TARGET) or None
     people = stored(store, target)
     job = str((profile or {}).get('job') or '')
@@ -333,7 +437,7 @@ def compare(store, profile, state=None, ledger=None):
         can_star = slot not in NO_STARFORCE_SLOTS and not (me.get('starforce') in (0, None) and (s['starforce_median'] or 0) <= 5)
         if can_star and isinstance(me.get('starforce'), int) and s['starforce_median'] is not None \
                 and me['starforce'] + 2 <= s['starforce_median']:
-            reasons.append(f"스타포스 {me['starforce']}성 (비슷한 유저 중앙값 {s['starforce_median']:g}성)")
+            reasons.append(f"스타포스 {me['starforce']}성 (목표 전투력대 유저 중앙값 {s['starforce_median']:g}성)")
         # 잠재능력이 아예 없는 장비(시드링 등 특수 반지)는 잠재로 비교하지 않는다(장비를 바꾸는 이야기는 아래 장비 비교가 맡는다).
         common = top_grade(s['potential'])
         if common and me.get('potential') and grade_rank(me.get('potential')) < grade_rank(common):
@@ -382,7 +486,7 @@ def facts_text(compared):
     if not compared.get('ready'):
         return ''
     t = compared['target']
-    lines = [f"[비슷한 유저 장비 통계] 같은 직업({t['job']}) 레벨 {t['level']}±{LEVEL_BAND} 유저 {compared['people']}명의 "
+    lines = [f"[목표 전투력대 유저 장비 통계] 같은 직업({t['job']}) 전투력 {t['cp'] / 1e8:.2f}억 ±{round(CP_BAND * 100)}% 유저 {compared['people']}명의 "
              f"장비를 넥슨 Open API로 모은 통계다(최근 {KEEP_DAYS}일 안에 조회). 이 밖의 유저 경향은 모른다."]
     for s in compared['slots']:
         parts = [', '.join(f"{i['name']} {i['share']}%" for i in s['items'])]
@@ -398,7 +502,7 @@ def facts_text(compared):
     def sim_line(sim):
         extra = (' · 세트 ' + ', '.join(sim['sets'])) if sim['sets'] else ''
         unknown = (' · 모름: ' + '; '.join(sim['unknown'])) if sim['unknown'] else ''
-        what = (f"같은 {sim['item']}를 비슷한 유저 수준({sim['starforce']}성, {', '.join(sim['potential']) or '잠재 없음'})으로 맞추면"
+        what = (f"같은 {sim['item']}를 목표 전투력대 유저 수준({sim['starforce']}성, {', '.join(sim['potential']) or '잠재 없음'})으로 맞추면"
                 if sim.get('same_item') else
                 f"{sim['item']} {sim['starforce']}성({', '.join(sim['potential']) or '잠재 없음'})으로 바꾸면")
         return (f"- {sim['slot']}: {what} "
@@ -409,19 +513,19 @@ def facts_text(compared):
         head.append('[바꾸면 좋아지는 부위] (보스 기준 이득이 큰 순)' if compared['upgrades'] else '[바꾸면 좋아지는 부위] 없음')
         head += [sim_line(s) for s in compared['upgrades']]
         if compared['ahead']:
-            head.append('[바꾸면 오히려 손해인 부위] 비슷한 유저가 많이 끼는 장비보다 지금 장비가 낫다. 이 부위의 교체는 권하지 말 것.')
+            head.append('[바꾸면 오히려 손해인 부위] 목표 전투력대 유저가 많이 끼는 장비보다 지금 장비가 낫다. 이 부위의 교체는 권하지 말 것.')
             head += [sim_line(s) for s in compared['ahead']]
     lines[1:1] = head
     if compared['behind']:
-        lines.append('[비슷한 유저보다 뒤처진 부위] (앞일수록 차이가 크다) '
+        lines.append('[목표 전투력대 유저보다 뒤처진 부위] (앞일수록 차이가 크다) '
                      + '; '.join(f"{b['slot']}: {', '.join(b['reasons'])}" for b in compared['behind']))
     if compared.get('simulated'):
         lines.append('[답변 방법] 교체 시뮬레이션을 가장 먼저 근거로 삼는다. \'바꾸면 좋아지는 부위\'에서 먼저 할 2~3개를 보스 기준 변화율과 함께 권하고, '
-                     '\'손해인 부위\'는 지금 장비를 유지하라고 짧게 말한다(비슷한 유저가 많이 낀다는 이유만으로 권하지 않는다). '
+                     '\'손해인 부위\'는 지금 장비를 유지하라고 짧게 말한다(목표 전투력대 유저가 많이 낀다는 이유만으로 권하지 않는다). '
                      '뒤처진 부위(스타포스·잠재 등급)는 강화 방향으로 덧붙인다. 비용·확률·시세는 위 사실에 없으면 말하지 않는다. '
                      '레벨·심볼·유니온·스킬이 달라서, 같은 장비를 껴도 같은 성능이 된다고 단정하지 않는다.')
     elif compared['behind']:
-        lines.append('[답변 방법] 목록을 그대로 옮기지 말고, 먼저 손댈 부위 2~3개를 골라 비슷한 유저 비율·중앙값을 이유로 들어 '
+        lines.append('[답변 방법] 목록을 그대로 옮기지 말고, 먼저 손댈 부위 2~3개를 골라 목표 전투력대 유저 비율·중앙값을 이유로 들어 '
                      '상담하듯 설명한다. 내 장비가 더 좋은 부위가 있으면 짧게 짚는다. 비용·확률·시세는 위 사실에 없으면 말하지 않는다. '
                      '레벨·심볼·유니온·스킬이 달라서, 같은 장비를 껴도 같은 성능이 된다고 단정하지 않는다.')
     return '\n'.join(lines)

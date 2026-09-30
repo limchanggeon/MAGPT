@@ -252,7 +252,7 @@ class Nexon:
         self.vault = vault
 
     def get(self, path, query):
-        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce','ranking/overall',
+        if path not in ('id','character/basic','character/stat','character/list','character/item-equipment','character/android-equipment','user/union','user/union-raider','scheduler/character-state','history/starforce','ranking/overall','ranking/dojang',
                         'character/set-effect','character/symbol-equipment','character/hyper-stat','user/union-artifact','user/union-champion',
                         'character/pet-equipment','character/skill','character/hexamatrix-stat',
                         'notice','notice/detail','notice-update','notice-update/detail',

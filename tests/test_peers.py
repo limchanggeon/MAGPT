@@ -15,9 +15,19 @@ def equip(slot, name, star, pot='유니크', add='에픽'):
 
 
 class FakeNexon:
-    """랭킹·장비 응답 흉내. 호출 기록을 남긴다."""
+    """무릉 랭킹·전투력·장비 응답 흉내. 호출 기록을 남긴다.
+
+    무릉 랭킹 1쪽에 40명: 이름 'p{층}_{순번}', 층 99~60. 전투력 = (층 - 50) × 1천만 (75층 = 2.5억).
+    """
     def __init__(self, fail=None):
         self.calls, self.fail = [], fail
+
+    @staticmethod
+    def cp_of(name):
+        if name == '나':
+            return 1.5e8
+        floor = int(name[1:].split('_')[0])
+        return (floor - 50) * 1e7
 
     def get(self, path, query):
         self.calls.append((path, dict(query)))
@@ -26,20 +36,25 @@ class FakeNexon:
             error.upstream = 429
             raise error
         if path == 'id':
-            return {'ocid': 'x' + query['character_name'][-1]}   # 실제 ocid처럼 이름이 들어 있지 않게
+            return {'ocid': 'o-' + query['character_name'].replace('p', '')}   # 실제 ocid처럼 이름과 다르게
+        if path == 'character/stat':
+            name = '나' if query['ocid'] == 'o-나' else 'p' + query['ocid'][2:]
+            return {'final_stat': [{'stat_name': '전투력', 'stat_value': str(int(self.cp_of(name)))}]}
         if path == 'ranking/overall' and 'ocid' in query and 'class' not in query:
             return {'ranking': [{'ranking': 67834, 'character_level': 291, 'class_name': '렌', 'sub_class_name': '',
                                  'world_name': '크로아', 'character_name': '나'}]}
         if path == 'ranking/overall' and 'ocid' in query:
-            return {'ranking': [{'ranking': 450, 'character_level': 291, 'class_name': '렌', 'sub_class_name': ''}]}
-        if path == 'ranking/overall':
-            levels = [295, 291, 290, 280, 292, 291, 288]
-            return {'ranking': [{'character_name': f'유저{i}', 'character_level': lv, 'class_name': '렌'}
-                                for i, lv in enumerate(levels)] + [{'character_name': '나', 'character_level': 291}]}
+            return {'ranking': [{'ranking': 3900, 'character_level': 291, 'class_name': '렌', 'sub_class_name': ''}]}
+        if path == 'ranking/dojang':
+            return {'ranking': [{'character_name': f'p{99 - i}_{i}', 'dojang_floor': 99 - i, 'character_level': 290}
+                                for i in range(40)]}
         if path == 'character/item-equipment':
             n = int(query['ocid'][-1])
             return {'item_equipment': [equip('모자', '에테르넬 나이트헬름', 22, '레전드리', '유니크'),
                                        equip('신발', '아케인셰이드 나이트슈즈', 21 + n % 2)]}
+        if path == 'character/set-effect':
+            return {'set_effect': [{'set_name': '아케인셰이드 세트(전사)', 'total_set_count': 1,
+                                    'set_option_full': [{'set_count': 2, 'set_option': '공격력  +30'}]}]}
         raise AssertionError(path)
 
 
@@ -49,43 +64,62 @@ class PeerTests(unittest.TestCase):
         self.nexon = FakeNexon()
         self.peers = peers.Peers(self.store, lambda: self.nexon, sleep=lambda s: None)
 
-    def test_choose_uses_job_rank_page_and_level_band(self):
-        state = self.peers.choose('나')
-        self.assertEqual(state['target']['job'], '렌-렌')              # 전직이 없는 직업은 같은 이름 두 번
-        page = self.nexon.calls[-1][1]
-        self.assertEqual((page['class'], page['page']), ('렌-렌', 3))  # 직업 안 450위 → 3쪽
-        queue = self.store.setting(peers.QUEUE)
-        self.assertEqual([q['level'] for q in queue], [291, 291, 290, 292, 288])   # ±3, 가까운 레벨 먼저, 나 제외
-        self.assertNotIn('나', [q['name'] for q in queue])
-
-    def test_collect_saves_summary_without_names(self):
-        self.peers.choose('나')
+    def collect(self):
+        self.peers.choose('나', 2.5e8)
         while self.peers.step():
             pass
+
+    def test_parse_target_power(self):
+        self.assertEqual(peers.parse_cp('2억5천'), 2.5e8)
+        self.assertEqual(peers.parse_cp('2억 5000'), 2.5e8)
+        self.assertEqual(peers.parse_cp('3.2억'), 3.2e8)
+        self.assertIsNone(peers.parse_cp('많이'))
+
+    def test_choose_estimates_floor_for_target_power(self):
+        state = self.peers.choose('나', 2.5e8)
+        target = state['target']
+        self.assertEqual(target['job'], '렌-렌')
+        self.assertEqual(target['floor'], 75)                              # (75 - 50) × 1천만 = 2.5억
+        queue = self.store.setting(peers.QUEUE)
+        self.assertLessEqual(abs(queue[0]['floor'] - 75), 1)
+        self.assertEqual(len([c for c in self.nexon.calls if c[0] == 'character/stat']), peers.PROBE_COUNT)
+
+    def test_target_floor_interpolates(self):
+        self.assertEqual(peers.target_floor([(60, 1e8), (80, 3e8)], 2e8), 70)
+        self.assertEqual(peers.target_floor([(60, 1e8), (80, 3e8)], 9e8), 80)
+
+    def test_screened_power_is_cached(self):
+        self.peers.power('p70_29')
+        before = len(self.nexon.calls)
+        self.assertEqual(self.peers.power('p70_29')[1], 2e8)
+        self.assertEqual(len(self.nexon.calls), before)
+
+    def test_collect_saves_only_target_band_without_names(self):
+        self.collect()
         rows = self.store.rows('SELECT * FROM peers')
-        self.assertEqual(len(rows), 5)
-        self.assertNotIn('유저', json.dumps([dict(r) for r in rows], ensure_ascii=False))
-        self.assertEqual(json.loads(rows[0]['data'])['모자']['starforce'], 22)
+        self.assertGreaterEqual(len(rows), 5)
+        self.assertTrue(all(peers.in_band(r['cp'], 2.5e8) for r in rows))
+        self.assertNotIn('p7', json.dumps([dict(r) for r in rows], ensure_ascii=False))
+        self.assertIn('아케인셰이드 세트(전사)', self.store.setting('set_tables'))    # 모르는 세트 단계표를 배움
 
     def test_daily_budget_stops_collection(self):
-        self.peers.choose('나')
+        self.peers.choose('나', 2.5e8)
         state = peers.calls(self.store)
-        state['count'] = peers.DAILY_CALLS - 1
+        state['count'] = peers.daily_calls(self.store) - 2
         self.store.set_setting(peers.CALLS, state)
-        self.assertFalse(self.peers.step())                           # 한 명에 2회가 필요하다
-        self.assertEqual(len(self.store.setting(peers.QUEUE)), 5)
+        before = len(self.store.setting(peers.QUEUE))
+        self.assertFalse(self.peers.step())
+        self.assertEqual(len(self.store.setting(peers.QUEUE)), before)
 
     def test_rate_limit_blocks_rest_of_day(self):
-        self.nexon.fail = 6
-        self.peers.choose('나')
+        self.peers.choose('나', 2.5e8)
+        self.nexon.fail = len(self.nexon.calls) + 2
         self.peers.run()
         self.assertEqual(peers.left(self.store), 0)
         self.assertIn('한도', self.peers.error)
 
     def test_compare_flags_slots_behind(self):
-        self.peers.choose('나')
-        while self.peers.step():
-            pass
+        self.collect()
         profile = {'job': '렌', 'equipment': [
             {'slot': '모자', 'name': '하이네스 워리어헬름', 'starforce': 17, 'potential_grade': '에픽', 'additional_grade': '에픽'},
             {'slot': '신발', 'name': '아케인셰이드 나이트슈즈', 'starforce': 22, 'potential_grade': '유니크', 'additional_grade': '에픽'}]}
@@ -93,21 +127,17 @@ class PeerTests(unittest.TestCase):
         self.assertTrue(result['ready'])
         behind = {b['slot']: ' '.join(b['reasons']) for b in result['behind']}
         self.assertIn('중앙값 22성', behind['모자'])
-        self.assertIn('레전드리', behind['모자'])
         self.assertIn('에테르넬 나이트헬름 100%', behind['모자'])
         self.assertNotIn('신발', behind)
         text = peers.facts_text(result)
-        self.assertIn('유저 5명', text)
-        self.assertIn('[비슷한 유저보다 뒤처진 부위]', text)
+        self.assertIn('전투력 2.50억 ±15%', text)
 
     def test_other_job_is_not_compared(self):
-        self.peers.choose('나')
-        while self.peers.step():
-            pass
+        self.collect()
         self.assertFalse(peers.compare(self.store, {'job': '히어로', 'equipment': []})['ready'])
 
     def test_peer_questions_route_to_character(self):
-        for q in ('비슷한 유저랑 비교해줘', '남들은 뭐 끼고 있어?', '뭐부터 바꿔야 해?'):
+        for q in ('비슷한 유저랑 비교해줘', '남들은 뭐 끼고 있어?', '뭐부터 바꿔야 해?', '목표 전투력대랑 비교해줘'):
             self.assertTrue(chat.PEER_INTENT.search(q), q)
         self.assertTrue(chat.CHARACTER_INTENT.search('비슷한 유저랑 비교해줘'))
 
@@ -173,15 +203,15 @@ if __name__ == '__main__':
 class SimulationRankingTests(unittest.TestCase):
     def test_worse_swaps_are_not_recommended(self):
         store = Store(tempfile.mkdtemp())
-        store.set_setting(peers.TARGET, {'job': '렌-렌', 'level': 291, 'world_type': 0, 'at': '2026-10-01'})
+        store.set_setting(peers.TARGET, {'job': '렌-렌', 'cp': 2.5e8, 'level': 291, 'at': '2026-10-01'})
         peers.ensure(store)
         worse = {'item_name': '아케인셰이드 나이트슈즈', 'item_equipment_slot': '신발', 'starforce': '17',
                  'item_total_option': {'str': '50'}}
         with store.db() as db:
             for i in range(5):
                 data = {'신발': {'name': '아케인셰이드 나이트슈즈', 'starforce': 17, 'potential': '레전드리', 'item': worse}}
-                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?)',
-                           (f'o{i}', '렌-렌', 291, 0, peers.since()[:10] + 'T23:59:59+09:00', json.dumps(data, ensure_ascii=False)))
+                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data,cp) VALUES(?,?,?,?,?,?,?)',
+                           (f'o{i}', '렌-렌', 291, 0, peers.since()[:10] + 'T23:59:59+09:00', json.dumps(data, ensure_ascii=False), 2.5e8))
         from mepiti import statcalc
         mine = {'item_name': '도전자의 신발', 'item_equipment_slot': '신발', 'starforce': '22',
                 'item_total_option': {'str': '300', 'attack_power': '100'}, 'potential_option_1': 'STR +9%'}

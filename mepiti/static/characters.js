@@ -170,26 +170,28 @@ function renderEquipmentDetail(box,item){
 $('#other-search').onsubmit=e=>{e.preventDefault();const name=e.target.elements.name.value.trim();if(!name)return;
   showCharacterProfile(name);$('#character-profile').scrollIntoView({behavior:'smooth',block:'start'});};
 
-// 비슷한 유저 — 같은 직업·비슷한 레벨 유저의 장비 통계와 대표 캐릭터 비교(mepiti/peers.py). 모으는 동안은 가끔 다시 불러온다.
+// 목표 전투력대 유저 — 같은 직업·비슷한 레벨 유저의 장비 통계와 대표 캐릭터 비교(mepiti/peers.py). 모으는 동안은 가끔 다시 불러온다.
 let peerTimer=null;
 function renderPeers(d){
   const st=$('#peer-status'),box=$('#peer-report');box.replaceChildren();clearTimeout(peerTimer);
   const t=d.target;
   const parts=[];
-  if(t)parts.push(`${t.job.split('-').pop()} Lv.${t.level}±3 · 모은 유저 ${fmt(d.collected)}명`+(d.queue?` · 남은 후보 ${fmt(d.queue)}명`:''));
-  else parts.push('아직 모으지 않았습니다. \'모으기 시작\'을 누르면 대표 캐릭터 기준으로 후보를 고릅니다.');
+  const eok=v=>`${(Math.round(v/1e6)/100).toLocaleString()}억`;
+  if(t&&t.cp){parts.push(`${t.job.split('-').pop()} · 전투력 ${eok(t.cp)} ±15% · 모은 유저 ${fmt(d.collected)}명`+(t.screened?` (확인 ${fmt(t.screened)}명 중 해당 ${fmt(t.matched||0)}명)`:'')+(d.queue?` · 남은 후보 ${fmt(d.queue)}명`:''));
+    const f=$('#peer-form').elements.cp;if(!f.value)f.value=eok(t.cp);}
+  else parts.push('목표 전투력을 적고 \'모으기 시작\'을 누르면 같은 직업 랭킹에서 그 전투력대를 찾아 천천히 모읍니다.');
   if(d.running)parts.push('모으는 중(한 명에 몇 초씩)');
   else if(d.queue&&!d.calls_left)parts.push('오늘 조회 몫을 다 써서 내일 이어서 모읍니다');
   parts.push(`오늘 남은 조회 ${fmt(d.calls_left)}/${fmt(d.daily_calls)}회`);
   if(d.error)parts.push(d.error);
   st.textContent=parts.join(' · ');
-  $('#peer-collect').textContent=t?'다시 고르기':'모으기 시작';
+  $('#peer-collect').textContent=t&&t.cp?'다시 찾기':'모으기 시작';
   if(d.running)peerTimer=setTimeout(()=>guard(loadPeers),15000);
-  if(t&&!d.same_job){box.append(el('p','hint','대표 캐릭터의 직업이 바뀌었어요. \'다시 고르기\'를 누르세요.'));return;}
+  if(t&&!d.same_job){box.append(el('p','hint','대표 캐릭터의 직업이 바뀌었어요. \'다시 찾기\'를 누르세요.'));return;}
   if(!d.ready){if(t)box.append(el('p','hint',`${fmt(d.min_peers)}명 이상 모이면 비교를 보여 드려요.`));return;}
-  const behind=el('div','peer-behind');behind.append(el('strong','',d.behind.length?`비슷한 유저 ${fmt(d.people)}명보다 뒤처진 부위`:`비슷한 유저 ${fmt(d.people)}명과 비교해 뒤처진 부위가 없어요`));
+  const behind=el('div','peer-behind');behind.append(el('strong','',d.behind.length?`목표 전투력대 유저 ${fmt(d.people)}명보다 뒤처진 부위`:`목표 전투력대 유저 ${fmt(d.people)}명과 비교해 뒤처진 부위가 없어요`));
   const pct=v=>`${v>=0?'+':''}${v.toFixed(2)}%`,span=r=>r[0]===r[1]?pct(r[0]):`${pct(r[0])} ~ ${pct(r[1])}`;
-  const simText=s=>(s.same_item?`같은 장비를 비슷한 유저 수준(${s.starforce}성 · ${s.potential.join(', ')||'잠재 없음'})으로 맞추면`:`${s.item} ${s.starforce}성(${s.potential.join(', ')||'잠재 없음'})으로 바꾸면`)+` 스탯공격력 ${span(s.range)} · 보스 기준 ${span(s.boss_range)}`+(s.sets.length?` (세트 ${s.sets.join(', ')})`:'')+(s.unknown.length?` · 모름: ${s.unknown.join('; ')}`:'');
+  const simText=s=>(s.same_item?`같은 장비를 목표 전투력대 유저 수준(${s.starforce}성 · ${s.potential.join(', ')||'잠재 없음'})으로 맞추면`:`${s.item} ${s.starforce}성(${s.potential.join(', ')||'잠재 없음'})으로 바꾸면`)+` 스탯공격력 ${span(s.range)} · 보스 기준 ${span(s.boss_range)}`+(s.sets.length?` (세트 ${s.sets.join(', ')})`:'')+(s.unknown.length?` · 모름: ${s.unknown.join('; ')}`:'');
   d.behind.forEach(b=>{const row=el('div','peer-row');const body=el('span','',b.reasons.join(' · '));
     if(b.simulation){body.append(el('br'),el('small','peer-sim',simText(b.simulation)));}
     row.append(el('span','peer-slot',b.slot),body);behind.append(row);});
@@ -197,14 +199,14 @@ function renderPeers(d){
   if(d.simulated){
     const list=(title,rows,cls)=>{const g=el('div','peer-behind '+cls);g.append(el('strong','',title));
       rows.forEach(s=>{const row=el('div','peer-row');row.append(el('span','peer-slot',s.slot),el('span','',simText(s)));g.append(row);});return g;};
-    box.prepend(list(d.upgrades.length?'바꾸면 좋아지는 부위 (보스 기준 이득 큰 순)':'비슷한 유저 장비로 바꿔서 좋아지는 부위는 없어요',d.upgrades,'up'));
+    box.prepend(list(d.upgrades.length?'바꾸면 좋아지는 부위 (보스 기준 이득 큰 순)':'목표 전투력대 유저 장비로 바꿔서 좋아지는 부위는 없어요',d.upgrades,'up'));
     if(d.ahead.length)box.append(list('지금 장비가 더 나은 부위 (바꾸면 손해)',d.ahead,'ahead'));
   }
   const simBar=el('div','peer-simbar');
   if(d.simulated)simBar.append(el('p','hint',d.simulation_note));
   else{const run=el('button','secondary','교체 효과 계산');run.type='button';
     run.onclick=()=>task(run,async()=>{run.textContent='내 스탯 출처 조회 중(넥슨 약 22회)…';renderPeers(await api('peers/simulate',{}));});
-    simBar.append(run,el('small','hint',' 내 스탯 출처를 하루 한 번 조회해, 비슷한 유저가 많이 끼는 장비로 바꿀 때 스탯공격력·보스 기준(방어율 300%) 변화를 계산합니다.'));}
+    simBar.append(run,el('small','hint',' 내 스탯 출처를 하루 한 번 조회해, 목표 전투력대 유저가 많이 끼는 장비로 바꿀 때 스탯공격력·보스 기준(방어율 300%) 변화를 계산합니다.'));}
   box.append(simBar);
   const more=el('details','peer-more');more.append(el('summary','','부위별 통계 전체'));
   const table=el('table','peer-table');const head=el('tr');['부위','많이 끼는 장비','스타포스 중앙값','윗잠','아랫잠','내 장비','바꾸면(보스 기준)'].forEach(h=>head.append(el('th','',h)));table.append(head);
@@ -213,8 +215,9 @@ function renderPeers(d){
     tr.append(el('td','',s.slot),el('td','',s.items.map(i=>`${i.name} ${i.share}%`).join(', ')),el('td','num',s.starforce_median==null?'—':`${s.starforce_median}성`),
       el('td','',shares(s.potential)),el('td','',shares(s.additional)),el('td','',me.name?`${me.name} ${me.starforce||0}성 · ${me.potential||'—'}/${me.additional||'—'}`:'—'),
       el('td','num',s.simulation?span(s.simulation.boss_range):'—'));table.append(tr);});
-  more.append(table,el('p','hint','넥슨 Open API 랭킹(전날 기준)에서 같은 직업·비슷한 순위의 유저를 골라 모은 통계입니다. 채팅에서 "비슷한 유저랑 비교해서 뭐부터 바꿀까?"처럼 물으면 이 통계로 상담합니다.'));
+  more.append(table,el('p','hint','넥슨 Open API 랭킹(전날 기준)에서 같은 직업·비슷한 순위의 유저를 골라 모은 통계입니다. 채팅에서 "목표 전투력대 유저랑 비교해서 뭐부터 바꿀까?"처럼 물으면 이 통계로 상담합니다.'));
   box.append(more);
 }
 async function loadPeers(){renderPeers(await api('peers'));}
-$('#peer-collect').onclick=e=>task(e.currentTarget,async()=>{renderPeers(await api('peers/collect',{}));});
+$('#peer-form').onsubmit=e=>{e.preventDefault();const b=$('#peer-collect');task(b,async()=>{b.textContent='전투력대 찾는 중(넥슨 30회 안팎, 1~2분)…';
+  renderPeers(await api('peers/collect',{cp:e.target.elements.cp.value}));});};

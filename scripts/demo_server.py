@@ -141,7 +141,8 @@ def seed_peers(store, profile):
     import json as _json
     from mepiti import peers
     job = profile.get('job') or '히어로'
-    target = {'job': f'데모-{job}', 'level': profile.get('level') or 285, 'world_type': 0, 'rank': 1234, 'at': now()}
+    target = {'job': f'데모-{job}', 'cp': 2.5e8, 'level': profile.get('level') or 285, 'floor': 80, 'pool': 600,
+              'screened': 24, 'matched': 8, 'at': now()}
     store.set_setting(peers.TARGET, target)
     peers.ensure(store)
     base = peers.summarize(profile.get('equipment'))
@@ -149,8 +150,8 @@ def seed_peers(store, profile):
         for i in range(8):
             data = {slot: {**item, 'starforce': max(0, (item.get('starforce') or 0) + (i % 4) - 1 + (2 if slot in ('모자', '장갑') else 0)),
                            'potential': '레전드리' if slot == '상의' and i % 4 else item.get('potential')} for slot, item in base.items()}
-            db.execute('INSERT OR REPLACE INTO peers(ocid,job,level,world_type,fetched_at,data) VALUES(?,?,?,?,?,?)',
-                       (f'demo-{i}', target['job'], target['level'], 0, now(), _json.dumps(data, ensure_ascii=False)))
+            db.execute('INSERT OR REPLACE INTO peers(ocid,job,level,world_type,fetched_at,data,cp) VALUES(?,?,?,?,?,?,?)',
+                       (f'demo-{i}', target['job'], target['level'], 0, now(), _json.dumps(data, ensure_ascii=False), 2.4e8 + i * 1e6))
 
 
 def main():

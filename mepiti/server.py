@@ -184,7 +184,7 @@ class Application:
                 'backups': backup.listing(self.store.folder), 'keep': backup.KEEP,
                 'startup_backup': self.startup_backup.name if self.startup_backup else None}
 
-    def peer_report(self, name=None, collect=False, simulate=False):
+    def peer_report(self, name=None, collect=False, simulate=False, cp=None):
         """비슷한 유저 통계와 내 장비 비교. collect면 후보를 (다시) 고르고 모으기를 시작한다.
         simulate면 내 스탯 출처(넥슨 약 22회, 하루 한 번)를 받아 교체 시뮬레이션까지 한다. 아니면 받아 둔 것이 있을 때만."""
         name = name or self.main_character_name()
@@ -196,10 +196,11 @@ class Application:
             profile = self.nexon.character(name, details=True)
         except AppError:
             pass
-        stale = not target or (profile and target.get('job', '').split('-', 1)[-1] != profile.get('job')) \
-            or str(target.get('at', ''))[:10] < peers.since()[:10]
-        if collect and (stale or not (self.store.setting(peers.QUEUE) or [])):
-            self.peers.choose(name)
+        if collect:
+            goal = peers.parse_cp(cp) if cp else target.get('cp')
+            if not goal:
+                raise AppError("목표 전투력을 '2억5천'처럼 적어 주세요.")
+            self.peers.choose(name, goal)
         self.peers.start()
         ledger = None
         try:
@@ -378,7 +379,7 @@ class Application:
             if path == '/api/earnings': return earnings.add(s, data)
             if path == '/api/earnings/delete': return earnings.delete(s, required(data,'id',100))
             if path == '/api/goals/meso': return goals.meso_plan(s, data.get('target'), data.get('current'))
-            if path == '/api/peers/collect': return self.peer_report(data.get('name') or None, collect=True)
+            if path == '/api/peers/collect': return self.peer_report(data.get('name') or None, collect=True, cp=data.get('cp'))
             if path == '/api/peers/simulate': return self.peer_report(data.get('name') or None, simulate=True)
             if path == '/api/goals/exp': return goals.exp_plan(s, self.nexon, required(data,'name',30))
             if path == '/api/earnings/capture':
