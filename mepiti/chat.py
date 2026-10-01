@@ -300,7 +300,6 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     result['topic_notes'] = [preset_note] if preset_note else []
     if preset_note:
         text = f"[장비 프리셋] {preset_note}\n" + text
-    missing_note = None
     item = None
     if topic:
         item = context.find_item(profile, topic)
@@ -383,7 +382,6 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
                                     else '외부 시세 조회기가 연결되어 있지 않아 저장된 값만 사용합니다.']
             return
         if unknown:
-            missing_note = '노작값을 모르는 장비: ' + ', '.join(r['item'] for r in unknown[:6])
             text += f'\n\n[값을 모르는 장비] 아래는 노작값을 모른다. 값을 추측해서 비교하지 말 것.\n' \
                     + '\n'.join(f"- {r['item']}" for r in unknown[:6])
     selected_model = store.setting('model')
@@ -813,11 +811,7 @@ def cp_label(value):
 
 def max_star(item):
     """장비 레벨별 최대 스타포스(일반 장비)."""
-    level = item.get('equip_level') or 0
-    for low, top in ((138, 30), (128, 20), (118, 15), (108, 10), (95, 8)):
-        if level >= low:
-            return top
-    return 5
+    return starforce.reachable_star(item.get('equip_level') or 0)
 
 
 def starforce_slot_options(profile, question):

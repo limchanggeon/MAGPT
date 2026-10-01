@@ -37,16 +37,17 @@ def guess_level(item):
 
 
 def ensure(store):
-    with store.db() as db:
-        db.executescript(SCHEMA)
-        if 'superior' not in [r['name'] for r in db.execute('PRAGMA table_info(starforce_history)')]:
-            db.execute('ALTER TABLE starforce_history ADD COLUMN superior INTEGER')
-    # 0.3.5 이하가 '슈페리얼 장비 미해당'을 슈페리얼로 잘못 저장했다. 한 번만 바로잡는다:
-    # 슈페리얼 계열(타일런트)만 남기고 지운다. 이후 받는 기록은 제대로 저장된다.
-    if not store.setting(SUPERIOR_FIXED):
-        with store.db() as db:
-            db.execute("UPDATE starforce_history SET superior=CASE WHEN item LIKE '%타일런트%' THEN 1 ELSE 0 END WHERE superior=1")
-        store.set_setting(SUPERIOR_FIXED, '1')
+    with store.schema('starforce_history') as needed:
+        if needed:
+            with store.db() as db:
+                db.executescript(SCHEMA)
+                if 'superior' not in [r['name'] for r in db.execute('PRAGMA table_info(starforce_history)')]:
+                    db.execute('ALTER TABLE starforce_history ADD COLUMN superior INTEGER')
+        # 보정 표시가 초기화된 경우도 재시도할 수 있어야 한다.
+        if not store.setting(SUPERIOR_FIXED):
+            with store.db() as db:
+                db.execute("UPDATE starforce_history SET superior=CASE WHEN item LIKE '%타일런트%' THEN 1 ELSE 0 END WHERE superior=1")
+            store.set_setting(SUPERIOR_FIXED, '1')
 
 
 def destroyed(row):
@@ -203,9 +204,9 @@ def analyse(store, character, item, rows, picked, levels):
         return group
     if group['level_guessed']:
         group['notes'].append(f'장비 레벨 {level}은 이름으로 추정했습니다.')
-    spent = [attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r))
-             + (group['spare_price'] or 0 if destroyed(r) else 0) for r in rows]
-    attempts_cost = sum(attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r)) for r in rows)
+    costs = [attempt_cost(level, r['before'], r['safeguard'], picked, events_of(r)) for r in rows]
+    spent = [cost + ((group['spare_price'] or 0) if destroyed(r) else 0) for cost, r in zip(costs, rows)]
+    attempts_cost = sum(costs)
     # 기대값은 기록에 가장 많이 남은 이벤트로 계산한다. 파괴방지는 실제로 켠 구간만 켠다.
     event = Counter(event_name(events_of(r), r['before']) for r in rows).most_common(1)[0][0]
     guarded = sorted({r['before'] for r in rows if r['safeguard']} & set(starforce.SAFEGUARD_STARS))

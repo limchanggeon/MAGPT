@@ -133,8 +133,10 @@ def from_answer(values):
     discounts = values.get('discounts') or []
     if event not in EVENTS:
         raise AppError('지원하지 않는 이벤트입니다.')
-    if not isinstance(discounts, list) or any(d not in DISCOUNTS for d in discounts):
+    if not isinstance(discounts, list) or any(not isinstance(d, str) or d not in DISCOUNTS for d in discounts):
         raise AppError('지원하지 않는 할인입니다.')
+    if len({d for d in discounts if d.startswith('MVP ')}) > 1:
+        raise AppError('MVP 등급은 하나만 골라 주세요. PC방 할인은 함께 쓸 수 있습니다.')
     for key in ('safeguard', 'use_restore'):
         if not isinstance(values.get(key, False), bool):
             raise AppError('파괴방지·흔적 복구는 사용 여부로 골라 주세요.')

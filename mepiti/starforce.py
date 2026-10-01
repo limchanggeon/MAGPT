@@ -10,6 +10,8 @@
 기대값은 몬테카를로가 아니라 연립방정식으로 정확히 푼다. 같은 입력이면 항상 같은 값이 나와야
 사용자가 결과를 신뢰하고 비교할 수 있기 때문이다.
 """
+import math
+from functools import lru_cache
 from .core import AppError
 
 # [성공, 유지, 파괴] — 0성부터 29성까지. 스타캐치 적용 상태.
@@ -116,6 +118,11 @@ def reachable_star(level):
 
 def attempt_costs(level):
     """성별 1회 시도 비용(메소)."""
+    return list(_attempt_costs(level))
+
+
+@lru_cache(maxsize=300)
+def _attempt_costs(level):
     costs = []
     for star in range(30):
         if star <= 9:
@@ -123,13 +130,19 @@ def attempt_costs(level):
         else:
             base = level ** 3 * (star + 1) ** 2.7
             costs.append(1000 + round(base / COST_DIVISOR.get(star, 200) / 100) * 100)
-    return costs
+    return tuple(costs)
 
 
 def solve(matrix, vector):
     """작은 연립방정식을 가우스 소거로 푼다. 외부 수치 라이브러리를 들이지 않으려는 것이다."""
-    size = len(vector)
-    rows = [row[:] + [vector[i]] for i, row in enumerate(matrix)]
+    return solve_many(matrix, [vector])[0]
+
+
+def solve_many(matrix, vectors):
+    """같은 전이행렬의 비용·시도·파괴 우변을 한 번에 푼다."""
+    size = len(matrix)
+    width = size + len(vectors)
+    rows = [row[:] + [v[i] for v in vectors] for i, row in enumerate(matrix)]
     for column in range(size):
         pivot = max(range(column, size), key=lambda r: abs(rows[r][column]))
         if abs(rows[pivot][column]) < 1e-12:
@@ -140,9 +153,9 @@ def solve(matrix, vector):
                 continue
             factor = rows[r][column] / rows[column][column]
             if factor:
-                for c in range(column, size + 1):
+                for c in range(column, width):
                     rows[r][c] -= factor * rows[column][c]
-    return [rows[i][size] / rows[i][i] for i in range(size)]
+    return [[rows[i][size + j] / rows[i][i] for i in range(size)] for j in range(len(vectors))]
 
 
 def expected(data):
@@ -156,8 +169,11 @@ def expected(data):
         if value is None or value == '':
             raise AppError(f'{key} 값을 입력해 주세요.')
         try:
-            value = int(float(str(value).replace(',', '')))
-        except (TypeError, ValueError):
+            raw = float(str(value).replace(',', ''))
+            if not math.isfinite(raw) or not raw.is_integer():
+                raise ValueError()
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
             raise AppError(f'{key} 값은 숫자여야 합니다.')
         if not low <= value <= high:
             raise AppError(f'{key} 값은 {low}~{high} 범위여야 합니다.')
@@ -170,8 +186,8 @@ def expected(data):
         spare_cost = float(str(data.get('spare_cost') or 0).replace(',', ''))
     except (TypeError, ValueError):
         raise AppError('spare_cost 값은 숫자여야 합니다.')
-    if spare_cost < 0:
-        raise AppError('스페어 비용은 0 이상이어야 합니다.')
+    if not math.isfinite(spare_cost) or spare_cost < 0:
+        raise AppError('스페어 비용은 0 이상의 유한한 숫자여야 합니다.')
     limit = reachable_star(level)
     if target > limit:
         raise AppError(f'{level}레벨 장비는 {limit}성까지만 강화할 수 있습니다.')
@@ -182,7 +198,12 @@ def expected(data):
     if event_name not in EVENTS:
         raise AppError('지원하지 않는 이벤트입니다. ' + ', '.join(EVENTS))
     event = EVENTS[event_name]
-    picked = [d for d in (data.get('discounts') or []) if d in DISCOUNTS]
+    discounts = data.get('discounts') or []
+    if not isinstance(discounts, list) or any(not isinstance(d, str) for d in discounts):
+        raise AppError('할인은 목록으로 골라 주세요.')
+    picked = list(dict.fromkeys(d for d in discounts if d in DISCOUNTS))
+    if sum(d.startswith('MVP ') for d in picked) > 1:
+        raise AppError('MVP 등급은 하나만 골라 주세요.')
     discount = sum(DISCOUNTS[d] for d in picked)
     use_restore = bool(data.get('use_restore'))
     meso_discount = max(event['restore_discount'], 0.2 if data.get('restore_discount') else 0.0)
@@ -207,9 +228,7 @@ def expected(data):
     size = target
     matrix = [[0.0] * size for _ in range(size)]
     vector = [0.0] * size
-    attempts = [[0.0] * size for _ in range(size)]
     attempt_vec = [0.0] * size
-    destroys = [[0.0] * size for _ in range(size)]
     destroy_vec = [0.0] * size
     restore_used = []
     safeguard_used = []
@@ -232,20 +251,18 @@ def expected(data):
             if recovered is not None:
                 back, penalty = to, recovered
                 restore_used.append(to)
-        for row, rhs, own_cost, own_destroy in ((matrix, vector, attempt, 0.0),
-                                                (attempts, attempt_vec, 1.0, 0.0),
-                                                (destroys, destroy_vec, 0.0, 1.0)):
-            row[star][star] += 1.0 - maintain
-            landing = min(star + jump, size)
-            if landing < size:
-                row[star][landing] -= success
-            if destroy and back < size:
-                row[star][back] -= destroy
-            rhs[star] = own_cost + destroy * (penalty if row is matrix else own_destroy)
+        matrix[star][star] += 1.0 - maintain
+        landing = min(star + jump, size)
+        if landing < size:
+            matrix[star][landing] -= success
+        if destroy and back < size:
+            matrix[star][back] -= destroy
+        vector[star] = attempt + destroy * penalty
+        attempt_vec[star] = 1.0
+        destroy_vec[star] = destroy
 
-    cost = solve(matrix, vector)[current]
-    tries = solve(attempts, attempt_vec)[current]
-    broken = solve(destroys, destroy_vec)[current]
+    solved = solve_many(matrix, [vector, attempt_vec, destroy_vec])
+    cost, tries, broken = (v[current] for v in solved)
     return {
         'level': level, 'current_star': current, 'target_star': target,
         'spare_cost': spare_cost, 'spare_cost_known': bool(spare_cost),

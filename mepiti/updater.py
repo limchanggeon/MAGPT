@@ -130,7 +130,11 @@ class Updater:
             self.state['status'] = '파일 확인 중'
             with fetch(info['_sums']) as response:
                 expected = parse_sums(response.read(100_000).decode('utf-8', 'replace')).get(info['_name'])
-            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            digest = hashlib.sha256()
+            with archive.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1 << 20), b''):
+                    digest.update(chunk)
+            digest = digest.hexdigest()
             if not expected or digest != expected:
                 archive.unlink(missing_ok=True)
                 raise AppError('받은 업데이트 파일이 릴리스와 달라요(SHA256 불일치). 다시 시도해 주세요.', 502)

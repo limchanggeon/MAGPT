@@ -269,7 +269,7 @@ py -3.12 -m venv .venv
 
 ## 자료 가져오기
 
-요구사항에 기재된 두 수집 ZIP은 작업 폴더에 없었습니다. 검증되지 않은 샘플 게임 지식을 기본 DB에 넣지 않았습니다. UI에서 등록하거나, 다음 JSONL 스키마로 변환해 가져올 수 있습니다.
+요구사항에 기재된 두 수집 ZIP은 작업 폴더에 없었습니다. 검증되지 않은 샘플 게임 지식을 기본 DB에 넣지 않았습니다. 다음 JSONL 스키마로 변환해 개발용 도구로 가져올 수 있습니다. 현재 화면에는 자료 등록·검토 탭이 없습니다.
 
 ```json
 {"title":"자료 제목","body":"검토할 원문","metadata":{"source_url":"https://maplestory.nexon.com/실제-출처","source_type":"official","published_at":null,"modified_at":null,"effective_from":"실제 적용일 YYYY-MM-DD","effective_to":null,"version":"검토한 실제 버전","region":"KR","server_type":"live","valid_until":"재검토 기한 YYYY-MM-DD","topic":"동일 규칙을 묶는 주제 ID"}}
@@ -279,13 +279,17 @@ py -3.12 -m venv .venv
 .venv/bin/python scripts/import_documents.py sources.jsonl
 ```
 
-가져온 자료는 항상 검토 대기 상태입니다. 수집 시각·본문 SHA-256은 생성되며 수집 시각을 적용일로 대체하지 않습니다. 자동 웹 수집, HTML 정제, OCR 표 추출, 자료 업데이트 스케줄러는 후속 작업입니다. 현재 자료는 승인 후에도 원문 사이트를 자동 재확인하지 않으므로 재검토 기한을 짧게 설정해야 합니다.
+가져온 자료는 항상 검토 대기 상태입니다. 수집 시각·본문 SHA-256은 생성되며 수집 시각을 적용일로 대체하지 않습니다. 개발용 `Store.review`로 원문·적용 조건을 검토해 승인해야 검색에 사용됩니다. 넥슨 공식 공지는 별도 수집 경로에서 본문을 받아 승인합니다. 일반 커뮤니티 자료 자동 수집·표 추출은 후속 작업입니다. 가져온 자료는 승인 후에도 원문 사이트를 자동 재확인하지 않으므로 재검토 기한을 짧게 설정해야 합니다.
 
 ## 검증 및 모델 실험
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
 node --check mepiti/static/app.js
+node --check mepiti/static/characters.js
+node --check mepiti/static/tour.js
+node tests/test_frontend.js
+.venv/bin/python -m scripts.audit_benchmark --output /tmp/mepiti-audit-benchmark.json  # 임시 DB·가상 자료 성능 측정
 .venv/bin/python scripts/benchmark.py 설치된모델1 설치된모델2
 .venv/bin/python scripts/eval_models.py qwen3.5:2b exaone3.5:7.8b   # 이 앱의 실제 과제로 모델 비교
 .venv/bin/python scripts/demo_server.py --port 8790                  # README 스크린샷용 데모 서버(가짜 넥슨 응답)
@@ -294,6 +298,8 @@ node --check mepiti/static/app.js
 `eval_models.py`는 숫자 없이 덧붙이기·약한 부위 분석·지어내기 유혹·근거 선택 네 과제를 앱의 실제 검증 함수로 채점합니다. 캐릭터 사실은 대표 캐릭터를 한 번 조회해 이름을 익명화한 뒤 `artifacts/`(git 제외)에 두며 DB에는 쓰지 않습니다. `benchmark.py`는 같은 합성 질문·근거로 문장 선택, 용어 표기, 근거 부족, 문서 내 명령 무시를 비교합니다. 실행 시간·Ollama 토큰 통계·기기 정보를 `artifacts/benchmark.json`에 저장합니다. 이 수치는 실제 게임 답변 정확도나 GTX 1650에서의 성능을 뜻하지 않습니다. Windows 대상 장비에서 모델 후보, 문맥 길이, 게임 동시 실행 메모리/VRAM을 별도로 측정해야 합니다. 설치된 모델이 없으면 오류로 종료하며 결과를 만들어내지 않습니다.
 
 현재 자동 검증은 계산 경계값, 보류·유효기간·버전 충돌, 근거 연결, API 응답 정리, 키 저장소 제한, 스냅샷 비교·만료, HTTP Host/Origin/토큰 검사를 포함합니다. 2026-09-28 사용자 환경에 저장된 키로 캐릭터 79개 목록과 1개 캐릭터의 기본 정보·전투력·외형 응답을 확인했습니다. 키나 계정 식별자는 로그에 출력하지 않았습니다. 생성 모델 품질은 설치 모델로 별도 검증해야 합니다.
+
+2026-10-01 전체 점검에서는 Python 테스트 426개와 Node 화면 동작 검사를 통과했습니다. 가상 자료의 수정 전/후 결과 일치, 성능 측정, 동시 요청과 Chromium/WebKit 검증은 [전체 점검 보고서](docs/audit/2026-10-01.md)에 기록했습니다. 성능 측정 도구는 실제 사용자 DB·키를 쓰지 않습니다.
 
 ## 스탯 재현 점검 (개발용)
 
@@ -320,7 +326,7 @@ git push origin v0.2.0
 
 - macOS 파일은 CI의 Apple Silicon 러너에서 만들어지므로 인텔 Mac에서는 실행되지 않습니다.
 
-Windows 설치 파일은 AI 모델(클라우드 기본·2B·8B·나중에)을 고르게 하고, 로컬 모델을 골랐는데 Ollama가 없으면 공식 설치 파일(`OllamaSetup.exe`, 약 1.5GB)을 받아 함께 설치한 뒤 선택을 남깁니다(`scripts/installer.iss`). Mac DMG에는 설치 마법사가 없어 첫 실행 화면에서 공식 Ollama 앱을 `~/Applications`에 설치합니다. 모델 파일과 Tesseract는 설치 파일에 들어 있지 않습니다. 서명·공증·자동 업데이트는 구현하지 않았습니다. macOS 빌드는 실행한 Mac 아키텍처 기준이며 Windows/Intel Mac 실기 검증을 대신하지 않습니다. EXE/DMG 빌드 정의와 실제 설치 검증은 구분해야 합니다.
+Windows 설치 파일은 AI 모델(클라우드 기본·2B·8B·나중에)을 고르게 하고, 로컬 모델을 골랐는데 Ollama가 없으면 공식 설치 파일(`OllamaSetup.exe`, 약 1.5GB)을 받아 함께 설치한 뒤 선택을 남깁니다(`scripts/installer.iss`). Mac DMG에는 설치 마법사가 없어 첫 실행 화면에서 공식 Ollama 앱을 `~/Applications`에 설치합니다. 모델 파일과 Tesseract는 설치 파일에 들어 있지 않습니다. macOS 빌드는 로컬 ad-hoc 서명을 하며 Apple Developer 배포 서명·공증은 아직 없습니다. 자동 업데이트는 별도 업데이터와 SHA256 검증으로 구현되어 있습니다. macOS 빌드는 실행한 Mac 아키텍처 기준이며 Windows/Intel Mac 실기 검증을 대신하지 않습니다. EXE/DMG 빌드 정의와 실제 설치 검증은 구분해야 합니다.
 
 ## 구조와 후속 범위
 
@@ -331,7 +337,9 @@ Windows 설치 파일은 AI 모델(클라우드 기본·2B·8B·나중에)을 �
 - `mepiti/static/`: 빌드 없는 한국어 반응형 UI
 - `scripts/`: 가져오기, 합성 근거 선택 평가, 배포 빌드
 
-미구현/미검증: 전 분야 지식 확장, 다중 조건을 이해하는 생성형 상담, 자유로운 후속 질문의 슬롯 갱신, 유니온·심볼 등 나머지 API, 검증된 게임 강화 엔진, 자동 자료 갱신, OCR 수치 구조화, LoRA, 웹 계정/동기화, 공개 서비스 운영. 현재 후속 질문은 최근 질문 두 개를 검색 문맥으로 사용하며 정밀한 직업/조건 전환은 한계가 있습니다.
+구현: 클라우드 모델의 질문 계획·재질문과 장비 상담, 강화 조건 변경·재계산, 목표 전투력대 비교·세트 교체 시뮬레이션, 유니온 추천, 스탯 출처 조회, 공식 공지 수집, 캡처 메소·조각 읽기, 목표 메소·다음 레벨 기간 추정. 로컬 모델은 기존 규칙에 따라 질문을 분류합니다.
+
+미완료/미검증: 전 분야 지식 확장과 최신 게임 공시 전수 대조, 헥사 스탯 표, 강화·잠재 비용을 포함한 추천, 먼 목표 레벨 경험치 표, LoRA, 웹 계정/동기화, 실제 유료 클라우드 응답, Windows 실기 검증. 요구사항별 상세 현황은 `IMPLEMENTATION.md`, 작업 간 인수인계는 `HANDOFF.md`에 기록합니다.
 
 공식 인터페이스 확인: [넥슨 API](https://openapi.nexon.com/ko/game/maplestory/?id=14), [인증 헤더](https://openapi.nexon.com/guide/request-api/), [Ollama Chat](https://docs.ollama.com/api/chat), [Ollama Pull](https://docs.ollama.com/api/pull), [Gemini 모델](https://ai.google.dev/gemini-api/docs/models), [Gemini API 약관](https://ai.google.dev/gemini-api/terms). 조회 데이터를 30일 이내 갱신해야 한다는 넥슨 안내를 고려해 보수적으로 만료된 원본 스냅샷을 제거합니다. 장기 성장 분석이 필요하면 API 정책에 맞는 별도 보존 정책 검토가 필요합니다.
 

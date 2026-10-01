@@ -5,7 +5,7 @@
 <div id="boot" class="boot" role="status" aria-live="polite"><img src="/favicon.svg" alt="" width="56" height="56"><strong>메피티</strong><span id="boot-text">준비하고 있어요</span><div class="boot-bar"><span></span></div><button id="boot-retry" class="secondary" type="button" hidden>다시 시도</button></div>
 <div class="app-shell">
 <aside class="sidebar">
-<a href="#chat" class="brand"><img src="/favicon.svg" alt="" width="22" height="22"><span>메피티</span><span class="alpha">0.2α</span></a>
+<a href="#chat" class="brand"><img src="/favicon.svg" alt="" width="22" height="22"><span>메피티</span><span class="alpha">α</span></a>
 <button class="new-chat" id="new-chat" type="button">새 대화<kbd>⌘K</kbd></button>
 <nav aria-label="메뉴">
 <button data-view="chat" class="nav-item active"><span>대화</span></button>
@@ -15,7 +15,7 @@
 <button data-view="library" class="nav-item"><span>기록</span></button>
 </nav>
 <div class="history-label">최근 대화</div><div id="history" class="history"></div>
-<div class="sidebar-bottom"><button data-view="settings" class="nav-item"><span>설정</span></button><div class="sidebar-footer"><span><span class="dot"></span>로컬 실행</span><span class="num" id="app-version">v0.2.0</span></div></div>
+<div class="sidebar-bottom"><button data-view="settings" class="nav-item"><span>설정</span></button><div class="sidebar-footer"><span><span class="dot"></span>로컬 실행</span><span class="num" id="app-version">버전 확인 중</span></div></div>
 </aside>
 <main>
 <header class="topbar"><div class="crumb"><span id="page-title">대화</span><span class="divider">/</span><span class="muted">KR 본서버</span></div><div class="model-switch"><button class="status-pill" id="model-pill" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu" title="AI 모델 바꾸기"><span class="dot amber"></span><span>연결 확인 중</span><span class="pill-go">▾</span></button><div id="model-menu" class="model-menu" role="menu" hidden></div></div></header>
@@ -126,7 +126,7 @@
 <button id="auction-open" class="secondary" type="button">경매장 창 열기</button> <button id="auction-check" class="primary" type="button">연결 확인</button></div><form id="price-form" class="form-grid"><label>장비 이름<input name="item" required maxlength="100" placeholder="골든 클로버 벨트"></label><label>노작값<input name="price" required maxlength="30" placeholder="32억"></label><label>추옵 급 (선택)<input name="add_grade" type="number" min="0" max="10000" placeholder="98"></label><label>메모 (선택)<input name="note" maxlength="300" placeholder="조회 서버·시점 등"></label><div class="full"><button class="primary" type="submit">저장</button><label class="checkbox"><input id="price-fetch" type="checkbox"> 외부 시세 조회 사용 (조회기 연결 시)</label></div></form><div id="price-list" class="price-list"></div></section><section class="panel data-panel"><div class="account-heading"><h2>데이터 보관</h2><button id="backup-now" class="secondary" type="button">지금 백업</button></div>
 <p class="hint">앱을 새 버전으로 바꿔 깔아도 아래 데이터와 키는 그대로 남습니다(앱 설치 폴더 밖에 따로 저장). 새 버전을 처음 켤 때 데이터를 자동으로 백업해 둡니다.</p>
 <dl id="data-info" class="data-info"></dl><div id="backup-list" class="backup-list"></div></section>
-<section class="panel"><h2>지원 범위</h2><p>근거 원문 검색·발췌, 용어 확인, 캐릭터 기본 정보·전투력·장비 조회, 목표·예산 저장, 최근 두 스냅샷 비교, 일반 확률·기간 계산, 확인 후 사용하는 한국어 OCR.</p><p class="muted">미구현 — 전 분야 지식 DB, 게임별 강화 규칙, 생성형 상담, 자동 자료 갱신, 모델 성능 검증.</p><p id="storage-path" class="hint"></p><p id="version-line" class="hint"></p><button id="update-check" class="secondary" type="button">업데이트 확인</button> <button id="replay-tour" class="secondary" type="button">사용법 다시 보기</button> <button id="quit-app" class="secondary" type="button">앱 종료</button></section></section>
+<section class="panel"><h2>지원 범위</h2><p>캐릭터·장비 조회, 스타포스 기대값·기록 분석, 재획·주보 수익, 경험치 목표, 공식 공지 검색, 목표 전투력대 장비 비교·교체 상담, 확인 후 저장하는 캡처 읽기.</p><p class="muted">남은 범위 — 전 분야 지식 DB, 헥사 스탯 등 미확인 수치, 강화·잠재 비용을 포함한 교체 추천, 내 장비 강화 가정 계산.</p><p id="storage-path" class="hint"></p><p id="version-line" class="hint"></p><button id="update-check" class="secondary" type="button">업데이트 확인</button> <button id="replay-tour" class="secondary" type="button">사용법 다시 보기</button> <button id="quit-app" class="secondary" type="button">앱 종료</button></section></section>
 </main></div><div id="toast" class="toast" role="status" hidden></div>
 <dialog id="item-dialog" aria-labelledby="item-dialog-title"><form method="dialog"><button class="dialog-close" aria-label="닫기">×</button></form><h2 id="item-dialog-title">장비 골라서 대화</h2><p id="item-dialog-status" class="muted">착용 장비를 불러오는 중</p><div id="item-presets" class="preset-tabs" hidden></div><div id="item-picker" class="item-picker"></div></dialog>
 <dialog id="ocr-dialog"><form method="dialog"><button class="dialog-close" aria-label="닫기">×</button></form><h2>OCR 결과 확인</h2><p class="muted">작은 숫자와 기호는 잘못 읽힐 수 있다. 확인·수정한 내용만 첨부된다.</p><img id="ocr-preview" alt="첨부한 스크린샷"><label>인식 결과<textarea id="ocr-text" rows="8" maxlength="10000"></textarea></label><button id="confirm-ocr" class="primary" type="button">확인 후 첨부</button></dialog>

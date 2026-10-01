@@ -1,4 +1,7 @@
 import argparse
+import copy
+from concurrent.futures import Future
+from contextlib import nullcontext
 import json
 import mimetypes
 import os
@@ -30,28 +33,36 @@ class CachedNexon:
     캐시가 없으면 대화를 몇 번만 이어가도 요청 한도(OPENAPI00007)에 걸린다.
     """
     TTL = 180
+    MAX_ENTRIES = 64
 
     def __init__(self, nexon):
         self.nexon = nexon
         self.cache = {}
         self.lock = threading.Lock()
+        self.inflight = {}
+        self.generation = 0
 
     def get(self, path, query):
         return self.nexon.get(path, query)
 
     def character(self, name, details=False):
-        key = (name, bool(details))
+        return self._cached(('character', name, bool(details)), lambda: self.nexon.character(name, details=details))
+
+    def clear(self):
         with self.lock:
-            hit = self.cache.get(key)
-            if hit and time.monotonic() - hit[0] < self.TTL:
-                return hit[1]
-        data = self.nexon.character(name, details=details)
+            self.generation += 1
+            self.cache.clear()
+
+    def prime(self, key, data, generation=None):
         with self.lock:
-            self.cache[key] = (time.monotonic(), data)
-            if len(self.cache) > 40:
-                oldest = min(self.cache, key=lambda k: self.cache[k][0])
-                self.cache.pop(oldest, None)
-        return data
+            if generation is None or generation == self.generation:
+                self._put(key, data)
+
+    def _put(self, key, data):
+        self.cache[key] = (time.monotonic(), copy.deepcopy(data))
+        while len(self.cache) > self.MAX_ENTRIES:
+            oldest = min(self.cache, key=lambda k: self.cache[k][0])
+            self.cache.pop(oldest)
 
     def characters(self):
         return self._cached(('list',), self.nexon.characters)
@@ -78,11 +89,29 @@ class CachedNexon:
         with self.lock:
             hit = self.cache.get(key)
             if hit and time.monotonic() - hit[0] < self.TTL:
-                return hit[1]
-        data = fetch()
-        with self.lock:
-            self.cache[key] = (time.monotonic(), data)
-        return data
+                return copy.deepcopy(hit[1])
+            pending_key = (self.generation, key)
+            pending = self.inflight.get(pending_key)
+            owner = pending is None
+            if owner:
+                pending = Future()
+                self.inflight[pending_key] = pending
+        if not owner:
+            return copy.deepcopy(pending.result())
+        try:
+            data = fetch()
+            with self.lock:
+                # 키가 바뀐 사이 끝난 이전 요청은 새 캐시에 넣지 않는다.
+                if pending_key[0] == self.generation:
+                    self._put(key, data)
+            pending.set_result(copy.deepcopy(data))
+            return data
+        except BaseException as e:
+            pending.set_exception(e)
+            raise
+        finally:
+            with self.lock:
+                self.inflight.pop(pending_key, None)
 
 
 class Application:
@@ -116,7 +145,7 @@ class Application:
             vault_error = None
         except AppError as e:
             key, vault_error = False, str(e)
-        docs = self.store.documents()
+        document_count, reviewed_count = self.store.document_counts()
         ollama = self.model.status()
         system = system_info(self.store.folder)
         selected = self.store.setting('model')
@@ -124,7 +153,7 @@ class Application:
         cloud = clouds[CLOUD_MODEL]
         # 답변을 쓸 준비가 됐는가. 클라우드는 그 회사 키가 있으면, 로컬은 Ollama에 그 모델이 있으면.
         ready = clouds[selected]['key_present'] if selected in clouds else bool(selected) and selected in ollama['models']
-        return {'version':__version__,'model':ollama,'selected_model':selected,'ready':ready,'cloud':cloud,'clouds':clouds,'key_present':key,'vault_error':vault_error,'system':system,'documents':len(docs),'reviewed_documents':sum(d['metadata']['verification_status']=='reviewed' for d in docs),'download':dict(self.download),'storage_path':str(self.store.folder),
+        return {'version':__version__,'model':ollama,'selected_model':selected,'ready':ready,'cloud':cloud,'clouds':clouds,'key_present':key,'vault_error':vault_error,'system':system,'documents':document_count,'reviewed_documents':reviewed_count,'download':dict(self.download),'storage_path':str(self.store.folder),
                 'presets':models.describe(system,ollama['models'],selected,{n:c['key_present'] for n,c in clouds.items()}),
                 'setup_choice':models.setup_choice(self.store.folder) if not selected else None,
                 'ollama_setup':dict(self.ollama_setup),
@@ -151,10 +180,12 @@ class Application:
             return {'state':'unverified','message':str(e)}
         self.vault.save(key)
         self.forget_nexon_cache()
+        self._prime_listing(listing)
         return {'state':'ok','characters':len(listing['characters'])}
 
     def check_key(self):
         """저장된 키가 지금도 쓸 수 있는지. 앱을 켤 때 한 번 부른다."""
+        generation = self.nexon.generation if isinstance(self.nexon, CachedNexon) else None
         try:
             key = self.vault.get()
         except AppError as e:
@@ -162,10 +193,15 @@ class Application:
         if not key:
             return {'state':'missing'}
         try:
-            self.nexon_for(key).characters()
+            listing = self.nexon_for(key).characters()
         except AppError as e:
             return {'state':key_problem(e),'message':str(e)}
+        self._prime_listing(listing, generation)
         return {'state':'ok'}
+
+    def _prime_listing(self, listing, generation=None):
+        if isinstance(self.nexon, CachedNexon):
+            self.nexon.prime(('list',), listing, generation)
 
     def data_status(self):
         """설정의 '데이터 보관': 데이터 위치, OS 보안 저장소에 있는 키, 백업 목록. 키 값은 돌려주지 않는다."""
@@ -211,7 +247,7 @@ class Application:
         return {**peers.compare(self.store, profile, self.peers.status(), ledger), 'name': name}
 
     def main_character_name(self):
-        chars = self.store.characters()
+        chars = self.store.characters(include_snapshots=False)
         main = next((c for c in chars if c['main']), None) or (chars[0] if chars else None)
         return main['name'] if main else None
 
@@ -301,9 +337,12 @@ class Application:
         raise AppError('고를 수 있는 모델이 아닙니다.')
 
     def forget_nexon_cache(self):
-        cache = getattr(self.nexon, 'cache', None)
-        if isinstance(cache, dict):
-            cache.clear()
+        if isinstance(self.nexon, CachedNexon):
+            self.nexon.clear()
+            self.nexon.nexon.__dict__.pop('_ocids', None)
+        self.store.set_setting(earnings.ACCOUNT_CHARACTERS, [])
+        self.store.set_setting(goals.EXP_DAYS, {})
+        self.store.set_setting(history.FETCHED, [])
 
     def start_pull(self, model, select_after=False):
         """모델 다운로드를 뒤에서 돌린다. select_after면 끝난 뒤 그 모델을 사용 모델로 정한다."""
@@ -353,10 +392,15 @@ class Application:
                     self.chat_lock.release()
             if path == '/api/characters/profile': return self.nexon.character(required(data,'name',30), details=True)
             if path == '/api/characters/discover':
+                cache = self.nexon if isinstance(self.nexon, CachedNexon) else None
+                generation = cache.generation if cache else None
                 found = self.nexon.characters()
                 # 수익 기록의 캐릭터 고르기에 쓴다. 이 컴퓨터의 데이터 파일에만 둔다.
-                s.set_setting(earnings.ACCOUNT_CHARACTERS, [{'name': c.get('name'), 'world': c.get('world'), 'level': c.get('level')}
-                                                            for c in found.get('characters') or [] if c.get('name')][:200])
+                with (cache.lock if cache else nullcontext()):
+                    if cache and generation != cache.generation:
+                        raise AppError('조회 중 API 키가 바뀌었습니다. 캐릭터 목록을 다시 불러와 주세요.', 409)
+                    s.set_setting(earnings.ACCOUNT_CHARACTERS, [{'name': c.get('name'), 'world': c.get('world'), 'level': c.get('level')}
+                                                              for c in found.get('characters') or [] if c.get('name')][:200])
                 return found
             if path == '/api/characters': return s.character_save(data)
             if path == '/api/characters/refresh':
@@ -386,7 +430,7 @@ class Application:
                 return earnings.read_capture(self.model, s.setting('model'), required(data, 'image', 8_100_000))
             if path == '/api/earnings/piece-price': return earnings.piece_price(s, self.auction, bool(data.get('refresh')))
             if path == '/api/earnings/scheduler':
-                names = [c['name'] for c in s.characters()]
+                names = [c['name'] for c in s.characters(include_snapshots=False)]
                 if not names: raise AppError('캐릭터 화면에서 관리할 캐릭터를 먼저 등록하세요.')
                 return earnings.scheduled_bosses(s, self.nexon, names[:20])
             if path == '/api/starforce': return starforce.expected(data)
@@ -404,6 +448,7 @@ class Application:
             if path == '/api/history/starforce/level': return history.set_level(s, data.get('item'), data.get('level'))
             if path == '/api/settings/key':
                 self.vault.save(required(data,'key',500))
+                self.forget_nexon_cache()
                 return {'ok':True}
             if path == '/api/settings/key/connect':
                 return self.connect_key(required(data,'key',500))
@@ -411,6 +456,7 @@ class Application:
                 return self.check_key()
             if path == '/api/settings/key/delete':
                 self.vault.delete()
+                self.forget_nexon_cache()
                 return {'ok':True}
             if path in ('/api/auction/open', '/api/auction/check'):
                 return self.auction_route(path)
@@ -550,10 +596,14 @@ def make_server(app,port=8765):
                     result = app.route(self.command,path,parse_qs(parsed.query),data)
                     return self.respond(200,result)
                 if self.command != 'GET': raise AppError('요청 경로를 찾을 수 없습니다.',404)
-                filename = {'/':'index.html','/app.js':'app.js','/characters.js':'characters.js','/tour.js':'tour.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(path)
+                filename = {'/':'index.html','/app.js':'app.js','/characters.js':'characters.js','/tour.js':'tour.js','/style.css':'style.css','/favicon.svg':'favicon.svg',
+                            '/icon.png':'icon.png','/sol-erda-piece.png':'sol-erda-piece.png'}.get(path)
                 if not filename: raise AppError('파일을 찾을 수 없습니다.',404)
                 content = (STATIC/filename).read_bytes()
-                self.respond(200,content,(mimetypes.guess_type(filename)[0] or 'text/plain')+'; charset=utf-8')
+                content_type = mimetypes.guess_type(filename)[0] or 'text/plain'
+                if content_type.startswith('text/') or filename.endswith(('.js', '.svg')):
+                    content_type += '; charset=utf-8'
+                self.respond(200,content,content_type)
             except AppError as e:
                 self.respond(e.status,{'error':str(e)})
             except Exception:

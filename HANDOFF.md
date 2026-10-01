@@ -1,141 +1,114 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-01 (KST)
-- 현재 단계: v0.4.3 릴리스 완료(대화형 도우미·재질문·넥슨 키만으로 내 캐릭터 자동). 전체 요구사항 완료 아님.
-- 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
-  **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
+- 현재 단계: v0.4.3 이후 전체 점검·최적화 완료, 로컬 작업 트리 반영. Python 426개·Node 회귀 검사·Chromium/WebKit 데모 검증 통과. 이번 변경은 미커밋·미릴리스이며 전체 요구사항 완료를 뜻하지 않는다.
+- 작업 브랜치: `claude/pensive-rubin-06leok`. 이번 수정 전 HEAD는 `d8839fb`. 로컬 `main`은 `7db1d96`으로 오래되어 현재 기능 확인 기준으로 쓰지 않았다. 원격 PR·브랜치 상태는 이번에 확인하지 않았다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
+- 이번 점검 상세: [점검 보고서](docs/audit/2026-10-01.md), [측정 원자료](docs/audit/2026-10-01-benchmark.json).
 
-## 현재 구현 상태 (2026-09-28 기준)
+## 현재 구현 상태 (2026-10-01 기준)
 
-화면은 왼쪽 메뉴의 탭 다섯 개다. 화면 id는 옛 이름을 그대로 쓴다(아래 표 참고).
+왼쪽 메뉴는 여섯 탭이다. 화면 id는 일부 옛 이름을 유지한다.
 
-| 탭(표시 이름) | 화면 id / data-view | 하는 일 |
+| 탭 | 화면 id / data-view | 하는 일 |
 |---|---|---|
-| 질의 | `view-chat` / `chat` | 대화. 스타포스 기대값, 장비 대화, 유니온 추천, 진행 중 이벤트, 공지 근거 검색 |
-| 캐릭터 | `view-characters` / `characters` | 계정 캐릭터 목록·상세, 장비창(5열 6행), 프리셋 1~3, 이 장비로 대화 |
-| 수익 | `view-calculator` / `calculator` | 재획(메소+조각), 주보(체크박스·스케줄러 불러오기·공식 결정석 가격) |
-| 기록 | `view-library` / `library` | 스타포스 강화 기록 → 장비별 실제 비용 vs 기대값 |
-| 설정 | `view-settings` / `settings` | 모델, 넥슨 API 키, 노작값, 앱 종료 |
+| 대화 | `view-chat` / `chat` | 강화 기대값·조건 재질문, 장비 상태, 목표 전투력대 비교·교체 상담, 공지 근거 검색 |
+| 캐릭터 | `view-characters` / `characters` | 계정 목록·상세, 장비창(5열 6행), 프리셋, 목표 전투력대 유저 수집·비교·교체 시뮬레이션 |
+| 수익 | `view-calculator` / `calculator` | 재획·주보 기록, 주/월 집계·추이·달력, 캡처 읽기, 조각 경매장 시세 |
+| 목표 | `view-goals` / `goals` | 경험치·레벨 목표와 예상 기간 |
+| 기록 | `view-library` / `library` | 스타포스 강화 기록·실제 비용과 기대값 비교 |
+| 설정 | `view-settings` / `settings` | 로컬/클라우드 모델, API 연결, 노작값, 백업·업데이트·앱 종료 |
 
-- **스타포스 기대값**(`starforce.py`): mesulive 이식. 파괴방지 15~17성·기본 비용 x2 추가, MVP·PC방 16성 이하만·이벤트 할인은 곱함,
-  23성 이상 파괴 시 22성 복구, 흔적 복구·복구 비용 할인 이벤트. 연립방정식으로 정확히 풀고 몬테카를로로 교차검증했다.
-- **대화**(`chat.py`): 강화 조건·노작값은 버튼·입력칸 선택창으로 되묻고, 답하면 원래 질문(`pending`)을 이어서 계산한다.
-  장비를 주제로 한 대화(`sessions.topic`), 유니온 추천(`union.py`), 진행 중 이벤트(`notices.py`).
-  수치는 앱이 직접 쓰고, 모델(Ollama)은 덧붙이는 말만 쓴다. 근거 없는 수치가 섞이면 모델 서술을 버린다.
-- **수익**(`earnings.py`): 재획 총수익 = 메소 + 조각 x 조각 가격. 주보 내 몫 = 결정석 / 파티 인원 + 드롭. 주간은 목요일 0시 기준.
-  결정석 가격표는 업데이트 813(사용자가 붙여 준 공지). 검은 마법사만 2026-10-01부터 새 가격.
-- **기록**(`history.py`): 넥슨 `history/starforce`를 날짜별로 받아 저장. 쓴 메소는 응답에 없어 비용식으로 다시 계산한다.
-  기대값과는 최고 성을 처음 찍을 때까지만 비교하고, 그 뒤 도전은 따로 보여 준다.
-- **공지**(`notices.py`): 공지·업데이트·진행 중 이벤트를 30분에 한 번 받아 본문을 공식 근거 문서로 자동 승인. 결정석 가격 공지 알림.
-- 화면 크기: 캐릭터 외형 480px, 장비 칸 84px, 나머지 탭은 `--ui-scale`(1.15) 배율.
-- 빌드·배포: `v*` 태그를 올리면 CI가 DMG/EXE를 Releases에 올린다(아직 한 번도 실행 안 함). README 앞부분은 비개발자용 설치 안내.
+- 수치 계산은 앱 코드가 담당한다. 모델이 만든 미확인 수치는 답에서 제외한다. 클라우드 모델의 대화 계획·재질문·상담과 로컬 모델의 기존 의도 분기가 함께 있다.
+- 스타포스 기대값은 공통 전이행렬 한 번으로 비용·횟수·파괴를 구한다. 비용표는 제한된 캐시를 쓰며 계산 결과는 기존 코드와 일치한다.
+- 수익 주간은 목요일 0시 기준이다. 결정석 표는 사용자 제공 업데이트 813을 기준으로 하며 검은 마법사의 지연 적용일은 2026-10-01이다. 게임 공시를 이번에 새로 대조한 것은 아니다.
+- 강화 기록의 사용 메소는 API에 없어 비용식으로 추정한다. 최고 성에 처음 도달하기 전/후를 나누며 흔적 복구 비용은 포함하지 않는다.
+- 공지·업데이트·진행 중 이벤트를 정기 수집하고 공식 본문을 근거 문서로 승인한다. 커뮤니티 후보 자료는 별도 검토가 필요하다.
+- 넥슨 캐시는 180초·전체 64개 제한이다. 동일 요청을 공유하되 반환 자료는 복사하고 키 교체 때 캐시를 무효화한다. 최대 3분의 정보 지연은 남는다.
+- 버전은 0.4.3을 유지했다. 아래 작업 이력에 v0.4.3 릴리스 기록이 있으나 이번 수정의 패키지 빌드·원격 CI·릴리스는 실행하지 않았다.
 
 ## 주요 파일
 
 | 파일 | 역할 |
 |---|---|
-| `mepiti/server.py` | 로컬 HTTP 서버, API 라우팅, 요청 보호. `CachedNexon`이 넥슨 호출을 180초 캐시한다 |
-| `mepiti/core.py` | SQLite 저장소(대화·캐릭터·문서·노작값), 문서 검토·검색, 용어 |
-| `mepiti/adapters.py` | 넥슨 API(허용 경로 목록 `Nexon.get`), Ollama, 키체인, OCR |
-| `mepiti/chat.py` | 대화 흐름 전체. 의도 판별 정규식(`*_INTENT`)과 분기 |
-| `mepiti/context.py` | 모델에 넘길 캐릭터 사실, 주제 장비 찾기·요약 |
-| `mepiti/starforce.py` | 스타포스 확률표·비용식·이벤트·할인·기대값 |
-| `mepiti/conditions.py` | 강화 조건(이벤트·파괴방지·복구·할인) 저장·해석·선택창 |
-| `mepiti/prices.py` | 노작값 저장·되묻기, 금액 표기 해석(`parse_price`: 억·만·천) |
-| `mepiti/union.py` | 유니온 공격대원 효과 표(사용자 제공 커뮤니티 표)와 추천 |
-| `mepiti/earnings.py` | 수익 기록, 결정석 가격표, 스케줄러 불러오기 |
-| `mepiti/history.py` | 스타포스 기록 저장·분석 |
-| `mepiti/notices.py` | 넥슨 공지 수집·이벤트·결정석 알림 |
-| `mepiti/static/index.html`, `app.js`, `characters.js`, `style.css` | 화면. 빌드 없이 바로 쓰는 JS·CSS |
-| `tests/test_app.py` | 자동 테스트 전체(한 파일) |
-| `scripts/build.py`, `scripts/installer.iss`, `.github/workflows/build.yml` | 패키지 빌드·CI·릴리스 |
-| `scripts/import_documents.py` | JSONL 문서 가져오기(자료 탭은 없어졌지만 채팅 근거 검색에 쓸 수 있다) |
+| `mepiti/server.py`, `core.py` | HTTP 라우팅·외부 조회 캐시, SQLite 저장소·문서 검색·표 초기화 및 작업 잠금 |
+| `mepiti/adapters.py`, `models.py` | 넥슨 허용 API, 로컬/클라우드 모델, 보안 저장소·OCR |
+| `mepiti/chat.py`, `planner.py`, `consult.py`, `context.py` | 대화 흐름·계획·재질문·상담·캐릭터 사실 |
+| `mepiti/starforce.py`, `conditions.py`, `prices.py` | 강화 계산·조건·노작값 |
+| `mepiti/statcalc.py`, `peers.py` | 스탯 재현·교체/세트 시뮬레이션, 목표 전투력대 수집·비교 |
+| `mepiti/earnings.py`, `history.py`, `goals.py`, `union.py` | 수익·강화 기록·목표·유니온 |
+| `mepiti/notices.py`, `auction.py` | 공식 공지·경매장 연결 |
+| `mepiti/desktop.py`, `backup.py`, `updater.py`, `update_apply.py` | 앱 창·백업·자동 업데이트 |
+| `mepiti/static/` | HTML·JS·CSS·화면 자산. 빌드 없이 실행 |
+| `tests/test_*.py`, `tests/test_frontend.js` | Python 테스트 8개 파일, Node 화면 회귀 검사 |
+| `scripts/audit_benchmark.py`, `docs/audit/` | 재현 가능한 임시 자료 성능 측정·점검 근거 |
+| `scripts/build.py`, `scripts/installer.iss`, `.github/workflows/build.yml` | 대상 OS 패키지 빌드·CI·릴리스 |
+| `scripts/import_documents.py`, `scripts/stat_check.py` | 개발용 문서 가져오기·스탯 점검 |
 
 ## 실행 및 검증 명령
 
 프로젝트 루트에서 실행한다.
 
 ```sh
-.venv/bin/python -m mepiti                          # 앱 실행(http://127.0.0.1:8765)
-.venv/bin/python -m unittest discover -s tests      # 테스트(2026-09-28 기준 258개)
-node --check mepiti/static/app.js                   # JS 구문 검사(characters.js도)
-lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(macOS)
-.venv/bin/python -m mepiti --port 8766 --data-dir /tmp/mepiti-test --no-browser   # 시험용 별도 DB
-.venv/bin/python scripts/build.py                   # 패키지 빌드(대상 OS에서)
+.venv/bin/python -m mepiti
+.venv/bin/python -m unittest discover -s tests
+node --check mepiti/static/app.js
+node --check mepiti/static/characters.js
+node --check mepiti/static/tour.js
+node tests/test_frontend.js
+.venv/bin/python -m scripts.audit_benchmark --output /tmp/mepiti-audit-benchmark.json
+.venv/bin/python -m mepiti --port 8766 --data-dir /tmp/mepiti-test --no-browser
+.venv/bin/python scripts/build.py
 ```
 
-- 기본 DB: `~/.mepiti/mepiti.sqlite3`. API 키는 OS 보안 저장소에만 있다.
-- 서버 코드(`.py`)를 바꾸면 앱을 껐다 켜야 한다. 화면 파일(`static/`)만 바꾸면 브라우저 새로고침으로 된다.
-- 응용 프로그램 폴더의 `Mepiti.app`은 예전에 빌드한 것이라 최신 코드가 아니다. 새로 빌드하기 전에는 터미널로 실행한다.
+- 기본 DB는 `~/.mepiti/mepiti.sqlite3`, API 키는 OS 보안 저장소다. 시험은 임시 `--data-dir` 또는 테스트의 임시 DB만 사용한다.
+- Python 변경 뒤 서버 재시작이 필요하다. JS/CSS 변경은 브라우저 새로고침으로 확인한다.
+- 설치된 앱이 이번 소스와 같은지 확인하려면 패키지 빌드/버전을 따로 확인해야 한다. 이번에는 설치된 앱을 바꾸지 않았다.
 
-## 수정 방법과 주의할 점 (팁)
+## 수정 방법과 주의할 점
 
-### 꼭 지킬 것
-- **시험은 반드시 임시 DB로.** `--data-dir <임시 폴더>`를 쓴다. 예전에 시험 중 지어낸 노작값(32억·45억)이
-  실제 DB(`~/.mepiti`)에 저장돼 사용자 계산을 오염시킨 적이 있다.
-- **게임 수치를 지어내지 않는다.** 확률·가격·효과 수치는 출처가 있는 값만 넣고, 코드 주석과 화면에 출처·비공식 여부를 적는다.
-  사용자가 붙여 준 자료는 "사용자 제공"이라고 남긴다. 모르는 값은 사용자에게 묻는다.
-- **넥슨 API 필드는 문서를 받아서 쓴다.** 이 클라우드 환경은 `nexon.com` 접속이 막혀 있다. 기억으로 쓰면 틀린다
-  (예: 파괴방지 필드는 `destroy_defense`가 아니라 `destroy_defence`). 사용자에게 문서의 요청·응답 부분을 붙여 달라고 한다.
-- **새 넥슨 API는 `adapters.py`의 `Nexon.get` 허용 경로 목록에 먼저 넣는다.** 안 넣으면 "허용되지 않은 API입니다" 오류가 난다.
-- **API 키·실제 캐릭터명은 기록·커밋에 남기지 않는다.** 테스트 캐릭터 이름은 '테스트', '시험렌렌' 같은 가짜를 쓴다.
+- 게임 수치를 지어내지 않는다. 사용자 제공·공식·커뮤니티 자료의 출처와 조건을 구분하고 승인 전 자료를 사실로 검색하지 않는다.
+- 넥슨 필드는 현재 공식 요청/응답 문서를 확인한다. 예를 들어 파괴방지 필드는 `destroy_defence`다. 새 API는 `adapters.py` 허용 목록에도 등록한다.
+- API 키·실제 캐릭터명은 기록·커밋에 남기지 않는다. 실제 DB에 시험용 노작값·수익·캐릭터를 쓰지 않는다.
+- 장비창 배치는 사용자 승인 표를 따른다. `characters.js`의 `EQUIPMENT_LAYOUT`을 스크린샷 추정만으로 고치지 않는다.
+- 결정석 변경: `earnings.py`의 `CRYSTALS`, `CRYSTAL_SOURCE`, `DELAYED`와 `notices.py`의 `CRYSTAL_TABLE_DAY`를 함께 확인한다.
+- 강화 이벤트 변경: `starforce.py`의 `EVENTS`, 기록 이벤트 추정은 `history.event_name`이다. 파괴방지는 15~17성, MVP·PC방 할인은 16성 이하, 이벤트 할인과 곱한다.
+- 수익 화면 id는 `calculator`, 기록은 `library`다. 공개 화면 이름과 내부 id를 혼동하지 않는다.
+- 기존 Python 테스트는 상속 때문에 같은 검사가 여러 번 실행되는 경우가 있다. 426은 실행 건수이며 신규 최적화 테스트는 독립적인 20개다.
+- UI는 가짜 넥슨·보안 저장소와 임시 DB 서버에서 확인한다. 서버는 자신이 실행한 PID/세션만 종료한다.
+- 계산 변경은 원래 코드·독립 계산기·몬테카를로 등 목적에 맞는 대조로 확인한다. 이번 최적화의 2,048조건 일치는 최신 게임 규칙 검증을 대신하지 않는다.
 
-### 자주 바꾸는 곳
-- **결정석 가격이 바뀌면**: `earnings.py`의 `CRYSTALS`(보스, 난이도, 기존가, 변경가)와 `CRYSTAL_SOURCE`, 적용일이 다르면 `DELAYED`.
-  `notices.py`의 `CRYSTAL_TABLE_DAY`도 새 표를 넣은 날로 바꿔야 옛 공지로 다시 알리지 않는다.
-- **스타포스 이벤트가 새로 생기면**: `starforce.py`의 `EVENTS`에 `_event(...)`로 추가. 기록 탭의 이벤트 이름 추정은 `history.event_name`.
-- **유니온 효과 표**: `union.py`의 `EFFECTS`·`JOBS`·`NOTES`와 평가 규칙 `rating`. API 직업 이름과 표 이름이 다르면 `ALIASES`.
-- **장비창 배치**: `characters.js` 맨 위 `EQUIPMENT_LAYOUT`. 슬롯 이름은 넥슨 `item_equipment_slot` 값과 정확히 같아야 한다.
-- **화면 크기**: 나머지 탭 배율은 `style.css` 끝의 `--ui-scale` 한 곳. 캐릭터 탭은 `.hero-avatar`, `.equipment-slot` 등을 직접 지정했다.
-- **장비 레벨 이름 추정**: `history.py`의 `NAME_LEVELS`(에테르넬 250 등). 확실한 세트만 넣는다.
+## 마지막 검증 결과
 
-### 헷갈리기 쉬운 것
-- 화면 id가 옛 이름이다: 수익 = `calculator`, 기록 = `library`. 탭 이름만 바꾸고 id는 호환을 위해 두었다.
-- 게임 용어는 **파괴방지**(안전모드 아님). 코드 내부 키는 `safeguard` 그대로다.
-- 파괴방지는 **15~17성만** 가능하다. 18성 이상 요청은 계산에서 빼고 `safeguard_ignored`로 알린다.
-- MVP·PC방 할인은 **16성 이하 시도에만**, 이벤트 30% 할인과는 **곱한다**(더하지 않는다).
-- 1+1 이벤트는 **10성 이하**. 금액은 '조' 단위를 잘못 쓰기 쉽다: 88,988,700,806 메소는 약 **890억**이다.
-- 강화 조건은 한 번 저장하면 다시 묻지 않는다. 조건이 이상하면 사용자에게 채팅에 **"강화 조건 다시"**를 입력하게 한다.
-- "기대값이 얼마야"의 '얼마'는 시세 질문이 아니다(`ITEM_PRICE`로 구분). 의도 정규식을 바꿀 때 기존 테스트를 꼭 돌린다.
-- 넥슨 스케줄러·스타포스 기록·공지 응답은 **실제 계정으로 아직 확인하지 못했다.** 이름 대조·완료 표시 형식이 다를 수 있다.
-- `CachedNexon`은 캐릭터·목록·유니온·공지 목록을 180초 캐시한다. 방금 바뀐 게임 정보가 3분 늦게 보일 수 있다.
+### 2026-10-01 — 이번 로컬 점검
 
-### 검증 요령
-- 테스트는 `tests/test_app.py` 한 파일이다. 하위 클래스가 상위 테스트를 상속해 같은 테스트가 여러 번 돈다(개수가 많아 보이는 이유).
-- 사용자가 겪은 대화는 **그대로 재현하는 회귀 테스트**로 넣고, 고치기 전 코드에서 실패하는지 확인한다.
-- 화면 확인은 가짜 넥슨 클라이언트를 끼운 서버 + Playwright(Chromium)로 한다. 이 컨테이너는 키체인 라이브러리가 충돌하므로
-  시험 서버에서는 `server.Vault`도 가짜로 바꾼다. 서버를 끌 때 `pkill -f` 대신 PID로 끈다(명령줄에 걸려 셸까지 죽는다).
-- 계산식을 바꾸면 mesulive 루프를 옮긴 몬테카를로와 대조한다(오차 1% 이내가 기준).
+- Python **426개 통과**, Node 요청/비교 표 회귀 검사, Python 전체 구문·미정의 이름 검사, 앱/도구/신규 테스트 미사용 코드 검사, JS 세 파일 구문 검사, `git diff --check` 통과.
+- 수정 전/후 같은 가상 자료의 반환 JSON 해시 4개 일치. 강화 계산 2,048조건의 모든 반환 필드 일치.
+- 캐릭터 조회 11.649→0.823ms, 수익 집계 78.445→31.410ms, 기록 비용 48.762→6.753ms, 강화 기대값 35.495→14.461ms(각 5회 중앙값, 임시 자료).
+- Chromium/WebKit 데모에서 6개 탭·비교 표·재획 저장·대화 확인. 동일 GET 3개→1회, 중복 탭 로딩 제거, 대화 뒤 목록 실패에도 답변 유지, JavaScript 오류 0개.
+- 실제 사용자 DB·키를 쓰지 않았다. 실제 API·유료 모델·Windows·새 패키지·원격 CI는 이번에 검증하지 않았다.
 
-## 마지막 검증 결과 (2026-09-28, 클라우드 컨테이너)
+### 2026-09-28 — 이전 검증(재실행 아님)
 
-- 자동 테스트 **258개 통과**, `app.js`·`characters.js` 구문 검사 통과, PR CI(macOS·Windows 빌드) 통과.
-- Chromium으로 각 기능 화면 확인(가짜 넥슨 응답): 선택창, 장비 대화, 프리셋, 수익·주보, 기록 탭, 글씨 배율, 캐릭터 외형.
-- 사용자 제공 계산기 결과와 대조: 샤타포스+MVP 다이아 18→21성 152억 811만 vs 앱 152억 834만(0.0015%).
-- 이전 검증(날짜 동일, 사용자 Mac 로컬): 실제 캐릭터 79개 목록 조회, 장비 26종 배치, macOS DMG 빌드.
-- **미검증**: 실제 계정의 스케줄러·스타포스 기록·공지·유니온 응답, Windows 설치, 릴리스 워크플로.
-- 모델 서술 품질은 2026-09-28 사용자 Mac(M4/16GB, Ollama 0.34.4)에서 소형 모델 8종으로 측정했다. GTX 1650 실측은 아직 없다.
+- 당시 Python 258개·JS 구문·PR CI 통과, 가짜 응답 Chromium 확인, 사용자 계산기 기대값과 대조.
+- 당시 사용자 Mac에서 실제 목록 79개·장비 배치·DMG 빌드 및 소형 모델 비교 기록. 이후 검증/릴리스는 아래 날짜별 작업 이력 참조.
 
-## 미완료 사항과 필요한 입력
+## 미완료 사항
 
-1. PR 병합과 저장소 공개 전환은 사용자가 할 일이다. 공개 후 `v0.1.1` 같은 태그로 첫 릴리스를 실행·확인한다.
-2. 실제 계정으로 기록 탭 이득·손해, 스케줄러 보스 이름·가격 대조, 공지 수집을 확인받아야 한다.
-3. macOS 패키지(`Mepiti.app`)를 최신 코드로 재빌드해야 한다. Mac에서만 가능.
-4. 소형 모델 비교는 1차 완료(`scripts/eval_models.py`, 아래 2026-09-28 '가벼운 모델 찾기' 참조). 기본 모델 교체 여부는 사용자 결정 대기.
-   GTX 1650 실기에서의 속도·VRAM, Windows 설치 검증은 미완료.
-5. 흔적 복구 비용은 기록 탭에서 계산하지 않는다(기록에 없음). 유니온은 배치 가능 인원 제한을 계산하지 않는다.
-6. 주스탯 환산은 계산 탭과 함께 삭제했다. 되살리려면 git 기록(`mepiti/conversion.py`, `mepiti/jobdata.py`)에서 복구한다.
-   메용 패시브화로 원본 계산기의 입력 전제가 깨진 문제(스탯퍼 측정)는 여전히 미결이다.
+1. 이번 최적화 변경은 미커밋·미릴리스다. 새 macOS/Windows 패키지와 실제 설치·업데이트는 별도 검증이 필요하다.
+2. 실제 계정의 기록·스케줄러·공지·경매장과 유료 LLM 연결은 이번 가짜 응답 검증 범위 밖이다. 이전 실측과 구분한다.
+3. 헥사 스탯 표·모르는 스탯 원천, 강화/잠재를 포함한 교체 비용, 내 장비 강화 가정 시뮬레이션, 먼 목표 경험치 표 등 기존 미완료 기능은 남아 있다.
+4. 흔적 복구 비용은 기록 분석에 없고 유니온 배치 가능 인원 제한도 계산하지 않는다. 삭제한 주스탯 환산 계산기와 메용 입력 전제 문제는 기존 미완료다.
+5. GTX 1650 등 Windows 실기 속도·VRAM은 이번에 확인하지 않았다. 로컬 모델은 사용자 선택을 유지한다.
+6. 문서 검색·전체 수익/대화 조회는 자료량에 따라 증가한다. 페이지 조회/검색 인덱스 도입은 실제 운영량을 측정해 판단한다.
 
 ## 다음 작업
 
-1. 사용자가 Mac에서 최신 브랜치로 기록 탭·주보 불러오기·공지를 써 보고 알려 주는 문제를 고친다.
-2. PR 병합 후 공개 전환·첫 릴리스 확인, macOS 패키지 재빌드.
-3. 후보(사용자와 논의): 장비 카드의 단계별 기대값 표, 장비 비교, 캐릭터 전체 요약 대화, 스냅샷 간 장비 변화 알림.
+1. 이번 변경을 배포한다면 macOS/Windows 빌드·설치·업데이트와 실제 API 화면을 확인한 뒤 릴리스한다.
+2. 실제 사용 중 기록·주보·공지·목표 전투력대 수집/상담 문제를 재현해 수정한다.
+3. 다음 기능 작업에서는 스탯/세트 근거 확보, 예산·강화 비용을 포함한 추천, 내 장비 강화 가정을 우선순위에 따라 진행한다.
 
 ## 작업 이력
-
 ### 2026-09-28 — 로컬 알파 초기 구현
 
 - 변경: `mepiti/`, `tests/`, `scripts/`, `pyproject.toml`, 실행 스크립트, CI, `README.md`, `IMPLEMENTATION.md` 신규 작성.
@@ -1304,3 +1277,31 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - **릴리스 v0.4.2**(2026-10-01, 사용자 "릴리즈"): `a613a03`, CI 통과, `main` 빨리감기(`5c05124..a613a03`), 태그, 릴리스 성공(파일 5개), API latest v0.4.2. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.2
 - 같은 날(사용자: "넥슨 API로 들어가 있으면 알아서 캐릭터 정보"): 캐릭터 미등록이면 계정에서 레벨 최고 캐릭터로 자동 답(안내 줄로 알림), 질문한 부위 상세를 사실 맨 앞에. 미릴리스.
 - **릴리스 v0.4.3**(2026-10-01, 사용자 "ㅇㅇㅇ"): `32a2b12`, CI 통과, `main` 빨리감기(`a613a03..32a2b12`), 태그, 릴리스 성공(파일 5개), API latest v0.4.3. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.3
+
+### 2026-10-01 — 전체 점검·최적화 (중간 기록)
+
+- 사용자 요청: "전수조사후 최적화". 코드·화면·저장소·외부 호출·빌드/업데이트 경로를 점검한다.
+- 현재 변경: `core.py` 캐릭터 스냅샷 일괄 조회·인덱스·표 초기화 및 작업 잠금, `server.py` 중복 외부 조회 합치기·캐시 무효화·이미지 제공,
+  `earnings.py` 주/월 집계 1회 순회, `starforce.py` 공통 행렬 1회 계산·비용표 캐시·입력 검증, `history.py` 비용 중복 계산 제거,
+  `statcalc.py`·`notices.py`·`peers.py` 동시 호출 보호, `updater.py` SHA256 스트리밍, 화면 JS 요청/탭 중복 제거와 숨긴 탭 폴링 중지.
+- 추가 파일: `scripts/audit_benchmark.py`, `tests/test_optimization.py`.
+- 이번 확인: 기존 테스트 406개 통과, 첫 최적화 뒤 추가 테스트 포함 421개 통과. 뒤이어 보완한 동시 호출 보호는 최종 전체 재검증 전이다.
+  동일 가상 자료의 수정 전/후 JSON SHA256 일치. 임시 DB 캐릭터 79개·스냅샷 2,370개·수익 10,000건, 5회 중앙값:
+  캐릭터 11.552→0.877ms, 수익 77.259→32.623ms, 기록 비용 10,000회 48.087→7.008ms, 강화 계산 100회 35.888→14.589ms.
+- 실제 사용자 DB·실제 API 키를 쓰지 않았다. 사용자 파일 `Maple_Equipment_Recommendation_Pipeline.md`는 그대로 둔다.
+- 다음: 보완분 동시성 회귀 테스트, 데모 브라우저 검증, 최종 정적 검사·전체 테스트·점검 보고서와 문서 최신화. 아직 빌드·릴리스하지 않았다.
+
+### 2026-10-01 — 전체 점검·최적화 완료
+
+- 사용자 요청: "전수조사후 최적화". 기존 실행·도구·검증·배포 파일 58개를 목록화하고 저장소·계산·외부 호출·화면·업데이트 경로를 점검했다.
+- 변경 파일: `core.py`, `server.py`, `earnings.py`, `starforce.py`, `history.py`, `conditions.py`, `chat.py`, `statcalc.py`, `notices.py`, `peers.py`, `updater.py`, `auction.py`, `context.py`, 화면 `index.html`·`app.js`·`characters.js`, `scripts/stat_check.py`·`import_documents.py`, CI, `README.md`·`IMPLEMENTATION.md`·`HANDOFF.md`.
+  신규: `scripts/audit_benchmark.py`, `tests/test_optimization.py`, `tests/test_frontend.js`, `docs/audit/2026-10-01.md`·측정 JSON(`2026-10-01-benchmark.json`).
+- 완료: 스냅샷 일괄 조회·인덱스·표 초기화 1회, 수익 1회 집계, 강화 공통 행렬·비용 캐시, 네트워크 중복 요청 합치기·키 교체 캐시 보호,
+  스탯/공지/비교 수집 동시성 보호, 화면 중복 로딩·이전 응답·숨은 탭 폴링 제거, 비교 표 DOM 오류·답변 유실·PNG 제공 수정, 업데이트 해시 스트리밍, 설정의 오래된 지원 범위·버전 표시 정리.
+- 실제 검증: Python 426개 통과(기존 406 + 신규 20), Node 회귀 검사, JS 3개 구문 검사, compileall·Ruff·diff 공백 검사 통과.
+  Chromium/WebKit 데모 6탭·수익 저장·비교·대화·실패 후 답변 유지 확인, JS 오류 0개. 키 목록 응답 보호 보완 뒤에도 Chromium/WebKit 검증이 통과했다.
+- 측정: 수정 전 `d8839fb`와 같은 임시 자료, 5회 중앙값. 캐릭터 11.649→0.823ms(92.9%), 수익 78.445→31.410ms(60.0%),
+  기록 비용 48.762→6.753ms(86.2%), 강화 35.495→14.461ms(59.3%). 4항목 반환 JSON 해시 동일, 강화 무작위 고정 시드 2,048조건 전 필드 일치.
+- 한계: 로컬 처리 시간이며 실제 네트워크/체감 속도를 뜻하지 않는다. 최신 게임 수치 재대조·실제 API/유료 모델·Windows·빌드/원격 CI는 미실행.
+  사용자 DB·키는 쓰지 않았고 `Maple_Equipment_Recommendation_Pipeline.md`는 그대로 두었다. 버전 0.4.3 유지, 커밋·푸시·릴리스는 하지 않았다.
+- 다음: 위 미완료/다음 작업대로 실제 운영/패키지 검증 및 근거가 필요한 기능을 이어간다. 상세 근거는 `docs/audit/2026-10-01.md`.

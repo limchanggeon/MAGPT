@@ -4,7 +4,6 @@
   .venv/bin/python scripts/stat_check.py 캐릭터이름
 """
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -14,19 +13,7 @@ from mepiti.adapters import Nexon, Vault  # noqa: E402
 
 
 def fetch(nexon, name):
-    ocid = nexon.get('id', {'character_name': name})['ocid']
-    raw = {}
-    for path in statcalc.PATHS:
-        time.sleep(0.3)
-        raw[path] = nexon.get(path, {'ocid': ocid})
-    raw['skills'] = []
-    for grade in statcalc.SKILL_GRADES:
-        time.sleep(0.3)
-        try:
-            raw['skills'] += nexon.get('character/skill', {'ocid': ocid, 'character_skill_grade': grade}).get('character_skill') or []
-        except Exception:
-            pass
-    return raw
+    return statcalc.fetch(nexon.get, name)
 
 
 def main():

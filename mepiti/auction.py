@@ -12,7 +12,6 @@
 - 경매장 검색은 넥슨 쪽 한도(하루 100회)가 있다. 찾은 값은 prices가 저장해 다시 검색하지 않는다.
 """
 import json
-import re
 import secrets
 import threading
 import uuid

@@ -47,6 +47,11 @@ def stale(store):
 
 def sync(store, nexon, force=False):
     """목록을 받고, 새 글의 본문을 근거 문서로 넣는다. 30분 안에는 다시 받지 않는다."""
+    with store.operation('notices'):
+        return _sync(store, nexon, force)
+
+
+def _sync(store, nexon, force):
     if not hasattr(nexon, 'notices') or (not force and not stale(store)):
         return {'skipped': True}
     imported = dict(store.setting(IMPORTED) or {})

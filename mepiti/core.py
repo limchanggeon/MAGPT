@@ -4,6 +4,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -64,6 +65,10 @@ class Store:
         self.folder = Path(folder)
         self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.folder / 'mepiti.sqlite3'
+        self._schema_lock = threading.Lock()
+        self._schemas = set()
+        self._operation_guard = threading.Lock()
+        self._operations = {}
         with self.db() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -74,6 +79,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY, title TEXT, body TEXT, metadata TEXT);
             CREATE TABLE IF NOT EXISTS prices(id TEXT PRIMARY KEY, item TEXT NOT NULL, add_grade INTEGER, potential TEXT, price REAL NOT NULL, source TEXT NOT NULL, note TEXT, recorded_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS prices_item ON prices(item);
+            CREATE INDEX IF NOT EXISTS snapshots_character_time ON snapshots(character_id, retrieved_at DESC);
+            CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots(retrieved_at);
+            CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id);
             ''')
             # 장비를 주제로 한 대화. 예전 DB에는 이 열이 없어 추가만 한다(기존 대화는 그대로).
             if 'topic' not in [r['name'] for r in db.execute('PRAGMA table_info(sessions)')]:
@@ -96,6 +104,31 @@ class Store:
         with self.db() as db:
             return [dict(r) for r in db.execute(query, args)]
 
+    @contextmanager
+    def schema(self, name):
+        """각 표의 호환성 작업은 Store마다 한 번. 실패하면 다음 요청에서 재시도한다."""
+        with self._schema_lock:
+            if name in self._schemas:
+                yield False
+            else:
+                yield True
+                self._schemas.add(name)
+
+    @contextmanager
+    def operation(self, name):
+        """외부 조회 후 저장하는 작업을 같은 대상끼리만 직렬화한다. 끝난 잠금은 제거한다."""
+        with self._operation_guard:
+            entry = self._operations.setdefault(name, [threading.RLock(), 0])
+            entry[1] += 1
+        try:
+            with entry[0]:
+                yield
+        finally:
+            with self._operation_guard:
+                entry[1] -= 1
+                if not entry[1]:
+                    del self._operations[name]
+
     def setting(self, key, default=''):
         rows = self.rows('SELECT value FROM settings WHERE key=?', (key,))
         return json.loads(rows[0]['value']) if rows else default
@@ -110,15 +143,28 @@ class Store:
         with self.db() as db:
             db.execute('DELETE FROM snapshots WHERE retrieved_at < ?', (cutoff,))
 
-    def characters(self):
+    def characters(self, include_snapshots=True):
+        if not include_snapshots:
+            return self.rows('SELECT * FROM characters ORDER BY main DESC, created_at')
         self.purge_expired()
-        chars = self.rows('SELECT * FROM characters ORDER BY main DESC, created_at')
+        with self.db() as db:
+            chars = [dict(r) for r in db.execute('SELECT * FROM characters ORDER BY main DESC, created_at')]
+            snapshots_by_character = {}
+            # CROSS JOIN으로 캐릭터를 먼저 읽어 각 캐릭터의 최신 두 rowid만 찾는다.
+            # 일반 JOIN은 SQLite가 스냅샷 전체를 먼저 순회하도록 계획할 수 있다.
+            for row in db.execute('''SELECT s.* FROM characters c CROSS JOIN snapshots s
+                WHERE s.rowid IN (SELECT rowid FROM snapshots WHERE character_id=c.id
+                                 ORDER BY retrieved_at DESC, rowid DESC LIMIT 2)
+                ORDER BY s.retrieved_at DESC, s.rowid DESC'''):
+                snapshot = dict(row)
+                snapshot['data'] = json.loads(snapshot['data'])
+                snapshots_by_character.setdefault(snapshot['character_id'], []).append(snapshot)
         for c in chars:
-            snapshots = self.rows('SELECT * FROM snapshots WHERE character_id=? ORDER BY retrieved_at DESC, rowid DESC LIMIT 2', (c['id'],))
-            c['snapshots'] = [{**s, 'data': json.loads(s['data'])} for s in snapshots]
+            snapshots = snapshots_by_character.get(c['id'], [])
+            c['snapshots'] = snapshots
             c['changes'] = {}
             if len(snapshots) == 2:
-                a, b = [json.loads(s['data']) for s in snapshots]
+                a, b = [s['data'] for s in snapshots]
                 for key in ('level', 'combat_power', 'stat'):
                     if isinstance(a.get(key), (int, float)) and isinstance(b.get(key), (int, float)):
                         c['changes'][key] = a[key] - b[key]
@@ -174,12 +220,16 @@ class Store:
     def documents(self):
         return [{**d, 'metadata': json.loads(d['metadata'])} for d in self.rows('SELECT * FROM documents ORDER BY rowid DESC')]
 
+    def document_counts(self):
+        rows = self.rows('SELECT metadata FROM documents')
+        return len(rows), sum(json.loads(r['metadata']).get('verification_status') == 'reviewed' for r in rows)
+
     def review(self, data):
-        docs = [d for d in self.documents() if d['id'] == data.get('id')]
+        docs = self.rows('SELECT id, metadata FROM documents WHERE id=?', (data.get('id'),))
         if not docs:
             raise AppError('문서를 찾을 수 없습니다.', 404)
         doc = docs[0]
-        m = doc['metadata']
+        m = json.loads(doc['metadata'])
         if data.get('approve'):
             if not all(m.get(k) for k in ('effective_from','version','valid_until','topic')) or m['region'] != 'KR' or m['server_type'] != 'live':
                 raise AppError('승인하려면 적용일·버전·재검토 기한·주제와 KR/live 범위를 입력해야 합니다.')
@@ -207,7 +257,8 @@ class Store:
             if timestamp(m['effective_from']) > current or timestamp(m['valid_until']) <= current or (m.get('effective_to') and timestamp(m['effective_to']) <= current):
                 continue
             haystack = normalize(d['title'] + ' ' + d['body']).lower()
-            matches = [t for t in tokens if t in haystack or any(w.startswith(t[:max(2,len(t)-2)]) for w in haystack.split())]
+            words = haystack.split()
+            matches = [t for t in tokens if t in haystack or any(w.startswith(t[:max(2,len(t)-2)]) for w in words)]
             if matches:
                 d['score'] = sum(3 if t in d['title'].lower() else 1 for t in matches)
                 d['passages'] = [p.strip() for p in re.split(r'\n+',d['body']) if p.strip()]
@@ -285,4 +336,3 @@ class Store:
     def message(self, sid, role, payload):
         with self.db() as db:
             db.execute('INSERT INTO messages VALUES(?,?,?,?,?)', (identifier(),sid,role,json.dumps(payload,ensure_ascii=False),now()))
-

@@ -537,6 +537,9 @@ def fetch(get, name, sleep=None):
     import time
     pause = sleep or time.sleep
     ocid = get('id', {'character_name': name}).get('ocid')
+    if not ocid:
+        from .core import AppError
+        raise AppError('캐릭터 식별자를 확인하지 못했습니다.', 502)
     raw = {}
     for path in PATHS:
         pause(0.3)
@@ -553,12 +556,21 @@ def fetch(get, name, sleep=None):
 
 def load(store, get, name, refresh=False, fetch_missing=True, sleep=None):
     """캐릭터의 스탯 출처(Ledger). 하루(KST)에 한 번만 넥슨에서 받고 DB에 둔다. fetch_missing=False면 캐시만 본다."""
+    if not fetch_missing:
+        return _load(store, get, name, refresh, fetch_missing, sleep)
+    with store.operation(('stat_raw', name)):
+        return _load(store, get, name, refresh, fetch_missing, sleep)
+
+
+def _load(store, get, name, refresh, fetch_missing, sleep):
     import json
     from datetime import datetime
     from .core import KST
     day = datetime.now(KST).date().isoformat()
-    with store.db() as db:
-        db.executescript(CACHE)
+    with store.schema('stat_raw') as needed:
+        if needed:
+            with store.db() as db:
+                db.executescript(CACHE)
     row = store.rows('SELECT day, data FROM stat_raw WHERE name=?', (name,))
     if row and row[0]['day'] == day and not refresh:
         return build(json.loads(row[0]['data']), store.setting(SET_TABLES) or {})

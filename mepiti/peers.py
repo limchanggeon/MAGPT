@@ -11,7 +11,6 @@
   - 모은 요약은 KEEP_DAYS일 동안 다시 조회하지 않는다.
 """
 import json
-import math
 import statistics
 import threading
 import time
@@ -48,10 +47,13 @@ NO_STARFORCE_SLOTS = ('보조무기', '엠블렘', '뱃지', '훈장', '포켓 �
 
 
 def ensure(store):
-    with store.db() as db:
-        db.executescript(SCHEMA)
-        if 'cp' not in [r['name'] for r in db.execute('PRAGMA table_info(peers)')]:
-            db.execute('ALTER TABLE peers ADD COLUMN cp REAL')
+    with store.schema('peers') as needed:
+        if not needed:
+            return
+        with store.db() as db:
+            db.executescript(SCHEMA)
+            if 'cp' not in [r['name'] for r in db.execute('PRAGMA table_info(peers)')]:
+                db.execute('ALTER TABLE peers ADD COLUMN cp REAL')
 
 
 def parse_cp(text):
@@ -144,6 +146,8 @@ class Peers:
         self.nexon = nexon_getter          # 앱이 넥슨 객체를 바꿔 끼워도 따라가게 함수로 받는다
         self.sleep = sleep
         self.lock = threading.Lock()
+        self.call_lock = threading.Lock()
+        self.collection_lock = threading.RLock()
         self.thread = None
         self.last_call = 0.0
         self.error = None
@@ -157,6 +161,11 @@ class Peers:
         return left(self.store)
 
     def get(self, path, query):
+        # 화면의 '다시 찾기'와 수집 스레드가 호출 몫·최소 간격을 동시에 갱신하지 않게 한다.
+        with self.call_lock:
+            return self._get(path, query)
+
+    def _get(self, path, query):
         if self.left() <= 0:
             raise AppError('오늘 목표 전투력대 유저 조회 몫을 다 썼어요. 내일 이어서 모읍니다.', 429)
         wait = GAP_SECONDS - (time.monotonic() - self.last_call)
@@ -198,6 +207,10 @@ class Peers:
 
     def choose(self, name, cp):
         """목표 전투력대 후보를 큐에 넣는다. 무릉 랭킹(층 순)을 후보로, 표본 몇 명의 전투력으로 목표 층을 어림한다(약 20회)."""
+        with self.collection_lock:
+            return self._choose(name, cp)
+
+    def _choose(self, name, cp):
         if not cp or cp < 1e6:
             raise AppError("목표 전투력을 '2억5천'처럼 적어 주세요.")
         ocid = self.get('id', {'character_name': name}).get('ocid')
@@ -242,6 +255,10 @@ class Peers:
     # 모으기 --------------------------------------------------------------
     def step(self):
         """큐에서 한 명을 확인한다: 전투력이 목표대면 장비(필요하면 세트 단계표도)를 저장. 더 할 게 없으면 False."""
+        with self.collection_lock:
+            return self._step()
+
+    def _step(self):
         from . import statcalc
         queue = self.store.setting(QUEUE) or []
         target = self.store.setting(TARGET) or {}

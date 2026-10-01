@@ -12,17 +12,26 @@ if(inAppWindow){
 }
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
-let accountCatalog = null, accountLoading = false, managedNames = new Set(), managedCharacters = [];
+let accountCatalog = null, accountLoading = false, catalogRequest=0, managedNames = new Set(), managedCharacters = [];
 const titles = {chat:'대화',characters:'캐릭터',calculator:'수익',goals:'목표',library:'기록',settings:'설정'};
-const fmt = (n) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:3}).format(n);
+const numberFormatter = new Intl.NumberFormat('ko-KR',{maximumFractionDigits:3});
+const fmt = (n) => numberFormatter.format(n);
 const el = (tag,cls,text) => { const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e; };
 function toast(message,error=false){const e=$('#toast');e.textContent=message;e.classList.toggle('error',error);e.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.hidden=true,6500);}
-async function api(path,data){const response=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'X-Mepiti-Token':token,...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error||'요청에 실패했습니다.');return result;}
+async function requestAPI(path,data){const response=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'X-Mepiti-Token':token,...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error||'요청에 실패했습니다.');return result;}
+const pendingGets = new Map();
+function api(path,data){
+  if(data!==undefined)return requestAPI(path,data);
+  if(pendingGets.has(path))return pendingGets.get(path);
+  const pending=requestAPI(path).finally(()=>pendingGets.delete(path));
+  pendingGets.set(path,pending);return pending;
+}
 async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}}
 async function task(button,fn){button.disabled=true;try{return await guard(fn);}finally{button.disabled=false;}}
 function formData(form){return Object.fromEntries(new FormData(form));}
 function sourceLink(url,text){const a=el('a','',text);try{const parsed=new URL(url);if(parsed.protocol==='https:'){a.href=url;a.target='_blank';a.rel='noreferrer noopener';}}catch{}return a;}
-function switchView(view){if(!titles[view])view='chat';$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters'){guard(loadCharacters);guard(loadPeers);}if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='goals')guard(loadGoals);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
+let activeView=null;
+function switchView(view){if(!titles[view])view='chat';if(view===activeView)return;activeView=view;clearTimeout(peerTimer);$$('.view').forEach(e=>e.hidden=e.id!=='view-'+view);$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#page-title').textContent=titles[view];if(view==='characters'){guard(loadCharacters);guard(loadPeers);}if(view==='calculator')guard(loadEarnings);if(view==='library')guard(loadForgeHistory);if(view==='goals')guard(loadGoals);if(view==='settings'){guard(loadStatus);guard(loadPrices);guard(loadAuction);guard(loadDataPanel);}location.hash=view;}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 window.addEventListener('hashchange',()=>switchView(location.hash.slice(1)));
 function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeight;}
@@ -46,7 +55,7 @@ async function sendChat(message,answer){
     const result=await api('chat',{message,session_id:sessionId,...(answer?{answer}:{}),...topic});
     sessionId=result.session_id;thinking.remove();
     if(chatTopic&&result.topic_item){chatTopic={...chatTopic,...result.topic_item};renderTopicCard();}
-    renderMessage('assistant',result);await loadHistory();
+    renderMessage('assistant',result);await guard(loadHistory);
   }catch(err){thinking.remove();$('#messages').lastElementChild?.remove();$('#welcome').hidden=$('#messages').children.length>0;throw err;}
   finally{busy=false;$('#send-button').disabled=false;}
 }
@@ -283,9 +292,11 @@ async function autoPieceAuction(d){
 }
 $('#piece-auction').onclick=e=>task(e.currentTarget,async()=>{pieceEdited=false;showPieceAuction(await api('earnings/piece-price',{}),true);});
 $('#hunt-form').elements.piece_price.addEventListener('input',()=>{pieceEdited=true;});
+let earningsRequest=0;
 async function loadEarnings(){
+  const request=++earningsRequest;
   const query=new URLSearchParams();if(earningsWeek)query.set('week',earningsWeek);if(earningsMonth)query.set('month',earningsMonth);
-  const d=await api('earnings'+(query.toString()?'?'+query:''));lastEarnings=d;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
+  const d=await api('earnings'+(query.toString()?'?'+query:''));if(request!==earningsRequest)return;lastEarnings=d;bossPrices=d.boss_prices||{};renderBossChecklist(d.crystals||[]);
   earningsWeek=d.week.current?'':d.week.start;earningsMonth=d.month.current?'':d.month.month;
   ['hunt-form','boss-form'].forEach(id=>{const f=$('#'+id).elements;if(!f.day.value)f.day.value=todayText();});
   if(d.piece_price&&!$('#hunt-form').elements.piece_price.value)$('#hunt-form').elements.piece_price.value=amountText(d.piece_price);
@@ -726,7 +737,7 @@ $('#auction-open').onclick=e=>task(e.currentTarget,async()=>{renderAuction(await
 $('#auction-check').onclick=e=>task(e.currentTarget,async()=>{renderAuction(await api('auction/check',{}));await loadPrices();});
 $('#price-fetch').onchange=e=>guard(async()=>{await api('prices/fetch',{enabled:e.target.checked});await loadPrices();});
 $('#key-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{const status=$('#key-card-status');if(await connectKey(e.target,status)){$('#account-characters').replaceChildren();switchView('characters');}else throw new Error(status.textContent);});};
-$('#delete-key').onclick=e=>task(e.currentTarget,async()=>{if(!confirm('저장된 API 키를 삭제합니다.'))return;await api('settings/key/delete',{});accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='키 삭제됨 · 설정에서 등록하세요';await loadStatus();toast('키를 삭제했습니다.');});
+$('#delete-key').onclick=e=>task(e.currentTarget,async()=>{if(!confirm('저장된 API 키를 삭제합니다.'))return;await api('settings/key/delete',{});resetCharacterCache();$('#account-characters').replaceChildren();$('#account-status').textContent='키 삭제됨 · 설정에서 등록하세요';await loadStatus();toast('키를 삭제했습니다.');});
 $('#model-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('settings/model',formData(e.target));await loadStatus();toast('모델을 저장했습니다.');});};
 $('#pull-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{await api('model/pull',formData(e.target));pollDownload();});};
 function progressText(d){return (d.status||'대기')+(d.total?` · ${Math.round((d.completed||0)/d.total*100)}% (${(d.completed/1e9).toFixed(2)} / ${(d.total/1e9).toFixed(2)} GB)`:'');}
@@ -878,7 +889,7 @@ function renderPresets(s){$('#model-presets').replaceChildren(...modelChooser(s)
 // 처음 실행하면 넥슨 API 키부터 연결하게 안내한다. 캐릭터·장비·기록이 모두 이 키로 조회된다.
 // 키 상태: missing(없음) · vault_error(보안 저장소를 못 읽음 — 키가 있을 수도 있다) · invalid(넥슨이 거절: 만료·삭제 등)
 // · connected(연결됨, 설정의 '발급 방법 보기'로 연 경우만 보인다). 인터넷·한도·점검으로 확인 못 한 경우는 카드를 띄우지 않는다.
-let keySkipped=false,keyOpened=false,keyState=null,keyChecking=false,lastStatus=null;
+let keySkipped=false,keyOpened=false,keyState=null,keyChecking=false,lastStatus=null,keyRequest=0;
 const KEY_CARD={
   missing:{title:'넥슨 API 키 연결',lead:'내 캐릭터와 장비를 불러오려면 넥슨이 무료로 발급하는 API 키가 필요해요. 처음 한 번만 하면 됩니다.',submit:'연결',close:'나중에'},
   invalid:{title:'저장된 넥슨 API 키를 쓸 수 없어요',lead:'넥슨이 저장된 키를 받아 주지 않았어요. 키가 만료됐거나 넥슨 Open API에서 삭제됐을 수 있어요. 아래 순서대로 키를 확인하거나 새로 받아 붙여 넣으세요.',submit:'바꾸기',close:'나중에'},
@@ -906,9 +917,12 @@ function renderKeyCard(s){
 // 앱을 켤 때 저장된 키가 아직 쓸 수 있는지 한 번 확인한다.
 async function checkSavedKey(s){
   if(!s.key_present||keyState)return;
+  const request=++keyRequest;
   keyChecking=true;renderKeyCard(s);
-  try{keyState=(await api('settings/key/check',{})).state;}catch{keyState='unverified';}
-  finally{keyChecking=false;}
+  try{const state=(await api('settings/key/check',{})).state;if(request===keyRequest)keyState=state;}
+  catch{if(request===keyRequest)keyState='unverified';}
+  finally{if(request===keyRequest)keyChecking=false;}
+  if(request!==keyRequest)return;
   renderKeyCard(lastStatus||s);if(typeof maybeStartTour==='function')maybeStartTour(lastStatus||s);
 }
 async function connectKey(form,status){
@@ -916,7 +930,7 @@ async function connectKey(form,status){
   let result;
   try{result=await api('settings/key/connect',formData(form));}
   catch(err){status.textContent=err.message;status.hidden=false;return false;}  // 넥슨이 거절한 키는 저장하지 않았다
-  form.reset();accountCatalog=null;keyState=result.state;keyOpened=false;
+  form.reset();resetCharacterCache();keyState=result.state;keyOpened=false;
   toast(result.state==='ok'?`연결됐어요. 캐릭터 ${result.characters}개를 찾았어요. 캐릭터 탭에서 볼 수 있어요.`
                           :`키를 저장했어요. 지금은 넥슨에서 확인하지 못했어요(${result.message}). 잠시 뒤 캐릭터 탭에서 다시 시도해 보세요.`);
   await loadStatus();return true;
@@ -973,10 +987,10 @@ async function refreshSavedCharacter(id){
 }
 function renderAccountCharacters(){renderCharacterRoster();}
 async function discoverCharacters(){
-  if(accountLoading)return;accountLoading=true;const button=$('#discover-characters');button.disabled=true;$('#account-status').textContent='목록 조회 중…';
-  try{accountCatalog=await api('characters/discover',{});$('#account-status').textContent=`캐릭터 ${accountCatalog.characters.length}개 · 조회 ${accountCatalog.retrieved_at}`;renderAccountCharacters();autoSelectCharacter();}
-  catch(e){accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='목록 조회 실패: '+e.message+' 아래에서 이름으로 직접 등록할 수 있습니다.';if(!selectedCharacterName)showProfileEmpty(e.message);}
-  finally{accountLoading=false;button.disabled=false;}
+  if(accountLoading)return;const request=++catalogRequest;accountLoading=true;const button=$('#discover-characters');button.disabled=true;$('#account-status').textContent='목록 조회 중…';
+  try{const found=await api('characters/discover',{});if(request!==catalogRequest)return;accountCatalog=found;$('#account-status').textContent=`캐릭터 ${accountCatalog.characters.length}개 · 조회 ${accountCatalog.retrieved_at}`;renderAccountCharacters();autoSelectCharacter();}
+  catch(e){if(request!==catalogRequest)return;accountCatalog=null;$('#account-characters').replaceChildren();$('#account-status').textContent='목록 조회 실패: '+e.message+' 아래에서 이름으로 직접 등록할 수 있습니다.';if(!selectedCharacterName)showProfileEmpty(e.message);}
+  finally{if(request===catalogRequest){accountLoading=false;button.disabled=false;}}
 }
 $('#discover-characters').onclick=discoverCharacters;
 $('#account-search').oninput=renderAccountCharacters;

@@ -31,13 +31,17 @@ CREATE INDEX IF NOT EXISTS earnings_day ON earnings(day);
 
 
 def ensure(store):
-    with store.db() as db:
-        db.executescript(SCHEMA)
-        # 스케줄러로 불러온 기록의 캐릭터와 중복 방지 키. 예전 표에는 없어 추가만 한다.
-        columns = [r['name'] for r in db.execute('PRAGMA table_info(earnings)')]
-        for column in ('character', 'source_key'):
-            if column not in columns:
-                db.execute(f'ALTER TABLE earnings ADD COLUMN {column} TEXT')
+    with store.schema('earnings') as needed:
+        if not needed:
+            return
+        with store.db() as db:
+            db.executescript(SCHEMA)
+            # 스케줄러로 불러온 기록의 캐릭터와 중복 방지 키. 예전 표에는 없어 추가만 한다.
+            columns = [r['name'] for r in db.execute('PRAGMA table_info(earnings)')]
+            for column in ('character', 'source_key'):
+                if column not in columns:
+                    db.execute(f'ALTER TABLE earnings ADD COLUMN {column} TEXT')
+            db.execute('CREATE INDEX IF NOT EXISTS earnings_source ON earnings(source_key)')
 
 
 def today():
@@ -188,7 +192,7 @@ ACCOUNT_CHARACTERS = 'account_characters'   # 넥슨 계정 캐릭터 목록(캐
 
 def character_choices(store, rows):
     """수익 기록에서 고를 캐릭터: 관리 중(대표 먼저) → 계정 캐릭터(레벨 높은 순) → 예전 기록에만 있는 이름."""
-    managed = sorted(store.characters(), key=lambda c: not c.get('main'))
+    managed = store.characters(include_snapshots=False)
     account = sorted(store.setting(ACCOUNT_CHARACTERS) or [], key=lambda c: -(c.get('level') or 0))
     seen, out = set(), []
     for group, items in (('관리 중', managed), ('계정', account)):
@@ -292,21 +296,24 @@ def overview(store, week=None, month=None, limit=200):
     week_to = week_from + timedelta(days=6)
     month_from = parse_month(month)
     month_to = shift_month(month_from, 1) - timedelta(days=1)
-    in_week = [r for r in rows if week_from.isoformat() <= r['day'] <= week_to.isoformat()]
-    in_month = [r for r in rows if month_from.isoformat() <= r['day'] <= month_to.isoformat()]
-
-    # 흐름: 고른 주까지 12주, 고른 달까지 6개월.
-    weeks = []
-    for back in range(11, -1, -1):
-        start = week_from - timedelta(weeks=back)
-        picked = [r for r in rows if start.isoformat() <= r['day'] <= (start + timedelta(days=6)).isoformat()]
-        weeks.append({'week_start': start.isoformat(), **{k: v for k, v in breakdown(picked).items() if k != 'characters'}})
-    months = []
-    for back in range(5, -1, -1):
-        start = shift_month(month_from, -back)
-        stop = shift_month(start, 1) - timedelta(days=1)
-        picked = [r for r in rows if start.isoformat() <= r['day'] <= stop.isoformat()]
-        months.append({'month': start.isoformat()[:7], **{k: v for k, v in breakdown(picked).items() if k != 'characters'}})
+    # 기록을 한 번만 순회해 12주·6개월로 묶는다. 날짜 문자열 변환도 기록마다 반복하지 않는다.
+    week_keys = [(week_from - timedelta(weeks=back)).isoformat() for back in range(11, -1, -1)]
+    month_keys = [shift_month(month_from, -back).isoformat()[:7] for back in range(5, -1, -1)]
+    week_rows = {key: [] for key in week_keys}
+    month_rows = {key: [] for key in month_keys}
+    week_end = week_to.isoformat()
+    for r in rows:
+        if week_keys[0] <= r['day'] <= week_end:
+            week_rows[week_start(date.fromisoformat(r['day'])).isoformat()].append(r)
+        month_key = r['day'][:7]
+        if month_key in month_rows:
+            month_rows[month_key].append(r)
+    in_week = week_rows[week_keys[-1]]
+    in_month = month_rows[month_keys[-1]]
+    weeks = [{'week_start': key, **{k: v for k, v in breakdown(week_rows[key]).items() if k != 'characters'}}
+             for key in week_keys]
+    months = [{'month': key, **{k: v for k, v in breakdown(month_rows[key]).items() if k != 'characters'}}
+              for key in month_keys]
 
     hunts_all = [r for r in rows if r['kind'] == 'hunt']
     flasks = sum(r['flasks'] or 0 for r in hunts_all)
