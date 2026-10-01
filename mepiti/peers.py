@@ -278,6 +278,23 @@ class Peers:
                            (ocid, target['job'], person.get('level'), 0, now(), json.dumps(summary, ensure_ascii=False), cp))
         return True
 
+    def restart(self, name, cp):
+        """목표 전투력을 바꿔 뒤에서 다시 찾고 모은다(대화에서 목표를 말했을 때). 이미 돌고 있으면 그 뒤에 이어서."""
+        def job():
+            try:
+                self.choose(name, cp)
+            except AppError as e:
+                self.error = str(e)
+                return
+            self.run()
+        with self.lock:
+            if self.thread and self.thread.is_alive():
+                self.error = '이전 모으기가 끝나면 새 목표로 다시 찾아 주세요.'
+                return False
+            self.thread = threading.Thread(target=job, name='peers-restart', daemon=True)
+            self.thread.start()
+            return True
+
     def run(self):
         try:
             while self.step():
@@ -481,6 +498,11 @@ def compare(store, profile, state=None, ledger=None):
     return result
 
 
+def span(r):
+    """'+1.74%~+1.98%' — 두 끝 모두에 %를 붙인다(대화 답의 수치 검사가 %가 붙은 값만 사실로 인정한다)."""
+    return f"{r[0]:+.2f}%~{r[1]:+.2f}%" if r[0] != r[1] else f"{r[0]:+.2f}%"
+
+
 def facts_text(compared):
     """채팅 모델에 넘길 사실. 앱이 센 값만 적는다."""
     if not compared.get('ready'):
@@ -506,7 +528,7 @@ def facts_text(compared):
                 if sim.get('same_item') else
                 f"{sim['item']} {sim['starforce']}성({', '.join(sim['potential']) or '잠재 없음'})으로 바꾸면")
         return (f"- {sim['slot']}: {what} "
-                f"스탯공격력 {sim['range'][0]:+.2f}~{sim['range'][1]:+.2f}%, 보스 기준 {sim['boss_range'][0]:+.2f}~{sim['boss_range'][1]:+.2f}%{extra}{unknown}")
+                f"스탯공격력 {span(sim['range'])}, 보스 기준 {span(sim['boss_range'])}{extra}{unknown}")
     head = []
     if compared.get('simulated'):
         head.append('[교체 시뮬레이션] 앱이 계산한 값이다. ' + SIMULATION_NOTE)

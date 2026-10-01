@@ -348,7 +348,7 @@ class Application:
                 if not self.chat_lock.acquire(blocking=False):
                     raise AppError('이전 질문을 처리 중입니다. 잠시 후 다시 시도해 주세요.',409)
                 try:
-                    return answer(s,self.model,data,self.nexon)
+                    return answer(s,self.model,data,self.nexon,self.peers)
                 finally:
                     self.chat_lock.release()
             if path == '/api/characters/profile': return self.nexon.character(required(data,'name',30), details=True)

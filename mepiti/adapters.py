@@ -567,7 +567,7 @@ class Ollama:
         return selected_ids(result.get('message',{}).get('content'), passages), \
             {k:result.get(k) for k in ('total_duration','eval_count','eval_duration')}
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
         """캐릭터 사실만 근거로 한 서술. 게임 규칙·확률·시세를 지어내지 못하게 막는다.
 
         여기서 나온 문장은 답변에 그대로 실리므로, 넘겨준 사실 밖의 수치가 섞이면 안 된다.
@@ -575,7 +575,7 @@ class Ollama:
         """
         result = request_json(self.BASE+'/api/chat',{
             **self._switches(model),
-            'model':model,'stream':False,'messages':analysis_messages(facts, question, history, numbers_shown),
+            'model':model,'stream':False,'messages':analysis_messages(facts, question, history, numbers_shown, consult),
             'options':{'temperature':0.3,'num_ctx':8192,'num_predict':700},'keep_alive':'5m'},timeout=300)
         return written_text((result.get('message') or {}).get('content','')), \
             {k:result.get(k) for k in ('total_duration','eval_count','eval_duration')}
@@ -617,7 +617,20 @@ def written_text(text):
     return text.strip()[:6000]
 
 
-def analysis_messages(facts, question, history=None, numbers_shown=False):
+CONSULT_STYLE = (
+    '\n[상담 문체] 너는 메이플스토리 스펙업 상담사다. 사용자가 목표 전투력에 가려면 무엇을 바꿀지 함께 고민해 준다.\n'
+    '- 존댓말로, 대화하듯 자연스럽게 쓴다. 첫 문장에 질문에 대한 결론(무엇을 먼저 할지)을 말한다.\n'
+    '- 이유는 정보에 있는 목표 전투력대 유저 비율·중앙값과 앱이 계산한 스탯공격력·보스 기준 변화율을 그대로 인용해 설명한다.\n'
+    '- 표나 긴 목록 대신 짧은 문단 2~4개로 쓴다. 꼭 필요하면 3개 이하의 짧은 항목만 쓴다.\n'
+    '- 여러 부위를 함께 바꾼 효과는 정보에 [함께 바꾸면]으로 주어진 값만 쓴다. 부위별 값을 더하지 않는다.\n'
+    '- 손해인 교체는 권하지 않는다. 노작값을 모르는 장비는 가격을 말하지 않는다.\n'
+    '- 가성비는 정보에 [가성비](1억당 효과)가 있을 때만 판단한다. 없으면 가성비를 단정하지 말고 효과가 큰 순서만 말하며, 노작값을 알려 주면 계산해 준다고 한다.\n'
+    '- 마지막에 다음 결정을 돕는 질문을 하나만 붙인다(예산, 어느 부위부터, 어떤 보스 기준 등). 대화에서 이미 답한 것은 다시 묻지 않는다.\n'
+    '- 앞선 대화의 흐름을 이어 간다. "그 다음은?", "왜?" 같은 짧은 질문은 앞 답변에 이어서 답한다.'
+)
+
+
+def analysis_messages(facts, question, history=None, numbers_shown=False, consult=False):
     system = (
             '너는 메이플스토리 캐릭터 정보를 읽고 정리하는 도우미다. 숙련자가 읽는 글이므로 군더더기 없이 쓴다.\n'
             '아래 [캐릭터 정보]에 적힌 사실만 근거로 쓴다. 거기 없는 수치·확률·비용·시세·패치 내용은 절대 만들지 않는다.\n'
@@ -631,6 +644,8 @@ def analysis_messages(facts, question, history=None, numbers_shown=False):
             '급은 추가옵션 등급, 성은 스타포스 단계다. 둘은 다른 값이니 섞어 쓰지 않는다.\n'
         '한국어로, 항목별로 짧게 쓴다. 인사말과 맺음말은 쓰지 않는다.'
     )
+    if consult:
+        system = system.replace('한국어로, 항목별로 짧게 쓴다. 인사말과 맺음말은 쓰지 않는다.', '한국어로 쓴다. 인사말은 쓰지 않는다.') + CONSULT_STYLE
     if numbers_shown:
         # 수치는 앱이 이미 화면에 썼다. 모델이 다시 쓰면 틀린 자릿수나 파생값이 섞인다.
         system += ('\n계산 결과는 이미 사용자 화면에 표시되어 있다. **숫자를 하나도 쓰지 마라.**\n'
@@ -823,8 +838,8 @@ class Gemini:
         usage = result.get('usageMetadata') or {}
         return text, {'eval_count': usage.get('candidatesTokenCount'), 'model': model}
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
-        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown),
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
                                    {'temperature': 0.3, 'maxOutputTokens': 4096})
         return written_text(text), meta
 
@@ -965,8 +980,8 @@ class Claude:
         text = ''.join(block.text for block in response.content if block.type == 'text')
         return text, {'eval_count': getattr(response.usage, 'output_tokens', None), 'model': response.model}
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
-        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult))
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -1066,8 +1081,8 @@ class OpenAI:
         usage = result.get('usage') or {}
         return text, {'eval_count': usage.get('output_tokens'), 'model': result.get('model') or model}
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
-        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown))
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult))
         return written_text(text), meta
 
     def read_capture(self, mime, data):

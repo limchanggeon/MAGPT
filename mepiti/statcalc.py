@@ -370,26 +370,40 @@ def set_bonus(full, count):
 
 
 def set_change(ledger, old_item, new_item):
-    """한 부위 교체로 바뀌는 세트 효과. 판별 못 한 세트는 unknown에 이름을 남긴다."""
+    """한 부위 교체로 바뀌는 세트 효과."""
+    return set_change_many(ledger, [(old_item, new_item)])
+
+
+def set_change_many(ledger, pairs):
+    """여러 부위를 함께 바꿀 때의 세트 효과 변화(세트마다 착용 개수 변화를 모아 한 번에 계산). 판별 못 한 세트는 unknown에."""
     sets = getattr(ledger, 'sets', {})
     names = list(sets)
-    old_set = set_of((old_item or {}).get('item_name'), names)
-    new_set = set_of((new_item or {}).get('item_name'), names)
     change = {'stats': {}, 'boss': 0, 'ied_add': [], 'ied_remove': [], 'notes': [], 'unknown': []}
-    if old_set == new_set:
-        return change
-    for set_name in (old_set, new_set):
-        if set_name and not sets[set_name]['verified']:
-            change['unknown'].append(f'{set_name}(착용 장비로 세트 수를 맞추지 못해 계산에서 뺐어요)')
-    old_set = old_set if old_set and sets[old_set]['verified'] else None
-    new_set = new_set if new_set and sets[new_set]['verified'] else None
-    for set_name, step in ((old_set, -1), (new_set, +1)):
-        if not set_name:
+    steps = {}
+    for old_item, new_item in pairs:
+        old_set = set_of((old_item or {}).get('item_name'), names)
+        new_set = set_of((new_item or {}).get('item_name'), names)
+        if old_set == new_set:
+            continue
+        for set_name, step in ((old_set, -1), (new_set, +1)):
+            if not set_name:
+                continue
+            if not sets[set_name]['verified'] and sets[set_name]['count']:
+                note = f'{set_name}(착용 장비로 세트 수를 맞추지 못해 계산에서 뺐어요)'
+                if note not in change['unknown']:
+                    change['unknown'].append(note)
+                continue
+            steps[set_name] = steps.get(set_name, 0) + step
+        new_name = (new_item or {}).get('item_name') or ''
+        if new_item and not new_set and re.search(r'에테르넬|아케인셰이드|앱솔랩스|도전자|루타비스|하이네스|이글아이|트릭스터', new_name):
+            change['unknown'].append(new_name + '의 세트(단계표를 아직 못 배움 — 그 세트를 끼는 비교 유저를 모으면 채워짐)')
+    lucky = getattr(ledger, 'lucky', False)
+    for set_name, step in steps.items():
+        if not step:
             continue
         info = sets[set_name]
-        lucky = getattr(ledger, 'lucky', False)
-        before = set_count(set_name, info['pieces'], lucky)
-        after = set_count(set_name, info['pieces'] + step, lucky)
+        before = set_count(set_name, info.get('pieces', 0), lucky)
+        after = set_count(set_name, info.get('pieces', 0) + step, lucky)
         a, b = set_bonus(info['full'], before), set_bonus(info['full'], after)
         for k in set(a['stats']) | set(b['stats']):
             fa, pa = a['stats'].get(k, (0, 0))
@@ -397,7 +411,7 @@ def set_change(ledger, old_item, new_item):
             f0, p0 = change['stats'].get(k, (0, 0))
             change['stats'][k] = (f0 + fb - fa, p0 + pb - pa)
         change['boss'] += b['boss'] - a['boss']
-        extra = [x for x in b['ied']]
+        extra = list(b['ied'])
         for x in a['ied']:
             if x in extra:
                 extra.remove(x)
@@ -405,9 +419,6 @@ def set_change(ledger, old_item, new_item):
                 change['ied_remove'].append(x)
         change['ied_add'] += extra
         change['notes'].append(f"{set_name} {before}→{after}세트")
-    new_name = (new_item or {}).get('item_name') or ''
-    if new_item and not new_set and re.search(r'에테르넬|아케인셰이드|앱솔랩스|도전자|루타비스|하이네스|이글아이|트릭스터', new_name):
-        change['unknown'].append(new_name + '의 세트(단계표를 아직 못 배움 — 그 세트를 끼는 비교 유저를 모으면 채워짐)')
     return change
 
 
@@ -450,11 +461,16 @@ def boss_score(main, sub, att, damage, boss, final_damage, crit_damage, ied, def
 
 def item_delta(level, old_item, new_item, sets=None):
     """장비 한 개를 바꿀 때 스탯별 (% 적용 고정치 변화, % 변화). sets(set_change 결과)를 주면 세트 효과 변화도 더한다."""
+    return items_delta(level, [(old_item, new_item)], sets)
+
+
+def items_delta(level, pairs, sets=None):
     before, after = Ledger(), Ledger()
-    if old_item:
-        item_sources(before, old_item, level)
-    if new_item:
-        item_sources(after, new_item, level)
+    for old_item, new_item in pairs:
+        if old_item:
+            item_sources(before, old_item, level)
+        if new_item:
+            item_sources(after, new_item, level)
     out = {}
     for stat in (*STATS, 'ATT', 'MATT', 'DAMAGE'):
         out[stat] = (after.total(stat, 'flat') - before.total(stat, 'flat'),
@@ -469,17 +485,26 @@ def item_delta(level, old_item, new_item, sets=None):
 
 def swap(ledger, old_item, new_item, classify=None, defense=BOSS_DEFENSE):
     """한 부위 교체 → 최대 스탯공격력 변화율과 보스 기준 변화율(%)을 범위로. 세트 효과 변화 포함."""
+    return swap_many(ledger, [(old_item, new_item)], classify, defense)
+
+
+def swap_many(ledger, pairs, classify=None, defense=BOSS_DEFENSE):
+    """여러 부위를 함께 교체 → 스탯공격력·보스 기준 변화율 범위. 세트 효과는 모든 교체를 합쳐 한 번에 계산한다."""
     report, models = calibrate(ledger, classify)
-    sets = set_change(ledger, old_item, new_item)
-    delta = item_delta(ledger.level, old_item, new_item, sets)
-    a, b = extras(old_item), extras(new_item)
-    d_boss = b['boss'] - a['boss'] + sets['boss']
-    d_crit = b['crit'] - a['crit']
+    sets = set_change_many(ledger, pairs)
+    delta = items_delta(ledger.level, pairs, sets)
+    d_boss, d_crit, ied_add, ied_remove = sets['boss'], 0, list(sets['ied_add']), list(sets['ied_remove'])
+    for old_item, new_item in pairs:
+        a, b = extras(old_item), extras(new_item)
+        d_boss += b['boss'] - a['boss']
+        d_crit += b['crit'] - a['crit']
+        ied_add += b['ied']
+        ied_remove += a['ied']
     final = ledger.final
     f = lambda k: float(str(final.get(k) or 0).replace(',', ''))
     main, sub, power = report['main'], report['sub'], report['power']
     power_label = {'ATT': '공격력', 'MATT': '마력'}[power]
-    ied_after = combine_ied(f('방어율 무시'), b['ied'] + sets['ied_add'], a['ied'] + sets['ied_remove'])
+    ied_after = combine_ied(f('방어율 무시'), ied_add, ied_remove)
     before = stat_attack(f(main), f(sub), f(power_label), f('데미지'), f('최종 데미지'))
     before_boss = boss_score(f(main), f(sub), f(power_label), f('데미지'), f('보스 몬스터 데미지'), f('최종 데미지'),
                              f('크리티컬 데미지'), f('방어율 무시'), defense)

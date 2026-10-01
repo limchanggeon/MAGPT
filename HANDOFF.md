@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-01 (KST)
-- 현재 단계: v0.4.1 릴리스 완료(목표 전투력대 비교·세트 효과·보스 기준·교체 시뮬레이션). 전체 요구사항 완료 아님.
+- 현재 단계: v0.4.1 릴리스 완료. 0.4.2 준비(목표 전투력대 비교를 대화 상담으로) — 릴리스는 사용자 승인 필요. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1282,3 +1282,12 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
 - 헥사 스탯: 사용자도 수치를 모름 → 지금처럼 보정(모르는 차이를 두 방식으로)으로 흡수. 수치 표를 얻으면 반영.
 - 예전 방식(레벨 ±3)으로 모은 기록은 전투력이 없어 비교에 쓰지 않음. 사용자는 목표 전투력을 넣고 '모으기 시작'을 다시 눌러야 함.
 - **릴리스 v0.4.1**(2026-10-01, 사용자 "릴리즈"): `5c05124`, CI 통과, `main` 빨리감기(`7369af8..5c05124`), 태그, 릴리스 성공(파일 5개), API latest v0.4.1. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.1
+
+### 2026-10-01 — 비교를 대화 상담으로 (사용자: "이 비교를 상담하는 것처럼 대화에서 자연스럽게")
+
+- 변경: `mepiti/consult.py`(신규), `mepiti/statcalc.py`(`swap_many`·`set_change_many`·`items_delta`), `mepiti/adapters.py`(상담 문체 `CONSULT_STYLE`, 모든 모델 `analyse(consult=)`),
+  `mepiti/chat.py`(상담 모드 이어 가기, 상담 중 노작값 되묻기 생략, 수치 검사 보완, 의도 패턴 '뭘로 바꿔'·'칠흑 맞추면'), `mepiti/peers.py`(`restart`, 범위 % 표기),
+  `mepiti/server.py`(answer에 peers 전달), 데모(`analyse(**kwargs)`), 테스트 `tests/test_consult.py`, 버전 0.4.2.
+- 검증·결과는 IMPLEMENTATION.md 2026-10-01 상담 항목(실제 Gemini로 7턴 대화 확인, 임시 DB).
+- 한계: 노작값을 모르면 가성비는 계산하지 않음(경매장 연결 시 자동 조회, 하루 100회 몫 안). 강화·잠재 비용은 가성비에 안 들어감.
+  '반지2 22성으로 올리면?'처럼 내 장비 강화만 가정하는 질문은 아직 시뮬레이션하지 않음(다음 후보).

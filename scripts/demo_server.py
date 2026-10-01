@@ -60,7 +60,7 @@ class FakeGemini:
         self.model = self.chosen or 'gemini-flash-lite-latest'
         return self.model
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, **kwargs):
         return '(데모) 클라우드 모델 자리입니다. 데모 서버는 실제 Gemini를 부르지 않습니다.', {}
 
     def select(self, model, question, passages):
@@ -89,7 +89,7 @@ class FakePaidCloud:
             raise cloud_failure('invalid', f'{self.name}가 이 API 키를 받아 주지 않았어요(데모).')
         return self.model
 
-    def analyse(self, model, facts, question, history=None, numbers_shown=False):
+    def analyse(self, model, facts, question, history=None, numbers_shown=False, **kwargs):
         return f'(데모) {self.name} {self.model} 자리입니다. 데모 서버는 실제 회사를 부르지 않습니다.', {}
 
     def select(self, model, question, passages):

@@ -1,18 +1,18 @@
 import re
-from . import conditions, context, notices, peers, prices, starforce, statcalc, union
+from . import conditions, consult, context, notices, peers, prices, starforce, statcalc, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
 CHARACTER_INTENT = re.compile(
     r'내\s*캐릭|제\s*캐릭|내\s*장비|제\s*장비|내\s*스펙|제\s*스펙|내\s*성장|제\s*성장|'
     r'내\s*예산|제\s*예산|뭘\s*올|어디를?\s*올|어느\s*부위|다음\s*단계|스펙업|약한\s*부위|'
-    r'추옵\s*(?:상태|등급)|보완|우선순위|비슷한\s*(?:유저|사람|스펙)|목표\s*전투력|전투력대|남들\s*(?:은|는|이랑|과|보다)|다른\s*(?:유저|사람)들?\s*(?:은|는|이랑|과|보다|장비)')
+    r'추옵\s*(?:상태|등급)|보완|우선순위|비슷한\s*(?:유저|사람|스펙)|(?:칠흑|여명|광휘|보장|에테르넬|아케인|앱솔)\s*(?:세트)?\s*(?:맞추|맞춰|모으|모아|껴|끼)|목표\s*전투력|전투력대|(?:뭘로|뭐로|무엇으로|어떤\s*걸로)\s*(?:바꿔|바꾸|갈아)|남들\s*(?:은|는|이랑|과|보다)|다른\s*(?:유저|사람)들?\s*(?:은|는|이랑|과|보다|장비)')
 # 게임 규칙은 검토된 자료에서만 나와야 한다. 확률 관련 표현은 문구 자체로 막는다.
 # '성공 확률: 38.5%', '파괴 확률은 3%'처럼 사이에 기호나 조사가 끼어도 잡는다.
 # 크리티컬 확률처럼 캐릭터 능력치에 있는 확률은 대상이 아니다.
 FABRICATION = re.compile(r'\d+\s*%\s*(?:확률|성공|파괴)|(?:성공|파괴|강화|큐브|등급\s*업)\s*확률[^\n\d]{0,8}\d|파괴\s*확률')
 # 금액·수치를 찾는 패턴. 서술에 나온 값은 모두 넘겨준 사실 안에 있어야 한다.
-AMOUNT = re.compile(r'(\d[\d,]*(?:\.\d+)?)\s*(조|억|만)?')
+AMOUNT = re.compile(r'(\d[\d,]*(?:\.\d+)?)\s*(조|억|만(?!큼))?(?!당)')    # '+28.45만큼'의 '만'은 단위가 아니다
 PERCENT = re.compile(r'(\d+(?:\.\d+)?)\s*%')
 UNIT_SCALE = {'조':1_0000_0000_0000,'억':1_0000_0000,'만':1_0000,None:1}
 # 값을 따져야 답할 수 있는 질문. 노작값을 모르면 지어내지 말고 되물어야 한다.
@@ -30,7 +30,7 @@ ITEM_PRICE = re.compile(r'노작|시세|가격|사는\s*게|살까|구매|바꾸
 PRICE_SKIP = re.compile(r'없어도|필요\s*없|몰라도|상관\s*없|괜찮|넘어가|건너뛰|스킵|skip|패스|몰라|모름|모르겠', re.I)
 # 강화 기대값 질문. 목표 성을 함께 찾는다.
 # 비슷한 유저와 비교하거나 무엇부터 바꿀지 묻는 질문 — 모아 둔 비슷한 유저 장비 통계를 사실로 넘긴다(mepiti/peers.py).
-PEER_INTENT = re.compile(r'비슷한|남들|목표\s*전투력|전투력대|다른\s*(?:사람|유저|분)|평균|추천|뭐\s*(?:부터|를)?\s*(?:바꿔|바꾸|올려|올리)|뭘\s*(?:바꿔|바꾸|올려|올리)|'
+PEER_INTENT = re.compile(r'비슷한|남들|(?:칠흑|여명|광휘|보장|에테르넬|아케인|앱솔)\s*(?:세트)?\s*(?:맞추|맞춰|모으|모아|껴|끼)|목표\s*전투력|전투력대|(?:뭘로|뭐로|무엇으로|어떤\s*걸로)\s*(?:바꿔|바꾸|갈아)|다른\s*(?:사람|유저|분)|평균|추천|뭐\s*(?:부터|를)?\s*(?:바꿔|바꾸|올려|올리)|뭘\s*(?:바꿔|바꾸|올려|올리)|'
                          r'어디\s*(?:부터|를)|우선\s*순위|먼저\s*(?:바꿔|바꾸|해야|올려)|부족한')
 STARFORCE_INTENT = re.compile(r'기대\s*값|기댓값|강화\s*비용|몇\s*번|스타포스|(\d+)\s*성')
 TARGET_STAR = re.compile(r'(\d{1,2})\s*성')
@@ -44,7 +44,7 @@ MONEY = re.compile(r'\d[\d,.]*\s*(?:조|억|천|만)|\d{6,}')
 PRICE_REPLY = re.compile(r'^(?P<item>.+?)\s*[:=]?\s*(?P<price>[\d,.]+\s*(?:조|억|만)?(?:\s*\d+\s*(?:억|만))?)\s*(?:메소)?$')
 
 
-def answer(store, model, data, nexon=None):
+def answer(store, model, data, nexon=None, peer_runner=None):
     question = data.get('message','')
     if not isinstance(question,str) or not question.strip() or len(question)>12000:
         raise AppError('질문은 1~12,000자로 입력해 주세요.')
@@ -62,6 +62,9 @@ def answer(store, model, data, nexon=None):
     previous = [m['payload']['content'] for m in history if m['role']=='user'][-2:]
     # Preserve only a short prior topic for explicitly elliptical follow-ups.
     followup = bool(re.match(r'^(그럼|그러면|이벤트 때|그거|그건|같은|이 경우)',question))
+    # 목표 전투력대 비교 상담 중이면 짧은 후속 질문('반지는?', '그 다음은?', '칠흑 맞추면?')도 상담으로 이어 간다.
+    consulting = bool(last.get('consult')) and not EVENT_INTENT.search(question) and not UNION_INTENT.search(question) \
+        and not re.search(r'기대\s*값|기댓값', question)
     query = '\n'.join(previous+[question]) if followup else question
     result = {'content':'','status':'held','sources':[],'conditions':[],'created_at':now(),'session_id':sid}
     structured = data.get('answer')
@@ -159,7 +162,7 @@ def answer(store, model, data, nexon=None):
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
             union_answer(store, model, nexon, main, question, history, result)
-    elif (topic or CHARACTER_INTENT.search(question)
+    elif (topic or consulting or CHARACTER_INTENT.search(question)
           or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
               and SLOT_WORDS.search(question))):
         chars = store.characters()
@@ -173,7 +176,8 @@ def answer(store, model, data, nexon=None):
         elif not nexon:
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
-            analyse_character(store, model, nexon, main, question, history, result, skip_prices, topic)
+            analyse_character(store, model, nexon, main, question, history, result, skip_prices, topic,
+                              consulting=consulting, peer_runner=peer_runner)
     elif terms and any(k in question for k in ('뜻','뭐','무엇','의미')):
         result.update(status='term',content='\n'.join(t['meaning'] for t in terms))
         result['conditions'] = ['용어 설명은 요구사항 v0.1 기준입니다. 게임별 확률과 비용을 뜻하지 않습니다.']
@@ -230,8 +234,11 @@ def answer(store, model, data, nexon=None):
     return result
 
 
-def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False, topic=None):
+def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False, topic=None,
+                      consulting=False, peer_runner=None):
     """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다."""
+    if consulting or PEER_INTENT.search(question):
+        result['consult'] = True        # 조회가 실패해도 다음 질문은 상담으로 이어 간다
     try:
         profile = nexon.character(managed['name'], details=True)
     except AppError as e:
@@ -269,20 +276,30 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
             text = f"[대화 주제 장비] {topic['slot']} {topic['name']} — 지금은 착용하지 않아 상세를 알 수 없다.\n\n" + text
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
-    if PEER_INTENT.search(question):
+    consult_mode = consulting or bool(PEER_INTENT.search(question))
+    if consult_mode:
+        result['consult'] = True
+        # 질문에 목표 전투력이 있고 지금 모으는 기준과 다르면, 그 전투력대로 다시 모으기 시작한다(뒤에서).
+        goal = consult.target_cp_in(question)
+        target = store.setting(peers.TARGET) or {}
+        if goal and peer_runner and (not target.get('cp') or abs(goal - target['cp']) > target['cp'] * 0.05):
+            peer_runner.restart(managed['name'], goal)
+            result['topic_notes'].append(f"목표 전투력을 {goal / 1e8:.2f}억으로 바꿔 그 전투력대 유저를 다시 모으기 시작했어요. "
+                                         "몇 분~하루에 걸쳐 모이니, 그동안은 이전 기준으로 답해요.")
         ledger = None
         if hasattr(nexon, 'get'):
             try:    # 교체 시뮬레이션용 스탯 출처. 하루 한 번 넥슨에서 받는다(statcalc.load).
                 ledger = statcalc.load(store, nexon.get, managed['name'])
             except AppError:
                 ledger = None
-        compared = peers.compare(store, profile, ledger=ledger)
-        if compared.get('ready'):
-            text += '\n\n' + peers.facts_text(compared)
+        consult_text, consult_notes, _ = consult.build(store, profile, ledger, question, managed)
+        result['topic_notes'] += consult_notes
+        if consult_text:
+            text += '\n\n' + consult_text
         else:
             text += ('\n\n[목표 전투력대 유저 장비 통계] 아직 모으지 못했다(캐릭터 화면의 \'목표 전투력대 유저\'에서 모으기 시작). '
-                     '다른 유저 경향을 지어내지 말 것.')
-            result['topic_notes'].append("목표 전투력대 유저 장비 통계가 아직 없어요. 캐릭터 화면의 '목표 전투력대 유저'에서 모으기를 시작하면 며칠에 걸쳐 모읍니다.")
+                     '다른 유저 경향을 지어내지 말 것. 목표 전투력을 물어보고, 캐릭터 화면에서 모으기를 시작하라고 안내할 것.')
+            result['topic_notes'].append("목표 전투력대 유저 장비 통계가 아직 없어요. 캐릭터 화면의 '목표 전투력대 유저'에 목표 전투력을 적고 모으기를 시작하세요.")
     # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
     if STARFORCE_INTENT.search(question):
         computed = starforce_facts(store, profile, question, result, item)
@@ -291,7 +308,8 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         text += computed
     # 값을 따져야 하는 질문이면 노작값부터 확보한다. 모르면 지어내지 않고 되묻는다.
     # 강화 기대값 질문의 '얼마'는 기대 비용을 묻는 말이라, 장비 값을 직접 물을 때만 시세를 챙긴다.
-    asks_price = PRICE_INTENT.search(question) and (
+    # 상담 중의 '얼마나 올라?', '가성비'는 상담이 아는 노작값으로 따로 다룬다(consult.build). 내 장비 값을 되묻지 않는다.
+    asks_price = not consult_mode and PRICE_INTENT.search(question) and (
         not STARFORCE_INTENT.search(question) or ITEM_PRICE.search(question))
     if asks_price:
         resolved = prices.resolve_many(store, price_targets(facts, question))
@@ -325,7 +343,8 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
                 for m in history[-4:] if m['payload'].get('content')]
     try:
         written, metrics = model.analyse(selected_model, text, question, previous,
-                                         numbers_shown=bool(result.get('starforce_text')))
+                                         numbers_shown=bool(result.get('starforce_text')),
+                                         **({'consult': True} if result.get('consult') else {}))
         result['metrics'] = metrics
     except AppError as e:
         kept = result.pop('starforce_text', None)
@@ -335,7 +354,12 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         return
     written = fix_name(written, facts['name'])
     # 넘겨준 사실에 없는 확률이나 수치가 섞이면 그 서술은 쓰지 않는다.
-    invented = unsupported_numbers(written, text)
+    # 사용자가 말한 수치(목표 전투력 '2억5천' 등)는 사실로 인정한다. 억 단위로 끊어 쓴 형태('2억')도 함께.
+    said = question + ' ' + ' '.join(m['payload'].get('content', '') for m in history[-4:] if m['role'] == 'user')
+    target = (store.setting(peers.TARGET) or {}).get('cp') if consult_mode else None
+    spoken = ' '.join(f"{v // 100_000_000}억 {v:,}" for v in
+                      [int(x) for x in (consult.target_cp_in(said), target) if x])
+    invented = unsupported_numbers(written, text + '\n' + said + '\n' + spoken)
     if FABRICATION.search(written) or invented:
         kept = result.pop('starforce_text', None)
         result.update(status='context', content=kept or '조회한 사실은 아래 항목에서 확인하세요.')
