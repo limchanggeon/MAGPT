@@ -529,10 +529,13 @@ class StarforceConversationTests(CharacterAnalysisTests):
         profile={'equipment':[{'slot':'반지1','name':'리스트레인트 링','starforce':0,'special_ring_level':4},
                               {'slot':'벨트','name':'골든 클로버 벨트','starforce':18}]}
         self.assertEqual([g['slot'] for g in context.starforce_gaps(profile)],['벨트'])
-    def test_missing_target_star_is_reported(self):
+    def test_missing_target_star_is_asked_with_buttons(self):
+        # 목표 성이 없으면 모델에게 묻게 하지 않고, 앱이 '몇 성까지?'를 버튼과 함께 되묻는다(재질문).
         self.store.price_save({'item':'골든 클로버 벨트','price':3.2e10,'source':'user'})
         r,model=self.ask('서술','벨트 강화 기대값 알려줘')
-        self.assertIn('목표 성을 알 수 없어',model.seen)
+        self.assertEqual(r['status'],'ask')
+        self.assertTrue(all(o['label'].endswith('성') for o in r['form']['options']))
+        self.assertIn('벨트',r['pending'])
 
 class ConditionTests(unittest.TestCase):
     """강화 조건 슬롯. 어떤 조건이 빠졌는지는 코드가 판단하고 모델에 맡기지 않는다."""

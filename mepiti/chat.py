@@ -58,6 +58,10 @@ def answer(store, model, data, nexon=None, peer_runner=None):
     last = next((m['payload'] for m in reversed(history) if m['role']=='assistant'), None) or {}
     # 되물었던 원래 질문. 조건·노작값을 답하면 이 질문을 이어서 계산한다.
     pending = last.get('pending') if last.get('status') in ('ask_conditions','ask_price') else None
+    # 재질문(부위·목표 성·목표 전투력·모호한 질문)에 답했으면 원래 질문에 그 답을 붙여 이어서 처리한다.
+    if last.get('status') == 'ask' and last.get('pending') and not data.get('answer'):
+        question = f"{last['pending']} {question}"
+    asked_before = last.get('status') == 'ask'
     notes = []
     previous = [m['payload']['content'] for m in history if m['role']=='user'][-2:]
     # Preserve only a short prior topic for explicitly elliptical follow-ups.
@@ -141,6 +145,11 @@ def answer(store, model, data, nexon=None, peer_runner=None):
     plan = None
     if not structured and not picked and not skip_prices and not saved_prices:
         plan = make_plan(store, model, question, history, topic)
+    if plan and plan.get('clarify') and len(plan.get('options') or []) >= 2 and not asked_before:
+        ask(result, plan['clarify'], [{'label': o, 'reply': o} for o in plan['options']], question)
+        store.message(sid, 'user', {'content': said})
+        store.message(sid, 'assistant', result)
+        return result
     if plan:
         question = planner.tool_question(plan, question)
         result['plan'] = {k: plan[k] for k in ('intents', 'slot', 'target_star', 'target_cp', 'rewritten')}
@@ -309,6 +318,16 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         # 질문에 목표 전투력이 있고 지금 모으는 기준과 다르면, 그 전투력대로 다시 모으기 시작한다(뒤에서).
         goal = consult.target_cp_in(question)
         target = store.setting(peers.TARGET) or {}
+        if not goal and not target.get('cp'):
+            now_cp = profile.get('combat_power') or 0
+            picks = sorted({round(now_cp * k / 5e7) * 5e7 for k in (1.3, 1.6, 2.0)} - {0})
+            ask(result, '목표 전투력을 얼마로 잡을까요? 그 전투력대 유저들과 비교해서 상담해 드릴게요.',
+                [{'label': cp_label(v), 'reply': f'목표 전투력 {cp_label(v)}'} for v in picks], question,
+                note=f"지금 전투력은 {cp_label(now_cp)}이에요. 원하는 값을 직접 적어도 됩니다(예: 2억5천)." if now_cp else
+                     '원하는 값을 직접 적어 주세요(예: 2억5천).')
+            return
+        if goal and not target.get('cp') and not peer_runner:
+            result['topic_notes'].append('목표 전투력은 캐릭터 화면의 \'목표 전투력대 유저\'에서 모으기를 시작하면 저장돼요.')
         if goal and peer_runner and (not target.get('cp') or abs(goal - target['cp']) > target['cp'] * 0.05):
             peer_runner.restart(managed['name'], goal)
             result['topic_notes'].append(f"목표 전투력을 {goal / 1e8:.2f}억으로 바꿔 그 전투력대 유저를 다시 모으기 시작했어요. "
@@ -602,6 +621,19 @@ def starforce_facts(store, profile, question, result, topic_item=None):
     if topic_item is not None and (not topic_item.get('equip_level') or topic_item.get('starforce') is None):
         topic_item = None
     item = context.starforce_item(profile, question, topic_item)
+    if not item:
+        options = starforce_slot_options(profile, question)
+        if options:
+            ask(result, '어느 장비의 강화 기대값을 볼까요?', options, question,
+                note='목록에 없는 장비면 이름을 직접 적어 주세요.')
+            return None
+    if item and context.starforce_possible(item) and not [t for t in TARGET_STAR.findall(question) if int(t) > item['starforce']]:
+        top = max_star(item)
+        steps = [s for s in range(item['starforce'] + 1, min(top, item['starforce'] + 5) + 1)]
+        if steps:
+            ask(result, f"{item['slot']} {item['name']}(지금 {item['starforce']}성)을 몇 성까지 볼까요?",
+                [{'label': f'{s}성', 'reply': f'{s}성까지'} for s in steps], f"{item['slot']} {question}")
+            return None
     if item and not context.starforce_possible(item):   # 강화 조건을 묻기 전에 걸러야 헛질문이 없다
         # 모델 서술을 버리는 경우에도 보이도록 앱이 직접 쓰는 답 머리에 둔다.
         result['starforce_text'] = f"**{item['slot']} {item['name']}**은 스타포스를 올릴 수 없는 장비라 기대값을 계산하지 않았습니다."
@@ -753,3 +785,42 @@ def chat_reply(store, model, question, history, result):
         return
     result.update(status='analysis', content=written)
     result['metrics'] = metrics
+
+
+def ask(result, content, options, pending, note=None):
+    """재질문: 버튼(고르면 그 답이 그대로 메시지로 간다)과 함께 되묻고, 원래 질문을 pending으로 남긴다. 직접 적어도 된다."""
+    result.update(status='ask', content=content, pending=pending,
+                  form={'kind': 'ask', 'options': [{'label': o['label'][:60], 'reply': o['reply'][:120]} for o in options[:8]]})
+    result['conditions'] = [note] if note else []
+
+
+def cp_label(value):
+    """2.5e8 → '2억5천', 3e8 → '3억'."""
+    eok = int(value // 1e8)
+    rest = int(round((value - eok * 1e8) / 1e7))
+    if rest >= 10:
+        eok, rest = eok + 1, 0
+    return f"{eok}억{rest}천" if rest else f"{eok}억"
+
+
+def max_star(item):
+    """장비 레벨별 최대 스타포스(일반 장비)."""
+    level = item.get('equip_level') or 0
+    for low, top in ((138, 30), (128, 20), (118, 15), (108, 10), (95, 8)):
+        if level >= low:
+            return top
+    return 5
+
+
+def starforce_slot_options(profile, question):
+    """강화할 장비 고르기 버튼: 스타포스를 올릴 수 있는 장비. 질문에 부위 낱말(반지·펜던트 등)이 있으면 그 부위만."""
+    items = [i for i in profile.get('equipment') or [] if i.get('equip_level') and i.get('starforce') is not None
+             and context.starforce_possible(i)]
+    hinted = [i for i in items if i.get('slot') and re.sub(r'\d+$', '', i['slot']) in question]
+    pool = hinted or items
+    goal = max((int(s) for s in TARGET_STAR.findall(question)), default=None)
+    if goal:      # '22성 기대값'이면 이미 22성 이상이거나 22성까지 못 올리는 장비는 빼고 보여 준다
+        pool = [i for i in pool if i['starforce'] < goal <= max_star(i)] or pool
+    order = {s: n for n, s in enumerate(context.SLOT_ORDER)}
+    pool.sort(key=lambda i: (order.get(re.sub(r'\d+$', '', i['slot']), 99), i['slot']))
+    return [{'label': f"{i['slot']} · {i['name']} {i['starforce']}성", 'reply': i['slot']} for i in pool[:8]]
