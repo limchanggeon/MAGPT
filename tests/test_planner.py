@@ -160,3 +160,28 @@ class AskTests(unittest.TestCase):
         self.assertEqual(chat.cp_label(2.5e8), '2억5천')
         self.assertEqual(chat.cp_label(3e8), '3억')
         self.assertEqual(chat.cp_label(2.96e8), '3억')
+
+
+class AutoCharacterTests(unittest.TestCase):
+    """캐릭터를 등록하지 않아도 넥슨 키가 있으면 계정 캐릭터로 답한다."""
+    def test_uses_highest_level_account_character(self):
+        class Nexon(FakeNexonProfile):
+            def characters(self):
+                return {'characters': [{'name': '부캐', 'world': '크로아', 'level': 260}, {'name': '본캐', 'world': '크로아', 'level': 291}]}
+            def character(self, name, details=False):
+                self.asked = name
+                return super().character(name, details)
+        store = Store(tempfile.mkdtemp())
+        store.set_setting('model', 'gemini')
+        nexon = Nexon()
+        model = FakePlanModel(plan(intents=['gear_status'], slot='모자', rewritten='내 모자 어때?'))
+        result = chat.answer(store, model, {'message': '내 모자 어때?'}, nexon)
+        self.assertEqual(nexon.asked, '본캐')
+        self.assertTrue(any('본캐' in c for c in result['conditions']))
+        self.assertIn('[질문한 장비]', model.analysed[0]['facts'])
+        self.assertIn('에테르넬 나이트헬름', model.analysed[0]['facts'].split('[질문한 장비]')[1][:200])
+
+    def test_ring_word_picks_all_rings(self):
+        profile = FakeNexonProfile().character('x', True)
+        self.assertEqual([i['slot'] for i in chat.asked_slot_items(profile, '반지들은?')], ['반지1', '반지2', '반지3'])
+        self.assertEqual([i['slot'] for i in chat.asked_slot_items(profile, '이거 어때?', '장갑')], ['장갑'])

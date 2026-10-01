@@ -167,7 +167,7 @@ def answer(store, model, data, nexon=None, peer_runner=None):
                                    and SLOT_WORDS.search(question)))
         events_route = not topic and bool(nexon) and bool(EVENT_INTENT.search(question))
         union_route = not topic and bool(UNION_INTENT.search(question))
-    flags = {'consult': 'consult' in want, 'starforce': 'starforce' in want} if plan else None
+    flags = {'consult': 'consult' in want, 'starforce': 'starforce' in want, 'slot': plan.get('slot')} if plan else None
     if terms and any(t['term'] in ('환산','대장장이') for t in terms) and not plan:
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
@@ -193,6 +193,8 @@ def answer(store, model, data, nexon=None, peer_runner=None):
     elif character_route:
         chars = store.characters()
         main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
+        if not main and nexon:
+            main = account_main(store, nexon, result)
         if topic and topic.get('character'):
             # 캐릭터 화면에서 고른 장비면 그 캐릭터를 조회한다(대표 캐릭터가 아니어도).
             main = next((c for c in chars if c['name'] == topic['character']), None) or \
@@ -254,6 +256,7 @@ def answer(store, model, data, nexon=None, peer_runner=None):
                     excerpts.append(f"[{ref['citation']}] {p['text']}")
                 result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
                 result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
+    notes += result.pop('auto_notes', None) or []
     notes += result.pop('topic_notes', None) or []
     if notes:
         result['conditions'] = notes + list(result.get('conditions') or [])
@@ -310,6 +313,11 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
         else:
             result['topic_notes'].append(f"대화 주제인 {topic['slot']} {topic['name']}을(를) 지금은 착용하고 있지 않습니다.")
             text = f"[대화 주제 장비] {topic['slot']} {topic['name']} — 지금은 착용하지 않아 상세를 알 수 없다.\n\n" + text
+    # 질문이 가리키는 부위('내 모자 어때?', '반지들 잠재')의 상세를 맨 앞에 둔다. 답이 그 장비에 집중하게.
+    if not topic:
+        for asked in asked_slot_items(profile, question, (flags or {}).get('slot')):
+            text = context.item_text(asked).replace('[대화 주제 장비] 사용자가 이 장비를 두고 묻고 있다. 부위를 말하지 않으면 이 장비 이야기다.',
+                                                    '[질문한 장비] 사용자가 이 장비를 물었다.') + '\n\n' + text
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
     consult_mode = consulting
@@ -824,3 +832,36 @@ def starforce_slot_options(profile, question):
     order = {s: n for n, s in enumerate(context.SLOT_ORDER)}
     pool.sort(key=lambda i: (order.get(re.sub(r'\d+$', '', i['slot']), 99), i['slot']))
     return [{'label': f"{i['slot']} · {i['name']} {i['starforce']}성", 'reply': i['slot']} for i in pool[:8]]
+
+
+def account_main(store, nexon, result):
+    """캐릭터를 등록하지 않았어도 넥슨 키가 있으면 계정 캐릭터 중 레벨이 가장 높은 캐릭터로 답한다(무엇을 썼는지 알린다)."""
+    from .earnings import ACCOUNT_CHARACTERS
+    listed = store.setting(ACCOUNT_CHARACTERS) or []
+    if not listed:
+        try:
+            listed = nexon.characters().get('characters') or []
+        except (AppError, AttributeError):
+            return None
+        store.set_setting(ACCOUNT_CHARACTERS, [{'name': c.get('name'), 'world': c.get('world'), 'level': c.get('level')} for c in listed])
+    best = max(listed, key=lambda c: c.get('level') or 0, default=None)
+    if not best or not best.get('name'):
+        return None
+    result.setdefault('auto_notes', []).append(
+        f"대표 캐릭터를 정하지 않아 계정에서 레벨이 가장 높은 {best['name']}(Lv.{best.get('level')}) 기준으로 답했어요. 캐릭터 화면에서 바꿀 수 있어요.")
+    return {'name': best['name'], 'goal': None, 'budget': 0}
+
+
+def asked_slot_items(profile, question, slot=None):
+    """질문(또는 질문 이해 결과)이 가리키는 부위의 장비들. '반지'면 반지1~4 전부, 이름이 나오면 그 장비."""
+    items = [i for i in profile.get('equipment') or [] if i.get('slot')]
+    named = [i for i in items if i.get('name') and i['name'] in question]
+    if named:
+        return named[:2]
+    words = [w for w in ([slot] if slot else []) + SLOT_WORDS.findall(question) if w and w not in ('장비', '템', '아이템', '방어구', '장신구')]
+    picked = []
+    for w in words:
+        for i in items:
+            if (i['slot'] == w or re.sub(r'\d+$', '', i['slot']) == w) and i not in picked:
+                picked.append(i)
+    return picked[:4]
