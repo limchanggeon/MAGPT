@@ -626,6 +626,8 @@ CONSULT_STYLE = (
     '- 손해인 교체는 권하지 않는다. 노작값을 모르는 장비는 가격을 말하지 않는다.\n'
     '- 가성비는 정보에 [가성비](1억당 효과)가 있을 때만 판단한다. 없으면 가성비를 단정하지 말고 효과가 큰 순서만 말하며, 노작값을 알려 주면 계산해 준다고 한다.\n'
     '- 마지막에 다음 결정을 돕는 질문을 하나만 붙인다(예산, 어느 부위부터, 어떤 보스 기준 등). 대화에서 이미 답한 것은 다시 묻지 않는다.\n'
+    '- 무엇부터 할지, 세트를 맞추며 단계적으로 갈지, 예산 안에서 무엇을 고를지 같은 판단은 네가 사실을 따져 내리고 그 이유를 말한다. '
+    '판단에 쓰는 수치는 정보에 있는 값만 인용한다.\n'
     '- 앞선 대화의 흐름을 이어 간다. "그 다음은?", "왜?" 같은 짧은 질문은 앞 답변에 이어서 답한다.'
 )
 
@@ -718,6 +720,8 @@ class Gemini:
     # 생각(thinking) 줄이기. Gemini 3.x는 thinkingLevel, 2.5는 thinkingBudget을 받는다. 모르는 값이면 400이 나므로
     # 차례로 시도하고, 모델마다 통한 것을 기억한다. 생각 토큰은 출력 한도에 포함되므로 한도는 넉넉히 둔다.
     THINKING = ({'thinkingLevel': 'low'}, {'thinkingBudget': 0}, None)
+    # 상담 답(목표 전투력대 비교)은 우선순위·예산·세트 조합·앞 대화를 따져야 해서 생각을 중간으로 켠다.
+    THINKING_MEDIUM = ({'thinkingLevel': 'medium'}, {'thinkingBudget': 2048}, None)
     # 사용자가 고를 수 있는 것(화면의 모델 선택). 첫 항목이 기본이다. 한도는 위 AI Studio 화면 기준 어림값.
     MODELS = (('gemini-flash-lite-latest', 'Flash-Lite · 기본 · 무료 하루 약 500회'),
               ('gemini-flash-latest', 'Flash · 무료 하루 약 20회'))
@@ -801,7 +805,7 @@ class Gemini:
             return name
         raise last
 
-    def generate(self, messages, config, key=None, model=None, images=None):
+    def generate(self, messages, config, key=None, model=None, images=None, think='low'):
         if not model and not self.model:
             self.check()
         model = model or self.model
@@ -813,10 +817,12 @@ class Gemini:
         body = {'contents': contents, 'generationConfig': dict(config)}
         if system:
             body['systemInstruction'] = {'parts': [{'text': system}]}
-        # 생각은 줄인다. 이 앱은 추론을 맡기지 않고, 길게 생각하면 느리고 출력 한도를 먹는다.
-        step = self.thinking.get(model, 0)
+        # 생각은 보통 줄인다(사실 정리는 길게 생각하면 느리고 출력 한도를 먹는다). 상담 답만 중간으로.
+        ladder = self.THINKING_MEDIUM if think == 'medium' else self.THINKING
+        memo = (model, think)
+        step = self.thinking.get(memo, 0)
         while True:
-            switch = self.THINKING[step]
+            switch = ladder[step]
             if switch:
                 body['generationConfig']['thinkingConfig'] = switch
             else:
@@ -829,7 +835,7 @@ class Gemini:
                 if switch is None or 'thinking' not in str(getattr(e, 'detail', '')).lower():
                     raise
                 step += 1
-        self.thinking[model] = step
+        self.thinking[memo] = step
         candidates = result.get('candidates') or []
         parts = ((candidates[0].get('content') or {}).get('parts') or []) if candidates else []
         text = ''.join(p.get('text', '') for p in parts if isinstance(p, dict) and not p.get('thought'))
@@ -840,7 +846,8 @@ class Gemini:
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
-                                   {'temperature': 0.3, 'maxOutputTokens': 4096})
+                                   {'temperature': 0.3, 'maxOutputTokens': 8192 if consult else 4096},
+                                   think='medium' if consult else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -904,7 +911,7 @@ OPENAI_MODELS = (('gpt-6-sol', 'GPT-6 Sol · 기본 · 질문당 약 17원'),
 class Claude:
     """Anthropic Claude API(유료). 사용자가 자기 키를 넣는다. 공식 Python SDK(anthropic)로 부른다.
 
-    이 앱은 모델에게 추론을 맡기지 않으므로 effort는 low로 둔다(Haiku 4.5는 effort를 받지 않는다).
+    사실 정리는 effort low, 목표 전투력대 상담 답은 medium(우선순위·예산·세트 조합을 따져야 한다). Haiku 4.5는 effort를 받지 않는다.
     Opus 5는 안전 분류기가 거절하면 서버가 다른 모델로 다시 돌리도록 fallbacks: "default"를 켠다.
     """
     MODELS = CLAUDE_MODELS
@@ -951,7 +958,7 @@ class Claude:
             raise self.failure(e, model)
         return model
 
-    def generate(self, messages, output_config=None, max_tokens=16000, images=None):
+    def generate(self, messages, output_config=None, max_tokens=16000, images=None, effort='low'):
         import anthropic
         model = self.model
         system, turns = cloud_messages(messages)
@@ -961,7 +968,7 @@ class Claude:
                 {'type': 'text', 'text': turns[-1]['content']}]}
         config = dict(output_config or {})
         if not model.startswith('claude-haiku'):
-            config.setdefault('effort', 'low')
+            config.setdefault('effort', effort)
         request = {'model': model, 'max_tokens': max_tokens, 'messages': turns}
         if system:
             request['system'] = system
@@ -981,7 +988,8 @@ class Claude:
         return text, {'eval_count': getattr(response.usage, 'output_tokens', None), 'model': response.model}
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
-        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult))
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
+                                   effort='medium' if consult else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -1050,7 +1058,7 @@ class OpenAI:
         self.call('GET', f'/models/{model}', key=key, timeout=20)
         return model
 
-    def generate(self, messages, extra=None, max_output_tokens=8000, images=None):
+    def generate(self, messages, extra=None, max_output_tokens=8000, images=None, effort='low'):
         model = self.model
         system, turns = cloud_messages(messages)
         if images:
@@ -1060,7 +1068,7 @@ class OpenAI:
         body = {'model': model, 'input': ([{'role': 'system', 'content': system}] if system else []) + turns,
                 'max_output_tokens': max_output_tokens, **(extra or {})}
         if model not in self.plain:
-            body['reasoning'] = {'effort': 'low'}
+            body['reasoning'] = {'effort': effort}
         try:
             result = self.call('POST', '/responses', body)
         except AppError as e:
@@ -1082,7 +1090,8 @@ class OpenAI:
         return text, {'eval_count': usage.get('output_tokens'), 'model': result.get('model') or model}
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
-        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult))
+        text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
+                                   effort='medium' if consult else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):

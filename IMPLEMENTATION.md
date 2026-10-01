@@ -455,3 +455,7 @@ macOS 패키지는 로컬 개발용 ad-hoc 서명이며 배포용 Developer ID �
   → "추천대로 다 바꾸면?" 모두 analysis(수치 검사 통과). 결론 먼저·이유·유지할 부위·마지막 질문 하나. 칠흑 5부위 함께 보스 기준 +22.2~22.4%(칠흑 2→… 세트 합산).
   고치기 전 문제(같은 장비 중복으로 칠흑 2→10세트, '2억'·'28.45만큼'·'1억당' 오판, 부위별/질문별 수치 불일치)는 모두 수정·테스트. 테스트 `tests/test_consult.py` 9개.
 - 채팅 첫 화면 예시 버튼은 기존 결정(첫 화면은 비워 둠, `test_chat_screen_is_plain`)에 따라 넣지 않음.
+- 추론(생각) 켜기(2026-10-01, 사용자: "추론을 왜 안 해?"): 그전까지 모든 답에서 생각을 최소로 두었다(Gemini thinkingLevel low/thinkingBudget 0, Claude·OpenAI effort low,
+  Ollama think 끔 — 앱이 계산하고 모델은 정리만 했기 때문). **상담 답만** 중간으로 켬: Gemini thinkingLevel medium(안 받으면 thinkingBudget 2048 → 모델 기본), 출력 한도 8192,
+  Claude·OpenAI effort medium. 로컬 모델은 생각을 켜면 몇 배 느려져 그대로 끔. 상담 문체에 '순서·단계·예산 판단은 사실을 따져 스스로 내리고 이유를 말한다' 추가.
+  확인: 실제 Gemini Flash-Lite가 medium을 받음, 답 하나에 약 5.5초. "칠흑 한꺼번에 vs 하나씩?", "첫 달·다음 달 계획" 같은 판단 질문에 비교·단계 계획으로 답함(수치 검사 통과).
