@@ -1,5 +1,5 @@
 import re
-from . import conditions, consult, context, notices, peers, prices, starforce, statcalc, union
+from . import conditions, consult, context, notices, peers, planner, prices, starforce, statcalc, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -137,13 +137,32 @@ def answer(store, model, data, nexon=None, peer_runner=None):
         store.message(sid,'user',{'content':question})
         store.message(sid,'assistant',result)
         return result
+    # 질문 이해: 클라우드 모델이면 앞 대화와 함께 '무엇을 계산·조회할지'를 먼저 정한다(planner.py). 실패하거나 로컬 모델이면 정규식 길.
+    plan = None
+    if not structured and not picked and not skip_prices and not saved_prices:
+        plan = make_plan(store, model, question, history, topic)
+    if plan:
+        question = planner.tool_question(plan, question)
+        result['plan'] = {k: plan[k] for k in ('intents', 'slot', 'target_star', 'target_cp', 'rewritten')}
+    want = set(plan['intents']) if plan else set()
     if topic and not SLOT_WORDS.search(question) and topic['name'] not in question:
         question = f"{topic['slot']} {question}"
     terms = [t for t in TERMS if t['term'] in normalize(question)]
-    if terms and any(t['term'] in ('환산','대장장이') for t in terms):
+    if plan:
+        character_route = bool(want & {'gear_status', 'starforce', 'consult'})
+        events_route = 'events' in want and not character_route and bool(nexon)
+        union_route = 'union' in want and not character_route
+    else:
+        character_route = bool(topic or consulting or CHARACTER_INTENT.search(question)
+                               or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
+                                   and SLOT_WORDS.search(question)))
+        events_route = not topic and bool(nexon) and bool(EVENT_INTENT.search(question))
+        union_route = not topic and bool(UNION_INTENT.search(question))
+    flags = {'consult': 'consult' in want, 'starforce': 'starforce' in want} if plan else None
+    if terms and any(t['term'] in ('환산','대장장이') for t in terms) and not plan:
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
-    elif not topic and nexon and EVENT_INTENT.search(question):
+    elif events_route:
         try:
             notices.sync(store, nexon)
         except AppError as e:
@@ -153,7 +172,7 @@ def answer(store, model, data, nexon=None, peer_runner=None):
                       links=[{'title': e['title'], 'url': e['url']} for e in events if e.get('url')])
         result['conditions'] = (result.get('conditions') or []) + [
             '넥슨 Open API의 진행 중 이벤트 목록(최근 20개) 기준입니다. 세부 조건은 공지 링크에서 확인하세요.']
-    elif not topic and UNION_INTENT.search(question):
+    elif union_route:
         chars = store.characters()
         main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
         if not main:
@@ -162,9 +181,7 @@ def answer(store, model, data, nexon=None, peer_runner=None):
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
             union_answer(store, model, nexon, main, question, history, result)
-    elif (topic or consulting or CHARACTER_INTENT.search(question)
-          or ((PRICE_INTENT.search(question) or STARFORCE_INTENT.search(question))
-              and SLOT_WORDS.search(question))):
+    elif character_route:
         chars = store.characters()
         main = next((c for c in chars if c['main']),None) or (chars[0] if chars else None)
         if topic and topic.get('character'):
@@ -177,7 +194,9 @@ def answer(store, model, data, nexon=None, peer_runner=None):
             result.update(status='clarify',content='캐릭터 조회를 사용할 수 없습니다. 설정에서 넥슨 API 키를 확인하세요.')
         else:
             analyse_character(store, model, nexon, main, question, history, result, skip_prices, topic,
-                              consulting=consulting, peer_runner=peer_runner)
+                              consulting=consulting, peer_runner=peer_runner, flags=flags)
+    elif plan and want <= {'chat', 'rules'} and 'rules' not in want:
+        chat_reply(store, model, question, history, result)
     elif terms and any(k in question for k in ('뜻','뭐','무엇','의미')):
         result.update(status='term',content='\n'.join(t['meaning'] for t in terms))
         result['conditions'] = ['용어 설명은 요구사항 v0.1 기준입니다. 게임별 확률과 비용을 뜻하지 않습니다.']
@@ -235,9 +254,17 @@ def answer(store, model, data, nexon=None, peer_runner=None):
 
 
 def analyse_character(store, model, nexon, managed, question, history, result, skip_prices=False, topic=None,
-                      consulting=False, peer_runner=None):
-    """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다."""
-    if consulting or PEER_INTENT.search(question):
+                      consulting=False, peer_runner=None, flags=None):
+    """실제 조회한 캐릭터 사실만 넘겨 모델이 서술하게 한다.
+
+    flags(질문 이해 결과)가 있으면 그것을 따르고(상담·기대값을 함께 물을 수도 있다), 없으면 정규식으로 판단한다."""
+    if flags is not None:
+        consulting = flags['consult']
+        wants_starforce = flags['starforce']
+    else:
+        consulting = consulting or bool(PEER_INTENT.search(question))
+        wants_starforce = bool(STARFORCE_INTENT.search(question))
+    if consulting:
         result['consult'] = True        # 조회가 실패해도 다음 질문은 상담으로 이어 간다
     try:
         profile = nexon.character(managed['name'], details=True)
@@ -276,7 +303,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
             text = f"[대화 주제 장비] {topic['slot']} {topic['name']} — 지금은 착용하지 않아 상세를 알 수 없다.\n\n" + text
     result['character'] = {'name':facts['name'],'level':facts['level'],'job':facts['job'],
                            'combat_power':facts['combat_power'],'retrieved_at':facts['retrieved_at']}
-    consult_mode = consulting or bool(PEER_INTENT.search(question))
+    consult_mode = consulting
     if consult_mode:
         result['consult'] = True
         # 질문에 목표 전투력이 있고 지금 모으는 기준과 다르면, 그 전투력대로 다시 모으기 시작한다(뒤에서).
@@ -301,7 +328,7 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
                      '다른 유저 경향을 지어내지 말 것. 목표 전투력을 물어보고, 캐릭터 화면에서 모으기를 시작하라고 안내할 것.')
             result['topic_notes'].append("목표 전투력대 유저 장비 통계가 아직 없어요. 캐릭터 화면의 '목표 전투력대 유저'에 목표 전투력을 적고 모으기를 시작하세요.")
     # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
-    if STARFORCE_INTENT.search(question):
+    if wants_starforce:
         computed = starforce_facts(store, profile, question, result, item)
         if computed is None:
             return
@@ -344,7 +371,8 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     try:
         written, metrics = model.analyse(selected_model, text, question, previous,
                                          numbers_shown=bool(result.get('starforce_text')),
-                                         **({'consult': True} if result.get('consult') else {}))
+                                         **({'consult': True} if result.get('consult') else
+                                            {'consult': 'chat'} if flags is not None else {}))
         result['metrics'] = metrics
     except AppError as e:
         kept = result.pop('starforce_text', None)
@@ -676,3 +704,52 @@ def last_starforce(history):
         if message['role'] == 'assistant' and message['payload'].get('starforce'):
             return message['payload']['starforce']
     return None
+
+
+def make_plan(store, model, question, history, topic=None):
+    """질문 이해(planner). 클라우드 모델이 아니거나 실패하면 None — 정규식 길로 간다."""
+    selected = store.setting('model')
+    if not selected or not hasattr(model, 'plan'):
+        return None
+    chars = store.characters()
+    main = next((c for c in chars if c['main']), None) or (chars[0] if chars else None)
+    target = store.setting(peers.TARGET) or {}
+    context_info = {'대표 캐릭터 직업': ((main or {}).get('snapshots') or [{}])[0].get('data', {}).get('job') if main else None,
+                    '저장된 목표 전투력': f"{target['cp'] / 1e8:.2f}억" if target.get('cp') else None,
+                    '대화 주제 장비': f"{topic['slot']} {topic['name']}" if topic else None}
+    turns = [{'role': m['role'], 'content': m['payload'].get('content', '')} for m in history[-4:] if m['payload'].get('content')]
+    try:
+        text, _ = model.plan(selected, planner.messages(question, turns, {k: v for k, v in context_info.items() if v}))
+    except AppError:
+        return None
+    except Exception:
+        return None
+    return planner.parse(text)
+
+
+CAPABILITIES = (
+    '[메피티가 할 수 있는 일] 넥슨 Open API로 사용자의 실제 캐릭터·장비를 보고 대화로 답한다:\n'
+    '- 지금 장비 상태(스타포스·잠재·추옵 급, 약한 부위)\n'
+    '- 스타포스 강화 기대값(이벤트·파괴방지 조건 반영, mesulive 방식 계산)\n'
+    '- 목표 전투력대 유저와 비교한 스펙업 상담(무엇을 바꾸면 보스 기준 몇 % 오르는지, 세트 맞추기, 가성비)\n'
+    '- 유니온 공격대원 추천, 진행 중 이벤트, 수익(재획·주보) 기록, 목표 메소·레벨업 기간\n'
+    '예시 질문: "내 장비 어때?", "모자 22성 기대값", "목표 전투력 2억5천이면 뭐부터 바꿔?", "지금 이벤트 뭐 있어?"'
+)
+
+
+def chat_reply(store, model, question, history, result):
+    """인사·잡담·사용법. 메피티가 할 수 있는 일만 사실로 주고 짧게 대화한다(게임 수치는 말하지 않는다)."""
+    selected = store.setting('model')
+    previous = [{'role': m['role'], 'content': m['payload']['content']} for m in history[-4:] if m['payload'].get('content')]
+    try:
+        written, metrics = model.analyse(selected, CAPABILITIES, question, previous, consult='chat')
+    except AppError as e:
+        result.update(status='clarify', content='무엇을 도와드릴까요? 예: "내 장비 어때?", "모자 22성 기대값", "목표 전투력 2억5천이면 뭐부터 바꿔?"')
+        result['conditions'] = [str(e)]
+        return
+    invented = unsupported_numbers(written, CAPABILITIES + '\n' + question)
+    if invented or FABRICATION.search(written):
+        result.update(status='clarify', content='무엇을 도와드릴까요? 예: "내 장비 어때?", "모자 22성 기대값", "목표 전투력 2억5천이면 뭐부터 바꿔?"')
+        return
+    result.update(status='analysis', content=written)
+    result['metrics'] = metrics

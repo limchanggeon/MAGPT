@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-01 (KST)
-- 현재 단계: v0.4.1 릴리스 완료. 0.4.2 준비(목표 전투력대 비교를 대화 상담으로) — 릴리스는 사용자 승인 필요. 전체 요구사항 완료 아님.
+- 현재 단계: v0.4.1 릴리스 완료. 0.4.2 준비(대화형 도우미: 질문 이해 planner·대화 문체·목표 전투력대 상담·상담 추론) — 릴리스는 사용자 승인 필요. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok` → PR [limchanggeon/MAGPT#1](https://github.com/limchanggeon/MAGPT/pull/1)(draft, 병합 전, CI 통과).
   **사용자는 PR 병합 전이라 Mac에서 이 브랜치를 직접 받아 쓰고 있다.** `main`에는 아직 이번 기능들이 없다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
@@ -1293,3 +1293,10 @@ lsof -ti :8765 | xargs kill                         # 켜져 있는 앱 끄기(m
   '반지2 22성으로 올리면?'처럼 내 장비 강화만 가정하는 질문은 아직 시뮬레이션하지 않음(다음 후보).
 - 추가(같은 날, 사용자: "추론을 왜 안 해?"): 상담 답만 추론 중간(Gemini medium, Claude·OpenAI effort medium), 나머지 답과 로컬 모델은 그대로 최소. 실제 Gemini로 판단 질문 3개 확인(약 5.5초/답).
   유료 키(Claude·ChatGPT)는 상담 답의 토큰·비용이 늘어남(실제 유료 키로는 확인 못 함).
+
+### 2026-10-01 — 대화형 도우미로 (사용자: "ChatGPT처럼 대화형으로 기대값·다음 스펙업 상담·템 상태를 물어보고 상담할 수 있게")
+
+- 변경: `mepiti/planner.py`(신규), `mepiti/adapters.py`(Gemini·Claude·OpenAI `plan`, `ModelRouter.plan`, `CHAT_STYLE`, 기대값 뒤 덧붙임 문구), `mepiti/chat.py`(계획으로 길 고르기·`make_plan`·`chat_reply`·flags),
+  테스트 `tests/test_planner.py`. 자세한 결과는 IMPLEMENTATION.md.
+- 한계·다음: 로컬 모델은 계획 없이 기존 정규식. '반지2 22성으로 올리면?'(내 장비 강화 가정) 시뮬레이션 없음. 장비 상태 답의 '괜찮은 편' 같은 평가는 모델 판단(근거: 목표 전투력대 통계가 있으면 그것).
+  질문마다 계획 호출 1회가 늘어 Gemini 무료 한도(하루 약 500회) 기준 대화 약 250번.

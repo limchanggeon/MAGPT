@@ -632,6 +632,16 @@ CONSULT_STYLE = (
 )
 
 
+# 대화 문체(장비 상태·기대값·잡담). 상담(CONSULT_STYLE)보다 가볍고, 추론은 켜지 않는다.
+CHAT_STYLE = (
+    '\n[대화 문체] 너는 메피티, 메이플스토리 스펙업을 도와주는 대화형 도우미다. ChatGPT처럼 자연스럽게 대화한다.\n'
+    '- 존댓말로, 첫 문장에 질문에 대한 답을 말한다. 짧은 문단 1~3개. 목록은 꼭 필요할 때만 짧게.\n'
+    '- 앞선 대화의 흐름을 이어 간다. 짧은 후속 질문은 앞 답변에 이어서 답한다.\n'
+    '- 사실에 없는 것은 모른다고 하고, 무엇을 알려 주면(또는 어느 화면에서) 할 수 있는지 안내한다.\n'
+    '- 다음에 물어보면 좋을 것을 필요할 때만 한 문장으로 권한다.'
+)
+
+
 def analysis_messages(facts, question, history=None, numbers_shown=False, consult=False):
     system = (
             '너는 메이플스토리 캐릭터 정보를 읽고 정리하는 도우미다. 숙련자가 읽는 글이므로 군더더기 없이 쓴다.\n'
@@ -647,11 +657,13 @@ def analysis_messages(facts, question, history=None, numbers_shown=False, consul
         '한국어로, 항목별로 짧게 쓴다. 인사말과 맺음말은 쓰지 않는다.'
     )
     if consult:
-        system = system.replace('한국어로, 항목별로 짧게 쓴다. 인사말과 맺음말은 쓰지 않는다.', '한국어로 쓴다. 인사말은 쓰지 않는다.') + CONSULT_STYLE
+        system = system.replace('한국어로, 항목별로 짧게 쓴다. 인사말과 맺음말은 쓰지 않는다.', '한국어로 쓴다. 인사말은 짧게만.')
+        system += CONSULT_STYLE if consult is True else CHAT_STYLE
     if numbers_shown:
         # 수치는 앱이 이미 화면에 썼다. 모델이 다시 쓰면 틀린 자릿수나 파생값이 섞인다.
-        system += ('\n계산 결과는 이미 사용자 화면에 표시되어 있다. **숫자를 하나도 쓰지 마라.**\n'
-                   '그 수치가 무엇을 뜻하는지, 무엇을 더 정하면 좋을지 한두 문장으로만 쓴다.')
+        system += ('\n앱이 계산 결과(수치)를 이 답 바로 위에 붙여 보여 준다. **숫자를 하나도 쓰지 마라.** '
+                   "그 결과를 다시 말하거나 '화면에 나와 있다'고 하지 말고, 이어서 읽힐 한두 문장만 쓴다: "
+                   '이 결과를 어떻게 보면 되는지(예: 파괴 위험이 크면 파괴방지·이벤트 때 하는 쪽을 고려), 다음에 해 볼 만한 것.')
     messages = [{'role':'system','content':system}]
     for turn in (history or [])[-4:]:
         messages.append(turn)
@@ -846,8 +858,8 @@ class Gemini:
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
-                                   {'temperature': 0.3, 'maxOutputTokens': 8192 if consult else 4096},
-                                   think='medium' if consult else 'low')
+                                   {'temperature': 0.3, 'maxOutputTokens': 8192 if consult is True else 4096},
+                                   think='medium' if consult is True else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -863,6 +875,12 @@ class Gemini:
             'responseSchema': {'type': 'OBJECT', 'properties': {'ids': {'type': 'ARRAY', 'items': {'type': 'INTEGER'}}},
                                'required': ['ids']}})
         return selected_ids(text, passages), meta
+
+    def plan(self, model, messages):
+        from .planner import schema_gemini
+        text, meta = self.generate(messages, {'temperature': 0, 'maxOutputTokens': 2048, 'responseMimeType': 'application/json',
+                                              'responseSchema': schema_gemini()})
+        return text, meta
 
 
 def gemini_error(code, detail):
@@ -989,7 +1007,7 @@ class Claude:
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
-                                   effort='medium' if consult else 'low')
+                                   effort='medium' if consult is True else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -1002,6 +1020,10 @@ class Claude:
                   'required': ['ids'], 'additionalProperties': False}
         text, meta = self.generate(select_messages(question, passages), {'format': {'type': 'json_schema', 'schema': schema}})
         return selected_ids(text, passages), meta
+
+    def plan(self, model, messages):
+        from .planner import schema_json
+        return self.generate(messages, {'format': {'type': 'json_schema', 'schema': schema_json()}}, max_tokens=2000)
 
 
 class OpenAI:
@@ -1091,7 +1113,7 @@ class OpenAI:
 
     def analyse(self, model, facts, question, history=None, numbers_shown=False, consult=False):
         text, meta = self.generate(analysis_messages(facts, question, history, numbers_shown, consult),
-                                   effort='medium' if consult else 'low')
+                                   effort='medium' if consult is True else 'low')
         return written_text(text), meta
 
     def read_capture(self, mime, data):
@@ -1105,6 +1127,10 @@ class OpenAI:
         text, meta = self.generate(select_messages(question, passages),
                                    {'text': {'format': {'type': 'json_schema', 'name': 'evidence_ids', 'schema': schema, 'strict': True}}})
         return selected_ids(text, passages), meta
+
+    def plan(self, model, messages):
+        from .planner import schema_json
+        return self.generate(messages, {'text': {'format': {'type': 'json_schema', 'name': 'plan', 'schema': schema_json(), 'strict': True}}})
 
 
 # 설정의 사용 모델 값 → 클라우드 제공자. 값이 이 목록에 없으면 로컬(Ollama) 모델 이름이다.
@@ -1128,6 +1154,13 @@ class ModelRouter:
 
     def select(self, model, *args, **kwargs):
         return self._for(model).select(model, *args, **kwargs)
+
+    def plan(self, model, messages):
+        """질문 이해(planner.py). 로컬 모델은 이해가 불안정해 쓰지 않는다 — 호출한 쪽이 정규식 길로 간다."""
+        target = self._for(model)
+        if target is self.local or not hasattr(target, 'plan'):
+            raise AppError('질문 이해는 클라우드 모델에서만 써요.', 400)
+        return target.plan(model, messages)
 
     def read_capture(self, model, mime, data):
         """캡처에서 메소·조각 수 읽기. 로컬 모델은 이미지를 못 읽으므로 직접 입력하게 한다."""
