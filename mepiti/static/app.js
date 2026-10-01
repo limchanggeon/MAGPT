@@ -395,6 +395,7 @@ function captureReport(){
     if(c&&c.values)body.textContent=line(c.values);else if(c&&c.loading)body.textContent='읽는 중…';else body.textContent='여기를 누르고 붙여 넣기';
     s.classList.toggle('filled',!!(c&&c.values));s.classList.toggle('active',s.dataset.slot===captureSlot);});
   $('#capture-apply').disabled=true;out.textContent='';
+  const flasks=Number($('#capture-flasks').value||0);
   if(!(b&&a))return;
   const both=(k)=>b[k]!=null&&a[k]!=null;
   const meso=both('inventory_meso')?(a.inventory_meso-b.inventory_meso)+(both('storage_meso')?a.storage_meso-b.storage_meso:0):null;
@@ -402,7 +403,8 @@ function captureReport(){
   captures.diff={meso,pieces};
   out.textContent=(meso!=null?`번 메소 ${meso<0?'-':''}${exactAmount(meso)}`:'메소 차이를 못 구했어요(두 캡처에 인벤 메소가 보여야 해요)')
     +(pieces!=null?` · 조각 ${pieces>=0?'+':''}${fmt(pieces)}개`:' · 조각 차이 없음(한쪽에서 못 찾음)')
-    +(both('storage_meso')?' · 창고 메소 변화 포함':'')+(meso!=null&&meso<0?' — 메소가 줄었어요. 캡처 순서를 확인하세요.':'');
+    +(both('storage_meso')?' · 창고 메소 변화 포함':'')+(meso!=null&&meso<0?' — 메소가 줄었어요. 캡처 순서를 확인하세요.':'')
+    +(flasks>0&&meso>0?` · 재획비 ${fmt(flasks)}개 → 1개당 메소 ${exactAmount(meso/flasks)}`:'');
   $('#capture-apply').disabled=!(meso>0||pieces>0);
 }
 async function readCaptureFile(file,slot){
@@ -432,8 +434,10 @@ document.addEventListener('paste',e=>{
 });
 $('#capture-apply').onclick=()=>{const f=$('#hunt-form').elements,d=captures.diff||{};
   if(d.meso>0)f.meso.value=exactAmount(d.meso);if(d.pieces>0)f.pieces.value=d.pieces;
+  const flasks=Number($('#capture-flasks').value||0);if(flasks>0)f.flasks.value=flasks;
   if(!f.day.value)f.day.value=todayText();huntPreview();toast('캡처 차이를 채웠어요. 확인한 뒤 저장하세요.');f.meso.focus();};
-$('#capture-reset').onclick=()=>{captures.before=captures.after=captures.diff=null;captureSlot='before';captureReport();};
+$('#capture-reset').onclick=()=>{captures.before=captures.after=captures.diff=null;captureSlot='before';$('#capture-flasks').value='';captureReport();};
+$('#capture-flasks').addEventListener('input',()=>captureReport());
 // 보스별로 기억한 결정석 가격을 직접 입력 칸에도 채운다.
 let bossPrices={};
 // 주보 체크리스트 — 보스 이름별 한 줄, 난이도마다 체크박스. 같은 보스는 한 난이도만 고른다.

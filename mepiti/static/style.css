@@ -833,3 +833,4 @@ html.in-app :is(img,a){-webkit-user-drag:none}
 .peer-behind.ahead .peer-row{border-left-color:var(--line)}
 .peer-behind.up .peer-row{border-left-color:var(--legendary)}
 .peer-form{display:flex;gap:8px;align-items:flex-end;margin:6px 0}.peer-form label{flex:1;margin:0}
+.capture-flasks{display:block;max-width:220px;margin:4px 0 8px}

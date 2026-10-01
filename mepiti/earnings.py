@@ -296,20 +296,28 @@ def overview(store, week=None, month=None, limit=200):
     week_to = week_from + timedelta(days=6)
     month_from = parse_month(month)
     month_to = shift_month(month_from, 1) - timedelta(days=1)
+    # 흐름 막대는 이번 주·이번 달에서 끝나게 고정한다. 지난 막대를 눌러도 막대가 밀리지 않고 고른 막대만 바뀌어,
+    # 다시 앞(최근) 막대를 누를 수 있다(2026-10-01 사용자 보고). 12주·6개월보다 더 과거를 고르면 그 주·달이 끝에 오게 민다.
+    week_anchor = week_start(today())
+    if week_from < week_anchor - timedelta(weeks=11) or week_from > week_anchor:
+        week_anchor = week_from
+    month_anchor = today().replace(day=1)
+    if month_from < shift_month(month_anchor, -5) or month_from > month_anchor:
+        month_anchor = month_from
     # 기록을 한 번만 순회해 12주·6개월로 묶는다. 날짜 문자열 변환도 기록마다 반복하지 않는다.
-    week_keys = [(week_from - timedelta(weeks=back)).isoformat() for back in range(11, -1, -1)]
-    month_keys = [shift_month(month_from, -back).isoformat()[:7] for back in range(5, -1, -1)]
+    week_keys = [(week_anchor - timedelta(weeks=back)).isoformat() for back in range(11, -1, -1)]
+    month_keys = [shift_month(month_anchor, -back).isoformat()[:7] for back in range(5, -1, -1)]
     week_rows = {key: [] for key in week_keys}
     month_rows = {key: [] for key in month_keys}
-    week_end = week_to.isoformat()
+    week_end = (week_anchor + timedelta(days=6)).isoformat()
     for r in rows:
         if week_keys[0] <= r['day'] <= week_end:
             week_rows[week_start(date.fromisoformat(r['day'])).isoformat()].append(r)
         month_key = r['day'][:7]
         if month_key in month_rows:
             month_rows[month_key].append(r)
-    in_week = week_rows[week_keys[-1]]
-    in_month = month_rows[month_keys[-1]]
+    in_week = week_rows[week_from.isoformat()]
+    in_month = month_rows[month_from.isoformat()[:7]]
     weeks = [{'week_start': key, **{k: v for k, v in breakdown(week_rows[key]).items() if k != 'characters'}}
              for key in week_keys]
     months = [{'month': key, **{k: v for k, v in breakdown(month_rows[key]).items() if k != 'characters'}}
