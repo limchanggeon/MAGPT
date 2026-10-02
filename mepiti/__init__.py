@@ -1,2 +1,2 @@
 """메피티: local, evidence-first MapleStory assistant."""
-__version__ = '0.4.6'
+__version__ = '0.4.7'
