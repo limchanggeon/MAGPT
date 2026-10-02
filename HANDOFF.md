@@ -1407,3 +1407,9 @@ node tests/test_frontend.js
 
 - 변경: `mepiti/static/app.js`(`renderHistoryCharacters`·`renderForgeHistory`), `index.html`, `style.css`, README·IMPLEMENTATION. 서버 변경 없음.
 - 검증: Python 전체·Node 회귀·JS 구문, 데모+WebKit. 임시 검사용 playwright 가상환경은 scratchpad `pw`로 새로 만듦(기존 `venv`가 비어 있었음). 미릴리스.
+
+### 2026-10-03 — 목표 전투력대 찾기 속도 (사용자: "늦다, 방법이 없을까")
+
+- 변경: `mepiti/peers.py`(간격 0.3초·하루 600회·레벨대 학습 `learn`), `index.html`·`README.md` 문구, 테스트 1개. 미릴리스.
+- 사실·실측은 IMPLEMENTATION.md 같은 날짜. 넥슨 공식 한도 확인됨(개발 키 초당 5·하루 1,000).
+- 대기: 사용자가 준 '전투력 랭킹' API의 경로(GET /maplestory/v1/ranking/...) — 받으면 전투력 순 랭킹으로 바로 목표대를 찾게 바꿀 예정(한 명씩 확인할 필요 없음).

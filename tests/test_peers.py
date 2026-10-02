@@ -262,3 +262,15 @@ class SimulationRankingTests(unittest.TestCase):
         self.assertEqual([a['slot'] for a in result['ahead']], ['신발'])
         self.assertFalse(any(r.startswith('장비 ') for b in result['behind'] for r in b['reasons']))
         self.assertIn('[바꾸면 오히려 손해인 부위]', peers.facts_text(result))
+
+
+class LearnOrderTests(unittest.TestCase):
+    def test_bands_with_hits_move_forward(self):
+        target = {'screened': 0}
+        queue = [{'name': 'now', 'level': 290}] + [{'name': f'a{i}', 'level': 270} for i in range(5)] + [{'name': f'b{i}', 'level': 295} for i in range(5)]
+        for i in range(peers.LEARN_EVERY):
+            target['screened'] += 1
+            person = {'name': f'x{i}', 'level': 295 if i % 2 else 270}
+            queue = peers.learn(target, person, hit=(person['level'] == 295), queue=queue)
+        self.assertEqual(queue[0]['name'], 'now')                       # 지금 보는 후보는 그대로
+        self.assertTrue(all(q['level'] == 295 for q in queue[1:6]))     # 해당이 나온 레벨대가 앞으로

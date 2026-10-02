@@ -63,8 +63,11 @@ PAUSE_MINUTES = 15            # 넥슨 요청 한도 초과(429) 뒤 모으기�
 TARGET = 'peer_target'        # {job, level, world_type, rank, at} — 마지막으로 고른 기준
 QUEUE = 'peer_queue'          # 아직 장비를 보지 않은 후보 [{name, level}]
 CALLS = 'peer_calls'          # {day, count, blocked}
-DAILY_CALLS = 120             # 넥슨 개발 키 하루 한도(약 1,000회로 알려짐, 미확인) 중 이 기능 몫. 설정 peer_daily_calls로 바꿀 수 있다.
-GAP_SECONDS = 3
+# 넥슨 개발 단계 키 한도: 초당 5건·하루 1,000건(공식 가이드 '사전 준비', 2026-10-03 확인). 초당은 adapters.NEXON_GATE(초당 4회)가 지키고,
+# 하루 몫은 화면 조회·상담·공지 몫(하루 수십~200회)을 남겨 600회. 설정 peer_daily_calls로 바꿀 수 있다.
+DAILY_CALLS = 600
+GAP_SECONDS = 0.3             # 이 기능 호출 사이 최소 간격(앱 전체 간격 0.25초 위에 조금 더)
+LEARN_EVERY = 10              # 이만큼 확인할 때마다 레벨대별 해당률로 남은 후보 순서를 다시 정한다
 KEEP_DAYS = 14
 LEVEL_BAND = 3                # 후보: 내 레벨 ±3
 MAX_QUEUE = 40
@@ -339,6 +342,7 @@ class Peers:
         if not cp:
             ocid, cp = self.power(person['name'])
             target['screened'] = int(target.get('screened') or 0) + 1
+            queue = learn(target, person, ocid and in_band(cp, target['cp']), queue)
         if not ocid or not in_band(cp, target['cp']):
             self.finals.pop(ocid, None)
             self.store.set_setting(TARGET, target)
@@ -732,3 +736,27 @@ def profile_rows(profile, ledger=None):
         no = int(min(presets, key=lambda n: (statcalc.hunting_lines(presets[n]), str(n) != str(applied))))
     rows = presets.get(str(no)) if no is not None else None
     return (rows or profile.get('equipment') or []), no or applied, applied
+
+
+def band_of(person):
+    """후보의 레벨대(3레벨 단위)와 같은 직업/같은 계열 구분 — 해당률을 따로 센다."""
+    level = int(person.get('level') or 0)
+    return f"{'f' if person.get('family') else 's'}{level // 3 * 3}"
+
+
+def learn(target, person, hit, queue):
+    """확인 결과를 레벨대별로 세고, LEARN_EVERY명마다 남은 후보를 '해당률이 높을 것 같은 레벨대' 순으로 다시 세운다.
+
+    전투력은 레벨과 약하게만 맞아도, 목표대가 몰린 레벨대가 있으면 그쪽을 먼저 본다. 처음 보는 레벨대는 전체 평균으로 친다."""
+    bands = target.setdefault('bands', {})
+    tries, hits = bands.get(band_of(person), [0, 0])
+    bands[band_of(person)] = [tries + 1, hits + (1 if hit else 0)]
+    if target.get('screened', 0) % LEARN_EVERY or len(queue) < 3:
+        return queue
+    total_tries = sum(v[0] for v in bands.values()) or 1
+    prior = (sum(v[1] for v in bands.values()) + 1) / (total_tries + 2)
+    def score(p):
+        t, h = bands.get(band_of(p), [0, 0])
+        return (h + prior * 2) / (t + 2)          # 적게 본 레벨대는 전체 평균 쪽으로
+    rest = sorted(queue[1:], key=lambda p: (0 if p.get('cp') else 1, -score(p)))   # 이미 전투력을 아는 후보는 앞에
+    return [queue[0]] + rest
