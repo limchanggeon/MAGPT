@@ -108,3 +108,19 @@ class ConsultChatTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class UniqueEquipTests(unittest.TestCase):
+    """반지·펜던트는 같은 장비를 두 자리에 낄 수 없다 — 자리마다 다른 장비를 추천한다."""
+    def test_ring_slots_get_distinct_items_and_worn_items_are_skipped(self):
+        store, ledger, profile = setup_store()
+        ring = item('반지2', '거대한 공포', 18, 200, ('STR +12%',))
+        meister = item('반지1', '마이스터링', 18, 150, ('STR +9%',))
+        people = [{'반지1': {'name': '거대한 공포', 'starforce': 18, 'item': {**ring, 'item_equipment_slot': '반지1'}},
+                   '반지2': {'name': '거대한 공포', 'starforce': 18, 'item': ring}},
+                  {'반지1': {'name': '마이스터링', 'starforce': 18, 'item': meister},
+                   '반지2': {'name': '어웨이크 링', 'starforce': 0, 'item': item('반지2', '어웨이크 링', 0, 0)}}]
+        sims = peers.simulate(people, peers.slot_stats(people), ledger)
+        picked = [sims[s]['item'] for s in ('반지1', '반지2') if s in sims]
+        self.assertEqual(len(picked), len(set(picked)))                    # 같은 장비를 두 자리에 추천하지 않는다
+        self.assertNotIn('어웨이크 링', [sims[s]['item'] for s in ('반지1',) if s in sims])   # 반지2에 이미 낀 장비는 반지1 후보가 아니다

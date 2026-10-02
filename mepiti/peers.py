@@ -485,27 +485,57 @@ def candidate(people, slot, name):
     return pool[len(pool) // 2]
 
 
+# 자리가 여럿인 부위. 같은 장비는 두 자리에 낄 수 없어(고유 장착) 묶어서 서로 다른 장비를 배정한다.
+SLOT_GROUPS = {'반지': ('반지1', '반지2', '반지3', '반지4'), '펜던트': ('펜던트', '펜던트2')}
+
+
+def group_of(slot):
+    return next((g for g in SLOT_GROUPS.values() if slot in g), (slot,))
+
+
 def simulate(people, stats, ledger):
-    """부위마다 '많이 끼는 장비(중앙 수준 한 벌)로 바꾸면' 스탯공격력·보스 기준 변화 범위."""
+    """부위마다 '많이 끼는 장비(중앙 수준 한 벌)로 바꾸면' 스탯공격력·보스 기준 변화 범위.
+
+    반지·펜던트처럼 자리가 여럿인 부위는 자리×후보 장비를 모두 계산해 효과가 큰 순서로, 한 자리에 한 장비·한 장비는 한 자리만 배정한다.
+    다른 자리에 이미 낀 장비는 후보에서 뺀다(같은 자리의 같은 장비를 더 좋은 옵션으로 맞추는 것은 된다)."""
     from . import statcalc
     mine = {}
     for item in getattr(ledger, 'items', None) or []:
         mine.setdefault(item.get('item_equipment_slot'), item)
-    out = {}
-    for slot, s in stats.items():
-        if not s['items'] or slot not in mine:
+    out, done = {}, set()
+    for slot in stats:
+        group = group_of(slot)
+        if group in done:
             continue
-        if statcalc.is_lucky(mine[slot].get('item_name')):
-            continue        # 제네시스 무기는 바꾸지 않는다(해방으로 같은 럭키 아이템을 강화할 뿐)
-        pick = candidate(people, slot, s['items'][0]['name'])
-        if not pick:
-            continue
-        result = statcalc.swap(ledger, mine[slot], pick)
-        out[slot] = {'item': pick['item_name'], 'starforce': int(pick.get('starforce') or 0),
-                     'same_item': pick['item_name'] == mine[slot].get('item_name'),
-                     'potential': [pick[k] for k in ('potential_option_1', 'potential_option_2', 'potential_option_3') if pick.get(k)],
-                     'range': result['range'], 'boss_range': result['boss_range'], 'sets': result['sets'],
-                     'unknown': result['unknown'], 'defense': result['defense']}
+        done.add(group)
+        slots = [s for s in group if s in mine and s in stats and stats[s]['items']
+                 and not statcalc.is_lucky(mine[s].get('item_name'))]   # 제네시스 무기는 바꾸지 않는다
+        names = []
+        for s in slots:
+            names += [i['name'] for i in stats[s]['items'][:3 if len(group) > 1 else 1]]
+        names = list(dict.fromkeys(names))
+        pairs = []
+        for s in slots:
+            worn_elsewhere = {mine[o].get('item_name') for o in group if o != s and o in mine}
+            for name in names:
+                if name in worn_elsewhere:
+                    continue
+                pick = candidate(people, s, name) or next((candidate(people, o, name) for o in group if candidate(people, o, name)), None)
+                if not pick:
+                    continue
+                result = statcalc.swap(ledger, mine[s], pick)
+                pairs.append((result['boss_range'][1], s, name, pick, result))
+        used_slots, used_names = set(), set()
+        for _, s, name, pick, result in sorted(pairs, key=lambda x: -x[0]):
+            if s in used_slots or name in used_names:
+                continue
+            used_slots.add(s)
+            used_names.add(name)
+            out[s] = {'item': pick['item_name'], 'starforce': int(pick.get('starforce') or 0),
+                      'same_item': pick['item_name'] == mine[s].get('item_name'),
+                      'potential': [pick[k] for k in ('potential_option_1', 'potential_option_2', 'potential_option_3') if pick.get(k)],
+                      'range': result['range'], 'boss_range': result['boss_range'], 'sets': result['sets'],
+                      'unknown': result['unknown'], 'defense': result['defense']}
     return out
 
 

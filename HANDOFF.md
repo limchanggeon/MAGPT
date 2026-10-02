@@ -1337,3 +1337,4 @@ node tests/test_frontend.js
 - 변경: `mepiti/statcalc.py`(프리셋 선택·기준 프리셋 상대 교체), `mepiti/peers.py`(비교 유저 기준 프리셋, 내 장비 기준 프리셋, 사실 글 안내), `mepiti/planner.py`(targets),
   `mepiti/chat.py`(여러 장비·끼지 않은 장비 기대값, 되묻기 뒤 계획 이어 가기), 테스트. 자세한 결과 IMPLEMENTATION.md.
 - 한계: 프리셋 투력은 넥슨 값이 아니라 시뮬레이션 추정. 이전에 모은 비교 유저 장비는 적용 중 프리셋으로 저장돼 있음(다시 모으면 기준 프리셋). 장신구 등 세트 표 밖 장비의 레벨은 모르면 되묻는다.
+- 같은 날(사용자: 반지·펜던트에 같은 템 추천): 묶음 배정으로 중복 제거, 다른 자리에 낀 장비 제외. `mepiti/peers.py`·`consult.py`·테스트. 미릴리스.

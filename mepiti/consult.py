@@ -15,7 +15,7 @@ import re
 
 from . import peers, prices, statcalc
 
-SLOT_GROUPS = {'반지': ('반지1', '반지2', '반지3', '반지4'), '펜던트': ('펜던트', '펜던트2')}
+SLOT_GROUPS = peers.SLOT_GROUPS
 SLOT_ALIASES = {'목걸이': '펜던트', '펜던트': '펜던트', '귀걸이': '귀고리', '귀고리': '귀고리', '이어링': '귀고리',
                 '얼장': '얼굴장식', '얼굴장식': '얼굴장식', '눈장': '눈장식', '눈장식': '눈장식', '어깨': '어깨장식',
                 '견장': '어깨장식', '보조': '보조무기', '보조무기': '보조무기', '심장': '기계 심장', '하트': '기계 심장',
@@ -91,6 +91,8 @@ def best_slot(ledger, mine, item, slots, people=None):
     for slot in slots:
         if slot not in mine or statcalc.is_lucky(mine[slot].get('item_name')):
             continue
+        if any(o != slot and o in mine and mine[o].get('item_name') == item['item_name'] for o in slots):
+            continue          # 다른 자리에 이미 낀 장비는 또 낄 수 없다(고유 장착)
         pick = (peers.candidate(people, slot, item['item_name']) if people else None) or item
         result = statcalc.swap(ledger, mine[slot], pick)
         if best is None or result['boss_range'][1] > best[1]['boss_range'][1]:
