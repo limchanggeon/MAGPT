@@ -21,13 +21,17 @@ function nexonImage(url,alt,cls){
   if(!url)return el('span','image-unavailable','이미지 없음');
   try{const u=new URL(url);if(u.protocol!=='https:'||u.hostname!=='open.api.nexon.com'||!u.pathname.startsWith('/static/maplestory/')||u.username)throw new Error();}
   catch{return el('span','image-unavailable','이미지 없음');}
-  const img=el('img',cls);img.src=url;img.alt=alt;img.decoding='async';img.onerror=()=>img.replaceWith(el('span','image-unavailable','불러오기 실패'));return img;
+  const img=el('img',cls);img.src=url;img.alt=alt;img.decoding='async';
+  // 넥슨에서 바로 못 받으면(창의 이미지 차단 등) 앱이 대신 받아 준 주소로 한 번 더 시도한다.
+  img.onerror=()=>{if(!img.dataset.proxied){img.dataset.proxied='1';img.src=proxiedImage(url);}else img.replaceWith(el('span','image-unavailable','불러오기 실패'));};
+  return img;
 }
+function proxiedImage(url){return '/nexon-image?u='+encodeURIComponent(url);}
 // 넥슨 캐릭터 이미지는 캐릭터 주위에 투명 여백이 크다. 캐릭터가 있는 부분만 잘라 칸을 채운다.
 // 넥슨 서버가 교차 출처 읽기를 막으면 잘라낼 수 없으므로, 캐릭터 쪽으로 확대하는 방식으로 대신한다.
 function fitSprite(img,url){
   const fallback=()=>img.classList.add('zoomed');
-  const probe=new Image();probe.crossOrigin='anonymous';
+  const probe=new Image();   // 같은 출처(앱이 대신 받은 이미지)라 캔버스로 읽을 수 있다
   probe.onload=()=>{try{
     const c=document.createElement('canvas');c.width=probe.naturalWidth;c.height=probe.naturalHeight;
     const g=c.getContext('2d');g.drawImage(probe,0,0);const px=g.getImageData(0,0,c.width,c.height).data;
@@ -38,7 +42,7 @@ function fitSprite(img,url){
     out.getContext('2d').drawImage(c,x0-pad,y0-pad,w,h,0,0,w,h);
     img.src=out.toDataURL('image/png');img.classList.add('trimmed');
   }catch{fallback();}};
-  probe.onerror=fallback;probe.src=url;
+  probe.onerror=fallback;probe.src=proxiedImage(url);
 }
 function showProfileEmpty(message){
   const box=$('#character-profile');box.replaceChildren();const empty=el('div','profile-placeholder');empty.append(el('h2','','캐릭터 미선택'),el('p','',message||'아래 목록에서 캐릭터를 선택하세요.'));

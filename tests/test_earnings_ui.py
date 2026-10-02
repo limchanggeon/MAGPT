@@ -41,3 +41,32 @@ class TrendAnchorTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NexonImageProxyTests(unittest.TestCase):
+    """넥슨 이미지를 앱이 대신 받아 주는 길(/nexon-image). 넥슨 정적 이미지 주소만 받는다."""
+    def test_rejects_other_hosts_and_paths(self):
+        from mepiti.core import AppError
+        from mepiti.server import nexon_image
+        class App: pass
+        for url in ('http://open.api.nexon.com/static/maplestory/a.png', 'https://evil.example/static/maplestory/a.png',
+                    'https://open.api.nexon.com/maplestory/v1/id', 'https://open.api.nexon.com:444/static/maplestory/a.png', ''):
+            with self.assertRaises(AppError):
+                nexon_image(App(), url)
+
+    def test_caches_and_checks_content_type(self):
+        from unittest import mock
+        from mepiti import server
+        class Response:
+            headers = {'Content-Type': 'image/png'}
+            def __init__(self): self.reads = 0
+            def read(self, n): return b'PNG'
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        class App: pass
+        app = App()
+        url = 'https://open.api.nexon.com/static/maplestory/character/look/ABC'
+        with mock.patch('urllib.request.urlopen', return_value=Response()) as opened:
+            self.assertEqual(server.nexon_image(app, url), (b'PNG', 'image/png'))
+            self.assertEqual(server.nexon_image(app, url), (b'PNG', 'image/png'))
+            self.assertEqual(opened.call_count, 1)

@@ -25,6 +25,35 @@ from . import backup, desktop, earnings, goals, history, notices, peers, prices,
 from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
+IMAGE_CACHE_SIZE = 96
+
+
+def nexon_image(app, url):
+    """넥슨 정적 이미지(https://open.api.nexon.com/static/maplestory/…)를 받아 돌려준다. 최근 것은 메모리에 둔다."""
+    from collections import OrderedDict
+    from urllib.request import Request, urlopen
+    parsed = urlparse(url or '')
+    if parsed.scheme != 'https' or parsed.hostname != 'open.api.nexon.com' or parsed.port or parsed.username \
+            or not parsed.path.startswith('/static/maplestory/') or len(url) > 4096:
+        raise AppError('넥슨 이미지 주소가 아닙니다.', 400)
+    cache = getattr(app, 'image_cache', None)
+    if cache is None:
+        cache = app.image_cache = OrderedDict()
+    if url in cache:
+        cache.move_to_end(url)
+        return cache[url]
+    try:
+        with urlopen(Request(url, headers={'User-Agent': 'Mepiti'}), timeout=10) as response:
+            kind = (response.headers.get('Content-Type') or '').split(';')[0]
+            body = response.read(3_000_001)
+    except Exception:
+        raise AppError('넥슨 이미지를 받지 못했습니다.', 502)
+    if not kind.startswith('image/') or len(body) > 3_000_000:
+        raise AppError('넥슨 이미지가 아닙니다.', 502)
+    cache[url] = (body, kind)
+    while len(cache) > IMAGE_CACHE_SIZE:
+        cache.popitem(last=False)
+    return body, kind
 
 class CachedNexon:
     """같은 캐릭터를 짧은 간격으로 다시 묻는 경우 넥슨 API를 다시 부르지 않는다.
@@ -596,6 +625,12 @@ def make_server(app,port=8765):
                     result = app.route(self.command,path,parse_qs(parsed.query),data)
                     return self.respond(200,result)
                 if self.command != 'GET': raise AppError('요청 경로를 찾을 수 없습니다.',404)
+                if path == '/nexon-image':
+                    # 넥슨 캐릭터·장비 이미지를 앱이 대신 받아 준다. 창(WebView2 등)에서 넥슨 이미지가 막히거나,
+                    # 외형 여백 자르기(캔버스)가 교차 출처로 막힐 때 쓴다. 넥슨 정적 이미지 주소만 받는다.
+                    if self.headers.get('Sec-Fetch-Site') == 'cross-site': raise AppError('접근 거부',403)
+                    body, kind = nexon_image(app, parse_qs(parsed.query).get('u',[''])[0])
+                    return self.respond(200, body, kind)
                 filename = {'/':'index.html','/app.js':'app.js','/characters.js':'characters.js','/tour.js':'tour.js','/style.css':'style.css','/favicon.svg':'favicon.svg',
                             '/icon.png':'icon.png','/sol-erda-piece.png':'sol-erda-piece.png'}.get(path)
                 if not filename: raise AppError('파일을 찾을 수 없습니다.',404)
