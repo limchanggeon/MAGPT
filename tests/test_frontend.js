@@ -5,8 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..', 'mepiti', 'static');
-const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-const characters = fs.readFileSync(path.join(root, 'characters.js'), 'utf8');
+// Windows에서 받으면 줄끝이 CRLF라 '\n'으로 자르는 위치를 못 찾는다(2026-10-03 Windows CI 실패). 줄끝을 맞춰 읽는다.
+const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
+const app = read('app.js');
+const characters = read('characters.js');
 
 async function checkRequests() {
   let calls = 0, release;
