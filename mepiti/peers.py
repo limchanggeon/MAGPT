@@ -1,9 +1,11 @@
 """목표 전투력대 유저 장비 통계 — 같은 직업에서 내가 목표로 하는 전투력(예: 2억 5천만)대 유저들은 부위마다 무엇을 끼나.
 
-넥슨 Open API에는 전투력 랭킹이 없다. 레벨 순 랭킹은 전투력과 거의 안 맞고(2026-10-01 실측: 1쪽 1.29억, 24쪽 1.9억),
-무릉도장 층수 랭킹이 훨씬 잘 맞는다(92층 4.6억, 74~79층 1.1~1.3억, 52~61층 0.9~1.0억). 그래서 직업의 무릉 랭킹 전체를 후보로 두고,
-층마다 몇 명의 전투력을 찍어 목표 전투력에 해당하는 층을 어림한 뒤, 그 층에 가까운 사람부터 확인해 목표 ±CP_BAND 안인 사람만
-장비를 저장한다(이름은 저장하지 않는다; 확인한 전투력은 이름의 해시로 캐시).
+넥슨 Open API에는 전투력 랭킹이 없고, 어느 랭킹도 전투력과 잘 맞지 않는다(2026-10-02 실측: 레벨·유니온 순위 모두 같은 쪽에서
+0.7억~2.7억이 섞임). 무릉 랭킹은 요즘 기록이 적어(캐논마스터 2명, 섀도어 5명) 직업 대부분에서 쓸 수 없다.
+그래서 후보를 넓게 잡고 한 명씩 전투력을 확인한다(이름 해시로 7일 캐시):
+  1. 같은 직업 레벨 랭킹(최대 5쪽) + 그 직업의 무릉 기록(있으면 먼저)
+  2. 전 직업 레벨 랭킹(최대 5쪽)에서 같은 방어구 계열·같은 주스탯 직업(JOB_FAMILIES) — 인원이 적은 직업은 1과 섞어서 먼저 본다.
+목표 ±CP_BAND 안인 사람만 장비를 저장하고, 같은 계열 유저는 표시(__family__)해 무기·보조무기·엠블렘 통계에서 뺀다.
 세트 단계표는 비교 유저의 세트 응답에서 배운다(statcalc.learn_sets). 한도에 걸리지 않게:
   - 이 기능은 하루 DAILY_CALLS회까지만 부른다(넥슨 키의 다른 기능 몫을 남긴다).
   - 호출 사이 GAP_SECONDS초 이상 쉰다.
@@ -27,6 +29,32 @@ CREATE INDEX IF NOT EXISTS peers_job ON peers(job);
 CREATE TABLE IF NOT EXISTS peer_power(key TEXT PRIMARY KEY, ocid TEXT, cp REAL, at TEXT NOT NULL);
 '''
 DOJANG_PAGES = 5              # 무릉 랭킹에서 볼 최대 쪽 수(쪽당 200명)
+JOB_PAGES = 5                 # 같은 직업 레벨 랭킹에서 볼 쪽 수
+FAMILY_PAGES = 5              # 전 직업 레벨 랭킹에서 볼 쪽 수(같은 계열·주스탯만 남긴다)
+SMALL_JOB = 300               # 같은 직업 후보가 이보다 적으면 같은 계열 유저를 섞어서 먼저 본다
+JOB_SLOTS = ('무기', '보조무기', '엠블렘')   # 직업마다 다른 부위 — 같은 직업 유저로만 통계를 낸다
+# 같은 방어구(나이트·메이지·아처·시프·파이렛)를 끼고 주스탯이 같은 직업끼리 묶는다. 제논·데몬어벤져는 따로.
+JOB_FAMILIES = (
+    ('전사·STR', ('히어로', '팔라딘', '다크나이트', '소울마스터', '미하일', '블래스터', '데몬슬레이어', '아란', '카이저', '아델', '제로', '렌')),
+    ('마법사·INT', ('아크메이지(불,독)', '아크메이지(썬,콜)', '비숍', '플레임위자드', '배틀메이지', '에반', '루미너스', '일리움', '라라', '키네시스')),
+    ('궁수·DEX', ('보우마스터', '신궁', '패스파인더', '윈드브레이커', '와일드헌터', '메르세데스', '카인')),
+    ('도적·LUK', ('나이트로드', '섀도어', '듀얼블레이더', '나이트워커', '팬텀', '카데나', '칼리', '호영')),
+    ('해적·STR', ('바이퍼', '캐논마스터', '스트라이커', '은월', '아크')),
+    ('해적·DEX', ('캡틴', '메카닉', '엔젤릭버스터')),
+)
+
+
+def job_name(entry):
+    """랭킹 항목의 직업 이름(전직 이름, 없으면 계열 이름): ('기사단','소울마스터') → '소울마스터', ('렌','') → '렌'."""
+    return entry.get('sub_class_name') or entry.get('class_name') or ''
+
+
+def family_of(job):
+    """직업 → (계열 이름, 같은 계열 직업들). 없으면 (None, ())."""
+    for label, jobs in JOB_FAMILIES:
+        if job in jobs:
+            return label, jobs
+    return None, ()
 PROBE_COUNT = 6               # 층-전투력 관계를 어림할 표본 수
 CP_BAND = 0.15                # 목표 전투력 ±15%
 PROBES = 7                    # 목표 전투력 쪽 찾기에서 볼 랭킹 쪽 수(쪽마다 2명 확인)
@@ -52,8 +80,11 @@ def ensure(store):
             return
         with store.db() as db:
             db.executescript(SCHEMA)
-            if 'cp' not in [r['name'] for r in db.execute('PRAGMA table_info(peers)')]:
+            columns = [r['name'] for r in db.execute('PRAGMA table_info(peers)')]
+            if 'cp' not in columns:
                 db.execute('ALTER TABLE peers ADD COLUMN cp REAL')
+            if 'family' not in columns:
+                db.execute('ALTER TABLE peers ADD COLUMN family INTEGER DEFAULT 0')
 
 
 def parse_cp(text):
@@ -206,7 +237,7 @@ class Peers:
         return ocid, cp
 
     def choose(self, name, cp):
-        """목표 전투력대 후보를 큐에 넣는다. 무릉 랭킹(층 순)을 후보로, 표본 몇 명의 전투력으로 목표 층을 어림한다(약 20회)."""
+        """목표 전투력대 후보를 큐에 넣는다: 같은 직업 랭킹(+무릉 기록) + 같은 계열·주스탯 직업(약 10~15회)."""
         with self.collection_lock:
             return self._choose(name, cp)
 
@@ -220,36 +251,54 @@ class Peers:
         if not mine or not mine.get('class_name'):
             raise AppError('랭킹에서 이 캐릭터를 찾지 못했어요(랭킹은 전날 기준이라 새 캐릭터는 하루 뒤에 나와요).', 404)
         job = f"{mine['class_name']}-{mine.get('sub_class_name') or mine['class_name']}"
-        pool = []
+        my_job = job_name(mine)
+        seen = {name}
+
+        def take(rows, **extra):
+            out = []
+            for r in rows:
+                n = r.get('character_name')
+                if n and n not in seen:
+                    seen.add(n)
+                    out.append({'name': n, 'level': int(r.get('character_level') or 0), **extra})
+            return out
+
+        # 1) 같은 직업: 무릉 기록(있으면, 층 높은 순) → 레벨 랭킹
+        dojang = []
         for page in range(1, DOJANG_PAGES + 1):
             rows = self.get('ranking/dojang', {'date': yesterday(), 'difficulty': 1, 'class': job, 'page': page}).get('ranking') or []
-            pool += [{'name': r['character_name'], 'floor': int(r.get('dojang_floor') or 0), 'level': int(r.get('character_level') or 0)}
-                     for r in rows if r.get('character_name') and r['character_name'] != name]
+            dojang += sorted(rows, key=lambda r: -int(r.get('dojang_floor') or 0))
             if len(rows) < 200:
                 break
-        if len(pool) < PROBE_COUNT:
-            raise AppError('이 직업의 무릉도장 랭킹이 너무 적어 목표 전투력대를 찾기 어려워요.', 404)
-        pool.sort(key=lambda r: -r['floor'])
-        # 층 분포에서 고르게 표본을 뽑아 층-전투력 점을 얻는다.
-        points, hits, probed = [], [], set()
-        for i in range(PROBE_COUNT):
-            r = pool[round(i * (len(pool) - 1) / (PROBE_COUNT - 1))]
-            if r['name'] in probed:
-                continue
-            probed.add(r['name'])
-            p_ocid, p_cp = self.power(r['name'])
-            if p_cp:
-                points.append((r['floor'], p_cp))
-                if in_band(p_cp, cp):
-                    hits.append({**r, 'ocid': p_ocid, 'cp': p_cp})
-        floor = target_floor(points, cp)
-        rest = [r for r in pool if r['name'] not in probed]
-        rest.sort(key=lambda r: abs(r['floor'] - floor))
-        queue = hits + rest[:MAX_QUEUE * 6]
+        same = take(dojang)
+        for page in range(1, JOB_PAGES + 1):
+            rows = self.get('ranking/overall', {'date': yesterday(), 'class': job, 'page': page}).get('ranking') or []
+            same += take(rows)
+            if len(rows) < 200:
+                break
+        # 2) 같은 계열·주스탯 직업(전 직업 레벨 랭킹에서 직업 이름으로 거른다)
+        label, jobs = family_of(my_job)
+        family = []
+        if jobs:
+            for page in range(1, FAMILY_PAGES + 1):
+                rows = self.get('ranking/overall', {'date': yesterday(), 'page': page}).get('ranking') or []
+                family += take([r for r in rows if job_name(r) in jobs and job_name(r) != my_job], family=True)
+                if len(rows) < 200:
+                    break
+        if len(same) < SMALL_JOB and family:
+            queue = []                                   # 인원이 적은 직업: 같은 직업과 같은 계열을 번갈아
+            for a, b in zip(same, family):
+                queue += [a, b]
+            longer = same if len(same) > len(family) else family
+            queue += longer[min(len(same), len(family)):]
+        else:
+            queue = same + family
+        if not queue:
+            raise AppError('이 직업의 랭킹 후보를 찾지 못했어요.', 404)
         self.store.set_setting(TARGET, {'job': job, 'cp': cp, 'band': CP_BAND, 'level': int(mine.get('character_level') or 0),
-                                        'floor': floor, 'points': [{'floor': f, 'cp': c} for f, c in sorted(points)],
-                                        'pool': len(pool), 'screened': 0, 'matched': len(hits), 'at': now()})
-        self.store.set_setting(QUEUE, queue)
+                                        'family': label, 'pool': len(same), 'family_pool': len(family),
+                                        'dojang': len(dojang), 'screened': 0, 'matched': 0, 'at': now()})
+        self.store.set_setting(QUEUE, queue[:MAX_QUEUE * 30])
         return self.status()
 
     # 모으기 --------------------------------------------------------------
@@ -289,10 +338,11 @@ class Peers:
         summary = summarize(rows, originals)
         if summary:
             with self.store.db() as db:
-                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data,cp) VALUES(?,?,?,?,?,?,?) '
+                db.execute('INSERT INTO peers(ocid,job,level,world_type,fetched_at,data,cp,family) VALUES(?,?,?,?,?,?,?,?) '
                            'ON CONFLICT(ocid) DO UPDATE SET job=excluded.job, level=excluded.level, '
-                           'fetched_at=excluded.fetched_at, data=excluded.data, cp=excluded.cp',
-                           (ocid, target['job'], person.get('level'), 0, now(), json.dumps(summary, ensure_ascii=False), cp))
+                           'fetched_at=excluded.fetched_at, data=excluded.data, cp=excluded.cp, family=excluded.family',
+                           (ocid, target['job'], person.get('level'), 0, now(), json.dumps(summary, ensure_ascii=False), cp,
+                            1 if person.get('family') else 0))
         return True
 
     def restart(self, name, cp):
@@ -369,9 +419,21 @@ def stored(store, target):
         return []
     ensure(store)
     cp = target['cp']
-    rows = store.rows('SELECT data FROM peers WHERE job=? AND fetched_at>=? AND cp BETWEEN ? AND ?',
+    rows = store.rows('SELECT data, family FROM peers WHERE job=? AND fetched_at>=? AND cp BETWEEN ? AND ?',
                       (target['job'], since(), cp * (1 - CP_BAND), cp * (1 + CP_BAND)))
-    return [json.loads(r['data']) for r in rows]
+    out = []
+    for r in rows:
+        person = json.loads(r['data'])
+        if r['family']:
+            person['__family__'] = True       # 같은 계열 유저 — 직업 부위(무기 등) 통계에서 뺀다
+        out.append(person)
+    return out
+
+
+def slots_of(person):
+    """사람의 부위별 장비. 같은 계열 유저는 직업마다 다른 부위(무기·보조무기·엠블렘)를 뺀다."""
+    family = person.get('__family__')
+    return {s: v for s, v in person.items() if not s.startswith('__') and not (family and s in JOB_SLOTS)}
 
 
 def status(store):
@@ -384,7 +446,7 @@ def slot_stats(people):
     """부위별: 많이 낀 장비 상위 3, 스타포스 중앙값, 윗잠·아랫잠 등급 비율."""
     slots = {}
     for person in people:
-        for slot, item in person.items():
+        for slot, item in slots_of(person).items():
             slots.setdefault(slot, []).append(item)
     out = {}
     for slot, items in slots.items():
@@ -413,7 +475,7 @@ def top_grade(shares):
 
 def candidate(people, slot, name):
     """목표 전투력대 유저가 낀 그 장비 중 스타포스가 중앙인 한 벌(옵션이 저장된 것만)."""
-    pool = [p[slot]['item'] for p in people if slot in p and p[slot].get('name') == name and p[slot].get('item')]
+    pool = [p[slot]['item'] for p in people if slot in slots_of(p) and p[slot].get('name') == name and p[slot].get('item')]
     if not pool:
         return None
     pool.sort(key=lambda i: int(i.get('starforce') or 0))
@@ -490,6 +552,8 @@ def compare(store, profile, state=None, ledger=None):
             result['behind'].append({'slot': slot, 'reasons': reasons, 'score': len(reasons) * 10 + max(0, gap)})
     result['behind'].sort(key=lambda b: -b['score'])
     result['people'] = len(people)
+    result['people_family'] = sum(1 for x in people if x.get('__family__'))
+    result['people_exact'] = result['people'] - result['people_family']
     result['simulated'] = False
     if ledger is not None:
         sims = simulate(people, stats, ledger)
@@ -525,7 +589,10 @@ def facts_text(compared):
     if not compared.get('ready'):
         return ''
     t = compared['target']
-    lines = [f"[목표 전투력대 유저 장비 통계] 같은 직업({t['job']}) 전투력 {t['cp'] / 1e8:.2f}억 ±{round(CP_BAND * 100)}% 유저 {compared['people']}명의 "
+    who = (f"같은 직업({t['job']}) {compared.get('people_exact', compared['people'])}명"
+           + (f" + 같은 방어구·주스탯 계열({t.get('family')}) {compared['people_family']}명(무기·보조무기·엠블렘은 같은 직업만)"
+              if compared.get('people_family') else ''))
+    lines = [f"[목표 전투력대 유저 장비 통계] 전투력 {t['cp'] / 1e8:.2f}억 ±{round(CP_BAND * 100)}%인 {who}, 모두 {compared['people']}명의 "
              f"장비를 넥슨 Open API로 모은 통계다(최근 {KEEP_DAYS}일 안에 조회). 이 밖의 유저 경향은 모른다."]
     for s in compared['slots']:
         parts = [', '.join(f"{i['name']} {i['share']}%" for i in s['items'])]

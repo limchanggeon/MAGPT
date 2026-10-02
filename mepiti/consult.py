@@ -123,7 +123,7 @@ def pool_items(people):
     """비교 유저들이 낀 장비: 이름 → (그 이름이 나온 부위 목록, 옵션이 저장된 한 벌들)."""
     out = {}
     for person in people:
-        for slot, s in person.items():
+        for slot, s in peers.slots_of(person).items():
             if not s.get('item'):
                 continue
             entry = out.setdefault(s['item']['item_name'], {'slots': set(), 'items': []})

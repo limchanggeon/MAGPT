@@ -15,19 +15,25 @@ def equip(slot, name, star, pot='유니크', add='에픽'):
 
 
 class FakeNexon:
-    """무릉 랭킹·전투력·장비 응답 흉내. 호출 기록을 남긴다.
+    """랭킹·전투력·장비 응답 흉내. 호출 기록을 남긴다.
 
-    무릉 랭킹 1쪽에 40명: 이름 'p{층}_{순번}', 층 99~60. 전투력 = (층 - 50) × 1천만 (75층 = 2.5억).
+    이름에 전투력을 담는다: 'j25_0'은 같은 직업(렌) 2.5억, 'h26_0'은 히어로(같은 전사·STR 계열) 2.6억, 'b25_0'은 비숍(다른 계열).
+    무릉 랭킹은 비어 있다(요즘 기록이 적다). dojang에 이름 목록을 주면 무릉 기록이 있는 것처럼 답한다.
     """
-    def __init__(self, fail=None):
-        self.calls, self.fail = [], fail
+    SAME = [10, 12, 25, 26, 30, 24, 8, 25, 15, 27]          # 렌 레벨 랭킹 1쪽(억 × 10)
+
+    def __init__(self, fail=None, dojang=()):
+        self.calls, self.fail, self.dojang, self.ids = [], fail, list(dojang), {}
+
+    def ocid(self, name):
+        return self.ids.setdefault(name, f'o{len(self.ids) + 1:04d}')    # 실제 ocid처럼 이름과 다르게
+
+    def name_of(self, ocid):
+        return next(n for n, o in self.ids.items() if o == ocid)
 
     @staticmethod
     def cp_of(name):
-        if name == '나':
-            return 1.5e8
-        floor = int(name[1:].split('_')[0])
-        return (floor - 50) * 1e7
+        return 1.5e8 if name == '나' else int(name[1:].split('_')[0]) * 1e7
 
     def get(self, path, query):
         self.calls.append((path, dict(query)))
@@ -36,22 +42,33 @@ class FakeNexon:
             error.upstream = 429
             raise error
         if path == 'id':
-            return {'ocid': 'o-' + query['character_name'].replace('p', '')}   # 실제 ocid처럼 이름과 다르게
+            return {'ocid': self.ocid(query['character_name'])}
         if path == 'character/stat':
-            name = '나' if query['ocid'] == 'o-나' else 'p' + query['ocid'][2:]
-            return {'final_stat': [{'stat_name': '전투력', 'stat_value': str(int(self.cp_of(name)))}]}
-        if path == 'ranking/overall' and 'ocid' in query and 'class' not in query:
-            return {'ranking': [{'ranking': 67834, 'character_level': 291, 'class_name': '렌', 'sub_class_name': '',
-                                 'world_name': '크로아', 'character_name': '나'}]}
+            return {'final_stat': [{'stat_name': '전투력', 'stat_value': str(int(self.cp_of(self.name_of(query['ocid']))))}]}
         if path == 'ranking/overall' and 'ocid' in query:
-            return {'ranking': [{'ranking': 3900, 'character_level': 291, 'class_name': '렌', 'sub_class_name': ''}]}
+            return {'ranking': [{'ranking': 3900, 'character_level': 291, 'class_name': '렌', 'sub_class_name': '',
+                                 'world_name': '크로아', 'character_name': '나'}]}
         if path == 'ranking/dojang':
-            return {'ranking': [{'character_name': f'p{99 - i}_{i}', 'dojang_floor': 99 - i, 'character_level': 290}
-                                for i in range(40)]}
+            return {'ranking': [{'character_name': n, 'dojang_floor': 80, 'character_level': 290} for n in self.dojang]}
+        if path == 'ranking/overall' and 'class' in query:
+            if query['page'] > 1:
+                return {'ranking': []}
+            return {'ranking': [{'character_name': f'j{c}_{i}', 'character_level': 290, 'class_name': '렌', 'sub_class_name': ''}
+                                for i, c in enumerate(self.SAME)] + [{'character_name': '나', 'character_level': 291, 'class_name': '렌'}]}
+        if path == 'ranking/overall':
+            if query['page'] > 1:
+                return {'ranking': []}
+            return {'ranking': [{'character_name': f'h{c}_{i}', 'character_level': 290, 'class_name': '전사', 'sub_class_name': '히어로'}
+                                for i, c in enumerate((25, 26, 9))]
+                               + [{'character_name': f'b25_{i}', 'character_level': 290, 'class_name': '마법사', 'sub_class_name': '비숍'}
+                                  for i in range(3)]
+                               + [{'character_name': 'j99_0', 'character_level': 300, 'class_name': '렌', 'sub_class_name': ''}]}
         if path == 'character/item-equipment':
+            name = self.name_of(query['ocid'])
             n = int(query['ocid'][-1])
+            weapon = '히어로의 투핸드엑스' if name.startswith('h') else '렌의 장검'
             return {'item_equipment': [equip('모자', '에테르넬 나이트헬름', 22, '레전드리', '유니크'),
-                                       equip('신발', '아케인셰이드 나이트슈즈', 21 + n % 2)]}
+                                       equip('신발', '아케인셰이드 나이트슈즈', 21 + n % 2), equip('무기', weapon, 22)]}
         if path == 'character/set-effect':
             return {'set_effect': [{'set_name': '아케인셰이드 세트(전사)', 'total_set_count': 1,
                                     'set_option_full': [{'set_count': 2, 'set_option': '공격력  +30'}]}]}
@@ -75,31 +92,45 @@ class PeerTests(unittest.TestCase):
         self.assertEqual(peers.parse_cp('3.2억'), 3.2e8)
         self.assertIsNone(peers.parse_cp('많이'))
 
-    def test_choose_estimates_floor_for_target_power(self):
+    def test_choose_mixes_same_job_and_family_for_small_jobs(self):
         state = self.peers.choose('나', 2.5e8)
         target = state['target']
-        self.assertEqual(target['job'], '렌-렌')
-        self.assertEqual(target['floor'], 75)                              # (75 - 50) × 1천만 = 2.5억
+        self.assertEqual((target['job'], target['family'], target['pool'], target['family_pool']), ('렌-렌', '전사·STR', 10, 3))
         queue = self.store.setting(peers.QUEUE)
-        self.assertLessEqual(abs(queue[0]['floor'] - 75), 1)
-        self.assertEqual(len([c for c in self.nexon.calls if c[0] == 'character/stat']), peers.PROBE_COUNT)
+        self.assertEqual([q['name'][0] for q in queue[:4]], ['j', 'h', 'j', 'h'])      # 인원이 적어 번갈아
+        self.assertFalse(any(q['name'].startswith('b') for q in queue))                 # 다른 계열(비숍)은 빼고
+        self.assertNotIn('j99_0', [q['name'] for q in queue])                           # 전 직업 랭킹의 같은 직업은 중복이라 빼고
+        self.assertNotIn('character/stat', [c[0] for c in self.nexon.calls])            # 고를 때는 전투력을 안 본다
+
+    def test_dojang_records_come_first(self):
+        self.nexon.dojang = ['d25_0']
+        self.peers.choose('나', 2.5e8)
+        self.assertEqual(self.store.setting(peers.QUEUE)[0]['name'], 'd25_0')
+
+    def test_family_of(self):
+        self.assertEqual(peers.family_of('렌')[0], '전사·STR')
+        self.assertEqual(peers.family_of('캡틴')[0], '해적·DEX')
+        self.assertIsNone(peers.family_of('제논')[0])
+        self.assertEqual(peers.job_name({'class_name': '기사단', 'sub_class_name': '소울마스터'}), '소울마스터')
 
     def test_target_floor_interpolates(self):
         self.assertEqual(peers.target_floor([(60, 1e8), (80, 3e8)], 2e8), 70)
         self.assertEqual(peers.target_floor([(60, 1e8), (80, 3e8)], 9e8), 80)
 
     def test_screened_power_is_cached(self):
-        self.peers.power('p70_29')
+        self.peers.power('j20_9')
         before = len(self.nexon.calls)
-        self.assertEqual(self.peers.power('p70_29')[1], 2e8)
+        self.assertEqual(self.peers.power('j20_9')[1], 2e8)
         self.assertEqual(len(self.nexon.calls), before)
 
     def test_collect_saves_only_target_band_without_names(self):
         self.collect()
         rows = self.store.rows('SELECT * FROM peers')
-        self.assertGreaterEqual(len(rows), 5)
+        self.assertEqual(len(rows), 7)                                   # 렌 5명 + 히어로 2명(2.5억 ±15%)
         self.assertTrue(all(peers.in_band(r['cp'], 2.5e8) for r in rows))
-        self.assertNotIn('p7', json.dumps([dict(r) for r in rows], ensure_ascii=False))
+        self.assertEqual(sum(r['family'] for r in rows), 2)
+        dumped = json.dumps([dict(r) for r in rows], ensure_ascii=False)
+        self.assertFalse(any(n in dumped for n in ('j25', 'h25', 'h26')))
         self.assertIn('아케인셰이드 세트(전사)', self.store.setting('set_tables'))    # 모르는 세트 단계표를 배움
 
     def test_daily_budget_stops_collection(self):
@@ -131,6 +162,10 @@ class PeerTests(unittest.TestCase):
         self.assertNotIn('신발', behind)
         text = peers.facts_text(result)
         self.assertIn('전투력 2.50억 ±15%', text)
+        self.assertIn('같은 방어구·주스탯 계열(전사·STR) 2명', text)
+        stats = peers.slot_stats(peers.stored(self.store, self.store.setting(peers.TARGET)))
+        self.assertEqual(stats['무기']['count'], 5)                         # 무기는 같은 직업만
+        self.assertEqual(stats['모자']['count'], 7)
 
     def test_other_job_is_not_compared(self):
         self.collect()

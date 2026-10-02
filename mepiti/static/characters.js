@@ -183,7 +183,7 @@ function renderPeers(d){
   const t=d.target;
   const parts=[];
   const eok=v=>`${(Math.round(v/1e6)/100).toLocaleString()}억`;
-  if(t&&t.cp){parts.push(`${t.job.split('-').pop()} · 전투력 ${eok(t.cp)} ±15% · 모은 유저 ${fmt(d.collected)}명`+(t.screened?` (확인 ${fmt(t.screened)}명 중 해당 ${fmt(t.matched||0)}명)`:'')+(d.queue?` · 남은 후보 ${fmt(d.queue)}명`:''));
+  if(t&&t.cp){parts.push(`${t.job.split('-').pop()} · 전투력 ${eok(t.cp)} ±15% · 모은 유저 ${fmt(d.collected)}명`+(t.family?` (같은 직업 후보 ${fmt(t.pool||0)}명 + ${t.family} 계열 ${fmt(t.family_pool||0)}명에서 찾음)`:'')+(t.screened?` (확인 ${fmt(t.screened)}명 중 해당 ${fmt(t.matched||0)}명)`:'')+(d.queue?` · 남은 후보 ${fmt(d.queue)}명`:''));
     const f=$('#peer-form').elements.cp;if(!f.value)f.value=eok(t.cp);}
   else parts.push('목표 전투력을 적고 \'모으기 시작\'을 누르면 같은 직업 랭킹에서 그 전투력대를 찾아 천천히 모읍니다.');
   if(d.running)parts.push('모으는 중(한 명에 몇 초씩)');
