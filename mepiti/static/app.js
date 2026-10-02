@@ -401,14 +401,19 @@ function captureReport(){
   $('#capture-apply').disabled=true;out.textContent='';
   const flasks=Number($('#capture-flasks').value||0);
   if(!(b&&a))return;
+  // 사냥 전에 0이면 캡처에 안 보이기도 한다(0조각이면 아이템 칸 자체가 없음). 사냥 후에만 보이면 사냥 전은 0으로 본다.
+  const assumed=[];
+  const before=(k,label)=>{if(b[k]!=null)return b[k];if(a[k]!=null){assumed.push(label);return 0;}return null;};
+  const bm=before('inventory_meso','메소'),bp=before('sol_erda_pieces','조각');
   const both=(k)=>b[k]!=null&&a[k]!=null;
-  const meso=both('inventory_meso')?(a.inventory_meso-b.inventory_meso)+(both('storage_meso')?a.storage_meso-b.storage_meso:0):null;
-  const pieces=both('sol_erda_pieces')?a.sol_erda_pieces-b.sol_erda_pieces:null;
+  const meso=bm!=null&&a.inventory_meso!=null?(a.inventory_meso-bm)+(both('storage_meso')?a.storage_meso-b.storage_meso:0):null;
+  const pieces=bp!=null&&a.sol_erda_pieces!=null?a.sol_erda_pieces-bp:null;
   captures.diff={meso,pieces};
   out.textContent=(meso!=null?`번 메소 ${meso<0?'-':''}${exactAmount(meso)}`:'메소 차이를 못 구했어요(두 캡처에 인벤 메소가 보여야 해요)')
     +(pieces!=null?` · 조각 ${pieces>=0?'+':''}${fmt(pieces)}개`:' · 조각 차이 없음(한쪽에서 못 찾음)')
     +(both('storage_meso')?' · 창고 메소 변화 포함':'')+(meso!=null&&meso<0?' — 메소가 줄었어요. 캡처 순서를 확인하세요.':'')
-    +(flasks>0&&meso>0?` · 재획비 ${fmt(flasks)}개 → 1개당 메소 ${exactAmount(meso/flasks)}`:'');
+    +(flasks>0&&meso>0?` · 재획비 ${fmt(flasks)}개 → 1개당 메소 ${exactAmount(meso/flasks)}`:'')
+    +(assumed.length?` (사냥 전 캡처에서 ${assumed.join('·')}을 못 찾아 0으로 봤어요)`:'');
   $('#capture-apply').disabled=!(meso>0||pieces>0);
 }
 async function readCaptureFile(file,slot){

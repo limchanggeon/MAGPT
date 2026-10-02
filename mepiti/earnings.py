@@ -277,6 +277,9 @@ def read_capture(model, selected, image):
             # '12+147'(인벤+창고)처럼 나눠 적을 수 있다. 숫자 묶음을 더한다.
             parts = [int(n) for n in re.findall(r'\d+', (v or '').replace(',', ''))]
             values[k] = sum(parts) if parts and sum(parts) <= 100000 else None
+        elif v and re.fullmatch(r'\s*0+\s*(?:메소)?\s*', v):
+            values[k] = 0.0          # '0'은 금액이 없는 게 아니라 0메소다(사냥 전 0메소에서 시작, 2026-10-02 사용자 보고)
+            continue
         else:
             amount = parse_price(v) if v else None
             values[k] = amount if amount is not None and amount <= MAX_MESO else None

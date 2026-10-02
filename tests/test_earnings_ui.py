@@ -70,3 +70,20 @@ class NexonImageProxyTests(unittest.TestCase):
             self.assertEqual(server.nexon_image(app, url), (b'PNG', 'image/png'))
             self.assertEqual(server.nexon_image(app, url), (b'PNG', 'image/png'))
             self.assertEqual(opened.call_count, 1)
+
+
+class CaptureZeroTests(unittest.TestCase):
+    """사냥 전 0메소·0조각에서 시작한 캡처(2026-10-02 사용자 보고: 0 + @가 @가 안 되고 0)."""
+    def read(self, raw):
+        class Model:
+            def read_capture(self, selected, mime, data):
+                return raw, {}
+        return earnings.read_capture(Model(), 'gemini', 'data:image/png;base64,AA')['values']
+
+    def test_zero_meso_is_zero_not_missing(self):
+        values = self.read({'inventory_meso': '0', 'storage_meso': '0 메소', 'sol_erda_pieces': '0', 'maple_points': None})
+        self.assertEqual((values['inventory_meso'], values['storage_meso'], values['sol_erda_pieces']), (0.0, 0.0, 0))
+
+    def test_missing_stays_missing(self):
+        values = self.read({'inventory_meso': None, 'storage_meso': None, 'sol_erda_pieces': None, 'maple_points': None})
+        self.assertIsNone(values['inventory_meso'])

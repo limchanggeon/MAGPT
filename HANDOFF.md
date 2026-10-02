@@ -1345,3 +1345,4 @@ node tests/test_frontend.js
 - 변경: `mepiti/adapters.py`(`Gate`·`NEXON_GATE`, 429 재시도), `mepiti/peers.py`(429면 15분 쉼), `mepiti/static/index.html·app.js·style.css`(글씨 크기), `README.md`, 테스트. 미릴리스.
 - 확인 필요: 업데이트 후 사용자 화면에서 한도 초과 문구가 사라졌는지. 넥슨 개발 키의 정확한 초당·일일 한도는 미확인(0.25초 간격은 보수적으로 잡은 값).
 - **릴리스 v0.4.6**(2026-10-02, 사용자 "ㅇㅇㅇ"): `844088f`, CI 통과(직전 `da97ecc` 실행은 macOS 산출물 업로드 중 GitHub 네트워크 오류 ECONNRESET로 실패 — 코드 문제 아님, 같은 코드의 다음 실행 통과), `main` 빨리감기(`a0e9533..844088f`), 태그, 릴리스 성공(파일 5개), API latest v0.4.6. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.6
+- 같은 날(사용자: 0메소·0조각에서 시작한 캡처 차이가 0): '0' 해석·사냥 전 못 찾음을 0으로. `mepiti/earnings.py`·`static/app.js`·테스트. 미릴리스.
