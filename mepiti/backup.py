@@ -7,6 +7,8 @@
 import json
 import re
 import sqlite3
+import tempfile
+import threading
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ FOLDER = 'backups'
 KEEP = 5                      # 오래된 것부터 지운다
 VERSION_SETTING = 'app_version'
 DATA_FILE = 'mepiti.sqlite3'
+_LOCK = threading.RLock()       # 같은 프로세스에서 백업 중인 파일을 정리/목록 조회하지 않는다.
 
 
 def data_file(folder):
@@ -39,6 +42,11 @@ def last_version(folder):
 
 def make(folder, label):
     """지금 데이터를 백업 폴더에 복사한다. 쓰는 중이어도 안전하게 sqlite의 백업 기능으로 뜬다."""
+    with _LOCK:
+        return _make(folder, label)
+
+
+def _make(folder, label):
     source = data_file(folder)
     if not source.exists():
         raise AppError('아직 백업할 데이터가 없습니다.', 404)
@@ -46,23 +54,35 @@ def make(folder, label):
     target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = datetime.now(KST).strftime('%Y%m%d-%H%M%S')
     safe = re.sub(r'[^0-9A-Za-z._-]+', '-', label).strip('-') or 'manual'
-    target = target_dir / f'mepiti-{stamp}-{safe}.sqlite3'
-    with closing(sqlite3.connect(str(source), timeout=15)) as src, closing(sqlite3.connect(str(target))) as dst:
-        src.backup(dst)
+    # 같은 초의 연속/동시 백업도 기존 백업을 덮어쓰지 않는다. 생성 권한은 0600이다.
+    with tempfile.NamedTemporaryFile(prefix=f'mepiti-{stamp}-{safe}-', suffix='.sqlite3', dir=target_dir, delete=False) as f:
+        target = Path(f.name)
+    try:
+        with closing(sqlite3.connect(str(source), timeout=15)) as src, closing(sqlite3.connect(str(target))) as dst:
+            src.backup(dst)
+    except (sqlite3.Error, OSError):
+        target.unlink(missing_ok=True)
+        raise
     prune(folder)
     return target
 
 
 def prune(folder, keep=KEEP):
-    files = sorted((Path(folder) / FOLDER).glob('mepiti-*.sqlite3'), key=lambda p: p.name, reverse=True)
-    for old in files[keep:]:
-        old.unlink(missing_ok=True)
+    with _LOCK:
+        for old in backup_files(folder)[keep:]:
+            old.unlink(missing_ok=True)
 
 
 def listing(folder):
-    files = sorted((Path(folder) / FOLDER).glob('mepiti-*.sqlite3'), key=lambda p: p.name, reverse=True)
-    return [{'name': f.name, 'size_kb': round(f.stat().st_size / 1024, 1),
-             'created': datetime.fromtimestamp(f.stat().st_mtime, KST).isoformat(timespec='seconds')} for f in files]
+    with _LOCK:
+        return [{'name': f.name, 'size_kb': round(f.stat().st_size / 1024, 1),
+                 'created': datetime.fromtimestamp(f.stat().st_mtime, KST).isoformat(timespec='seconds')}
+                for f in backup_files(folder)]
+
+
+def backup_files(folder):
+    return sorted((Path(folder) / FOLDER).glob('mepiti-*.sqlite3'),
+                  key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
 
 
 def on_start(folder, version):

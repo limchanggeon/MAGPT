@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "b596145",
+  "baseline": {
+    "scope": {
+      "characters": 79,
+      "snapshots": 2370,
+      "earnings": 10000,
+      "repeats": 5,
+      "stat_source_rows": 3000
+    },
+    "characters": {
+      "median_ms": 0.78,
+      "result_sha256": "cedd5c083d2e7544e498a860f89497c1c2564c4034fc9ae7cf660eb984ef8e57"
+    },
+    "earnings": {
+      "median_ms": 30.993,
+      "result_sha256": "549d4ee66ad4a8b5c495fd402766630337a44a121f156b28059e6cd2c6de3015"
+    },
+    "meso_goal": {
+      "median_ms": 22.429,
+      "result_sha256": "3c769855d12759e931806a977f9a2b9f14f6d4849fe5d184a612b1a772ef5253"
+    },
+    "stat_swap_100": {
+      "median_ms": 17.133,
+      "result_sha256": "bf19bd4961120a85f060b0b16e0b5ff92526a0b00d2cf12b62113262bcf5a89e"
+    },
+    "history_costs_10000": {
+      "median_ms": 6.714,
+      "result_sha256": "0066245d47c4c8bda0cbb83afcdb98cf64b80dfa66cbe3f16f2bd74a54a9cd8e"
+    },
+    "starforce_100": {
+      "median_ms": 14.14,
+      "result_sha256": "e9dd879e35f76006c1ee449cf4be2f28e5ae37c571ba0e55ba86d80994d993fc"
+    }
+  },
+  "current": {
+    "scope": {
+      "characters": 79,
+      "snapshots": 2370,
+      "earnings": 10000,
+      "repeats": 5,
+      "stat_source_rows": 3000
+    },
+    "characters": {
+      "median_ms": 0.783,
+      "result_sha256": "cedd5c083d2e7544e498a860f89497c1c2564c4034fc9ae7cf660eb984ef8e57"
+    },
+    "earnings": {
+      "median_ms": 31.377,
+      "result_sha256": "549d4ee66ad4a8b5c495fd402766630337a44a121f156b28059e6cd2c6de3015"
+    },
+    "meso_goal": {
+      "median_ms": 2.536,
+      "result_sha256": "3c769855d12759e931806a977f9a2b9f14f6d4849fe5d184a612b1a772ef5253"
+    },
+    "stat_swap_100": {
+      "median_ms": 3.192,
+      "result_sha256": "bf19bd4961120a85f060b0b16e0b5ff92526a0b00d2cf12b62113262bcf5a89e"
+    },
+    "history_costs_10000": {
+      "median_ms": 6.619,
+      "result_sha256": "0066245d47c4c8bda0cbb83afcdb98cf64b80dfa66cbe3f16f2bd74a54a9cd8e"
+    },
+    "starforce_100": {
+      "median_ms": 14.233,
+      "result_sha256": "e9dd879e35f76006c1ee449cf4be2f28e5ae37c571ba0e55ba86d80994d993fc"
+    }
+  },
+  "all_benchmark_return_hashes_identical": true,
+  "equivalence": {
+    "goal_scenarios": 128,
+    "swap_scenarios": 256,
+    "seed": 1003,
+    "all_return_fields_identical": true
+  },
+  "browser": {
+    "chromium": {
+      "tabs": 6,
+      "errors": [],
+      "characters_requests_per_navigation": 1,
+      "peers_requests_per_navigation": 1,
+      "concurrent_session_reads": 1,
+      "earnings_save": "passed",
+      "capture_apply_zero": "passed",
+      "chat_reply_survives_history_failure": true
+    },
+    "webkit": {
+      "tabs": 6,
+      "errors": [],
+      "characters_requests_per_navigation": 1,
+      "peers_requests_per_navigation": 1,
+      "concurrent_session_reads": 1,
+      "earnings_save": "passed",
+      "capture_apply_zero": "passed",
+      "chat_reply_survives_history_failure": true
+    }
+  },
+  "validation": {
+    "baseline_python_tests": 446,
+    "final_python_tests": 464,
+    "new_python_tests": 18,
+    "node_checks_passed": true,
+    "real_api_used": false,
+    "released": false
+  }
+}

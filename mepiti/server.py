@@ -26,34 +26,78 @@ from .updater import Updater
 
 STATIC = Path(__file__).parent/'static'
 IMAGE_CACHE_SIZE = 96
+IMAGE_CACHE_BYTES = 12 * 1024 * 1024
+_IMAGE_INIT_LOCK = threading.Lock()
+
+
+class ImageCache:
+    """정적 이미지의 동시 요청을 합치고 개수와 실제 본문 크기를 함께 제한한다."""
+    def __init__(self):
+        from collections import OrderedDict
+        self.entries = OrderedDict()
+        self.inflight = {}
+        self.size = 0
+        self.lock = threading.Lock()
+
+    def get(self, url, fetch):
+        with self.lock:
+            if url in self.entries:
+                self.entries.move_to_end(url)
+                return self.entries[url]
+            pending = self.inflight.get(url)
+            owner = pending is None
+            if owner:
+                pending = Future()
+                self.inflight[url] = pending
+        if not owner:
+            return pending.result()
+        try:
+            value = fetch()
+            with self.lock:
+                self.entries[url] = value
+                self.size += len(value[0])
+                while len(self.entries) > IMAGE_CACHE_SIZE or self.size > IMAGE_CACHE_BYTES:
+                    _, removed = self.entries.popitem(last=False)
+                    self.size -= len(removed[0])
+            pending.set_result(value)
+            return value
+        except BaseException as e:
+            pending.set_exception(e)
+            raise
+        finally:
+            with self.lock:
+                self.inflight.pop(url, None)
 
 
 def nexon_image(app, url):
-    """넥슨 정적 이미지(https://open.api.nexon.com/static/maplestory/…)를 받아 돌려준다. 최근 것은 메모리에 둔다."""
-    from collections import OrderedDict
+    """허용된 넥슨 정적 이미지만 받아 캐시한다. API 키는 사용하지 않는다."""
     from urllib.request import Request, urlopen
-    parsed = urlparse(url or '')
-    if parsed.scheme != 'https' or parsed.hostname != 'open.api.nexon.com' or parsed.port or parsed.username \
-            or not parsed.path.startswith('/static/maplestory/') or len(url) > 4096:
-        raise AppError('넥슨 이미지 주소가 아닙니다.', 400)
-    cache = getattr(app, 'image_cache', None)
-    if cache is None:
-        cache = app.image_cache = OrderedDict()
-    if url in cache:
-        cache.move_to_end(url)
-        return cache[url]
     try:
-        with urlopen(Request(url, headers={'User-Agent': 'Mepiti'}), timeout=10) as response:
-            kind = (response.headers.get('Content-Type') or '').split(';')[0]
-            body = response.read(3_000_001)
-    except Exception:
-        raise AppError('넥슨 이미지를 받지 못했습니다.', 502)
-    if not kind.startswith('image/') or len(body) > 3_000_000:
-        raise AppError('넥슨 이미지가 아닙니다.', 502)
-    cache[url] = (body, kind)
-    while len(cache) > IMAGE_CACHE_SIZE:
-        cache.popitem(last=False)
-    return body, kind
+        parsed = urlparse(url or '')
+        allowed = (parsed.scheme == 'https' and parsed.hostname == 'open.api.nexon.com'
+                   and not parsed.port and not parsed.username
+                   and parsed.path.startswith('/static/maplestory/') and len(url) <= 4096)
+    except (ValueError, TypeError):
+        allowed = False
+    if not allowed:
+        raise AppError('넥슨 이미지 주소가 아닙니다.', 400)
+    with _IMAGE_INIT_LOCK:
+        if not hasattr(app, 'image_cache'):
+            app.image_cache = ImageCache()
+        cache = app.image_cache
+
+    def fetch():
+        try:
+            with urlopen(Request(url, headers={'User-Agent': 'Mepiti'}), timeout=10) as response:
+                kind = (response.headers.get('Content-Type') or '').split(';')[0]
+                body = response.read(3_000_001)
+        except Exception:
+            raise AppError('넥슨 이미지를 받지 못했습니다.', 502)
+        if not kind.startswith('image/') or len(body) > 3_000_000:
+            raise AppError('넥슨 이미지가 아닙니다.', 502)
+        return body, kind
+
+    return cache.get(url, fetch)
 
 class CachedNexon:
     """같은 캐릭터를 짧은 간격으로 다시 묻는 경우 넥슨 API를 다시 부르지 않는다.

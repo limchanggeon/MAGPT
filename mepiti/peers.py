@@ -9,14 +9,14 @@
 세트 단계표는 비교 유저의 세트 응답에서 배운다(statcalc.learn_sets). 한도에 걸리지 않게:
   - 이 기능은 하루 DAILY_CALLS회까지만 부른다(넥슨 키의 다른 기능 몫을 남긴다).
   - 호출 사이 GAP_SECONDS초 이상 쉰다.
-  - 429(한도 초과)를 받으면 그날은 멈춘다.
+  - 429(한도 초과)를 받으면 15분 쉬고 다시 시도한다.
   - 모은 요약은 KEEP_DAYS일 동안 다시 조회하지 않는다.
 """
 import json
 import statistics
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta
 
 from .core import AppError, KST, now
@@ -183,6 +183,7 @@ class Peers:
         self.thread = None
         self.last_call = 0.0
         self.error = None
+        self.finals = OrderedDict()       # 탈락 후보의 임시 스탯이 계속 쌓이지 않게 제한한다.
         ensure(store)
 
     # 호출 한도 -----------------------------------------------------------
@@ -231,8 +232,10 @@ class Peers:
         if not ocid:
             return None, None
         final = self.get('character/stat', {'ocid': ocid}).get('final_stat') or []
-        self.finals = getattr(self, 'finals', {})
         self.finals[ocid] = final                 # 장비를 받을 때 투력 기준 프리셋을 고르는 데 쓴다(추가 호출 없음)
+        self.finals.move_to_end(ocid)
+        while len(self.finals) > 32:
+            self.finals.popitem(last=False)
         cp = next((x.get('stat_value') for x in final if x.get('stat_name') == '전투력'), None)
         try:
             cp = float(str(cp).replace(',', '')) if cp is not None else None
@@ -311,7 +314,15 @@ class Peers:
     def step(self):
         """큐에서 한 명을 확인한다: 전투력이 목표대면 장비(필요하면 세트 단계표도)를 저장. 더 할 게 없으면 False."""
         with self.collection_lock:
-            return self._step()
+            try:
+                return self._step()
+            except AppError as e:
+                if e.status == 404 or getattr(e, 'upstream', None) == 404:
+                    # 삭제/이름 변경 등 조회 대상이 없는 경우는 다음 후보로 넘어간다.
+                    queue = self.store.setting(QUEUE) or []
+                    self.store.set_setting(QUEUE, queue[1:])
+                    return True
+                raise
 
     def _step(self):
         from . import statcalc
@@ -322,22 +333,26 @@ class Peers:
         if len(stored(self.store, target)) >= MAX_QUEUE:
             self.store.set_setting(QUEUE, [])          # 충분히 모였다
             return False
-        person = queue.pop(0)
-        self.store.set_setting(QUEUE, queue)
+        # 요청 실패 전에 큐에서 빼면 429/통신 오류 뒤 그 후보를 다시 확인하지 못한다.
+        person = queue[0]
         ocid, cp = person.get('ocid'), person.get('cp')
         if not cp:
             ocid, cp = self.power(person['name'])
             target['screened'] = int(target.get('screened') or 0) + 1
         if not ocid or not in_band(cp, target['cp']):
+            self.finals.pop(ocid, None)
             self.store.set_setting(TARGET, target)
+            self.store.set_setting(QUEUE, queue[1:])
             return True
         target['matched'] = int(target.get('matched') or 0) + 1
-        self.store.set_setting(TARGET, target)
         if self.store.rows('SELECT 1 FROM peers WHERE ocid=? AND fetched_at>=?', (ocid, since())):
+            self.finals.pop(ocid, None)
+            self.store.set_setting(TARGET, target)
+            self.store.set_setting(QUEUE, queue[1:])
             return True
         from .adapters import Nexon
         equipped = self.get('character/item-equipment', {'ocid': ocid})
-        originals = [item for item in best_preset(equipped, getattr(self, 'finals', {}).pop(ocid, None))
+        originals = [item for item in best_preset(equipped, self.finals.get(ocid))
                      if isinstance(item, dict) and item.get('item_name')]
         if statcalc.unknown_sets(originals, self.store.setting(statcalc.SET_TABLES) or {}):
             statcalc.learn_sets(self.store, self.get('character/set-effect', {'ocid': ocid}))
@@ -350,6 +365,9 @@ class Peers:
                            'fetched_at=excluded.fetched_at, data=excluded.data, cp=excluded.cp, family=excluded.family',
                            (ocid, target['job'], person.get('level'), 0, now(), json.dumps(summary, ensure_ascii=False), cp,
                             1 if person.get('family') else 0))
+        self.finals.pop(ocid, None)
+        self.store.set_setting(TARGET, target)
+        self.store.set_setting(QUEUE, queue[1:])
         return True
 
     def restart(self, name, cp):

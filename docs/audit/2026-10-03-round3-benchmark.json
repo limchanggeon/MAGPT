@@ -1,0 +1,163 @@
+{
+  "date_kst": "2026-10-03",
+  "head": "b596145",
+  "version": "0.4.6",
+  "baseline": "current working tree after prior audit (464 passing tests), not clean HEAD",
+  "baseline_files_sha256": {
+    "mepiti/core.py": "78d783269dcb58746586fc00fa3b826451d858a2b81c77c27984669b71a73ec9",
+    "mepiti/prices.py": "e46b231dcdfb931f437790fb94948264c27e28867175bf69bc1176220ee35793",
+    "mepiti/static/app.js": "b5952d4d9df585c5884e1d7edf702be234c33be8f6b5e2a2a3530dc6b1c45141",
+    "mepiti/static/characters.js": "a0e34eacd78fb36a229438c2dc1c21b6b6618cbfad379d174ac7d365552e2c0c"
+  },
+  "current_files_sha256": {
+    "mepiti/core.py": "9a01afe3908665d9277ed8b44bef4a423f884eb83a0a132d27d079628a9fc258",
+    "mepiti/prices.py": "418a8a7e67e996664a9a6d59b667ee4c0e78c758dfcdb9f4c6f03784618402ad",
+    "mepiti/static/app.js": "bf146e6af6c0bfaf233c7ee580720744507367731ce23b2c9116ae1097df5977",
+    "mepiti/static/characters.js": "a0f7f4e14b87a56b7e788d7bdad74ad03dff28a665757b5b6658a6917ccafcb8"
+  },
+  "measurement": "one sequential before/after pair, median of five per operation, synthetic temporary database",
+  "before": {
+    "scope": {
+      "characters": 79,
+      "snapshots": 2370,
+      "earnings": 10000,
+      "repeats": 5,
+      "stat_source_rows": 3000,
+      "documents": 1000,
+      "reviewed_documents": 50,
+      "prices": 10000
+    },
+    "documents_search": {
+      "median_ms": 48.383,
+      "result_sha256": "d0c278fd3426ac5c5f62a9f3a0f64ac0fb02a472070d4ddb0399af46984e2a35"
+    },
+    "price_lookup_100": {
+      "median_ms": 96.941,
+      "result_sha256": "371d845f4970f5898fdae53861e476c8b8afb0d145c7e173f9b4ba5db6946b04"
+    },
+    "price_daily_count": {
+      "median_ms": 5.169,
+      "result_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5"
+    },
+    "characters": {
+      "median_ms": 0.791,
+      "result_sha256": "cedd5c083d2e7544e498a860f89497c1c2564c4034fc9ae7cf660eb984ef8e57"
+    },
+    "earnings": {
+      "median_ms": 30.941,
+      "result_sha256": "549d4ee66ad4a8b5c495fd402766630337a44a121f156b28059e6cd2c6de3015"
+    },
+    "meso_goal": {
+      "median_ms": 2.584,
+      "result_sha256": "3c769855d12759e931806a977f9a2b9f14f6d4849fe5d184a612b1a772ef5253"
+    },
+    "stat_swap_100": {
+      "median_ms": 3.19,
+      "result_sha256": "bf19bd4961120a85f060b0b16e0b5ff92526a0b00d2cf12b62113262bcf5a89e"
+    },
+    "history_costs_10000": {
+      "median_ms": 6.874,
+      "result_sha256": "0066245d47c4c8bda0cbb83afcdb98cf64b80dfa66cbe3f16f2bd74a54a9cd8e"
+    },
+    "starforce_100": {
+      "median_ms": 14.077,
+      "result_sha256": "e9dd879e35f76006c1ee449cf4be2f28e5ae37c571ba0e55ba86d80994d993fc"
+    }
+  },
+  "after": {
+    "scope": {
+      "characters": 79,
+      "snapshots": 2370,
+      "earnings": 10000,
+      "repeats": 5,
+      "stat_source_rows": 3000,
+      "documents": 1000,
+      "reviewed_documents": 50,
+      "prices": 10000
+    },
+    "documents_search": {
+      "median_ms": 18.863,
+      "result_sha256": "d0c278fd3426ac5c5f62a9f3a0f64ac0fb02a472070d4ddb0399af46984e2a35"
+    },
+    "price_lookup_100": {
+      "median_ms": 8.079,
+      "result_sha256": "371d845f4970f5898fdae53861e476c8b8afb0d145c7e173f9b4ba5db6946b04"
+    },
+    "price_daily_count": {
+      "median_ms": 0.427,
+      "result_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5"
+    },
+    "characters": {
+      "median_ms": 0.819,
+      "result_sha256": "cedd5c083d2e7544e498a860f89497c1c2564c4034fc9ae7cf660eb984ef8e57"
+    },
+    "earnings": {
+      "median_ms": 31.765,
+      "result_sha256": "549d4ee66ad4a8b5c495fd402766630337a44a121f156b28059e6cd2c6de3015"
+    },
+    "meso_goal": {
+      "median_ms": 2.555,
+      "result_sha256": "3c769855d12759e931806a977f9a2b9f14f6d4849fe5d184a612b1a772ef5253"
+    },
+    "stat_swap_100": {
+      "median_ms": 3.162,
+      "result_sha256": "bf19bd4961120a85f060b0b16e0b5ff92526a0b00d2cf12b62113262bcf5a89e"
+    },
+    "history_costs_10000": {
+      "median_ms": 7.942,
+      "result_sha256": "0066245d47c4c8bda0cbb83afcdb98cf64b80dfa66cbe3f16f2bd74a54a9cd8e"
+    },
+    "starforce_100": {
+      "median_ms": 14.449,
+      "result_sha256": "e9dd879e35f76006c1ee449cf4be2f28e5ae37c571ba0e55ba86d80994d993fc"
+    }
+  },
+  "all_nine_result_hashes_equal": true,
+  "search_equivalence": {
+    "seed": 1003,
+    "cases": 128,
+    "all_return_fields_equal": true
+  },
+  "python_tests": {
+    "count": 474,
+    "seconds": 15.811,
+    "result": "passed"
+  },
+  "ui_session_races": {
+    "chromium": {
+      "out_of_order_session": "passed",
+      "new_chat_during_read": "passed",
+      "send_disabled_during_read": "passed",
+      "errors": []
+    },
+    "webkit": {
+      "out_of_order_session": "passed",
+      "new_chat_during_read": "passed",
+      "send_disabled_during_read": "passed",
+      "errors": []
+    }
+  },
+  "ui_smoke": {
+    "chromium": {
+      "tabs": 6,
+      "errors": [],
+      "characters_requests_per_navigation": 1,
+      "peers_requests_per_navigation": 1,
+      "concurrent_session_reads": 1,
+      "earnings_save": "passed",
+      "capture_apply_zero": "passed",
+      "chat_reply_survives_history_failure": true
+    },
+    "webkit": {
+      "tabs": 6,
+      "errors": [],
+      "characters_requests_per_navigation": 1,
+      "peers_requests_per_navigation": 1,
+      "concurrent_session_reads": 1,
+      "earnings_save": "passed",
+      "capture_apply_zero": "passed",
+      "chat_reply_survives_history_failure": true
+    }
+  },
+  "external_api_real_database_paid_models_build_release": "not exercised"
+}

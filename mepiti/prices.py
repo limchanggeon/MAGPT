@@ -40,17 +40,23 @@ def daily_limit(store):
 
 
 def _used_today(store):
-    today = now()[:10]
-    return len([p for p in store.prices(1000)
-                if p['source'] != 'user' and str(p['recorded_at'])[:10] == today])
+    return store.price_fetch_count(now()[:10])
 
 
 def resolve(store, item, add_grade=None):
     """한 장비의 노작값. 모르면 `known=False`로 돌려주고 지어내지 않는다."""
     saved = store.price_lookup(item, add_grade)
     if saved:
-        return {'item': item, 'known': True, 'price': saved['price'], 'source': saved['source'],
-                'recorded_at': saved['recorded_at'], 'add_grade': saved['add_grade']}
+        return _saved_result(item, saved)
+    # 한도 확인부터 저장까지 묶어 중복 조회와 서로 다른 장비의 한도 경합을 막는다.
+    with store.operation('price_fetch'):
+        return _resolve(store, item, add_grade)
+
+
+def _resolve(store, item, add_grade):
+    saved = store.price_lookup(item, add_grade)
+    if saved:
+        return _saved_result(item, saved)
     if fetch_enabled(store):
         if _used_today(store) >= daily_limit(store):
             return {'item': item, 'known': False, 'reason': 'limit'}
@@ -70,6 +76,11 @@ def resolve(store, item, add_grade=None):
                     'add_grade': add_grade}
     return {'item': item, 'known': False,
             'reason': 'disabled' if not fetcher_available() else 'missing'}
+
+
+def _saved_result(item, saved):
+    return {'item': item, 'known': True, 'price': saved['price'], 'source': saved['source'],
+            'recorded_at': saved['recorded_at'], 'add_grade': saved['add_grade']}
 
 
 def resolve_many(store, items):

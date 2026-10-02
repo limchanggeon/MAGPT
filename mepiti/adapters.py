@@ -256,17 +256,20 @@ class Gate:
         self.next_at = 0.0
 
     def wait(self):
-        with self.lock:
-            now = self.clock()
-            at = max(now, self.next_at)
-            self.next_at = at + self.interval
-        if at > now:
-            self.sleep(at - now)
+        # 대기 시간을 미리 예약하면 pause 뒤에도 기존 예약자가 호출하고,
+        # 늦게 깨어난 스레드들이 한꺼번에 호출할 수 있다. 실제 시작 시점에 다시 확인한다.
+        while True:
+            with self.lock:
+                now = self.clock()
+                delay = self.next_at - now
+                if delay <= 0:
+                    self.next_at = now + self.interval
+                    return
+            self.sleep(delay)
 
     def pause(self, seconds):
         with self.lock:
             self.next_at = max(self.next_at, self.clock() + seconds)
-        self.wait()
 
 
 NEXON_GATE = Gate(0.25)      # 앱 전체에서 넥슨 호출은 초당 최대 4회

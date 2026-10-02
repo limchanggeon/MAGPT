@@ -41,21 +41,19 @@ class Ledger:
 
     def __init__(self):
         self.rows = {}
+        self._totals = {}
 
     def add(self, stat, source, label, value, kind='flat'):
         if value:
-            if stat == 'ALL':
-                for s in STATS:
-                    self.rows.setdefault(s, []).append((source, label, value, kind))
-            else:
-                self.rows.setdefault(stat, []).append((source, label, value, kind))
+            for s in (STATS if stat == 'ALL' else (stat,)):
+                self.rows.setdefault(s, []).append((source, label, value, kind))
+                totals = self._totals.setdefault((s, kind), {})
+                totals[source] = totals.get(source, 0) + value
 
     def total(self, stat, kind, classify=None, applied=None):
         classify = classify or CLASSIFY
         out = 0
-        for source, _, value, k in self.rows.get(stat, []):
-            if k != kind:
-                continue
+        for source, value in self._totals.get((stat, kind), {}).items():
             if applied is None or classify.get(source, True) == applied:
                 out += value
         return out
@@ -651,8 +649,8 @@ def preset_pairs(current, preset):
     pairs = []
     for slot in set(now) | set(then):
         a, b = now.get(slot), then.get(slot)
-        if (a or {}).get('item_name') == (b or {}).get('item_name') and (a or {}).get('starforce') == (b or {}).get('starforce') \
-                and list(potential_lines(a or {})) == list(potential_lines(b or {})):
+        # 이름·성·잠재가 같아도 추옵/주문서/소울 등 옵션이 다를 수 있다.
+        if a == b:
             continue
         pairs.append((a, b))
     return pairs

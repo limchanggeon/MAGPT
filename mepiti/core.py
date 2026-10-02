@@ -79,6 +79,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY, title TEXT, body TEXT, metadata TEXT);
             CREATE TABLE IF NOT EXISTS prices(id TEXT PRIMARY KEY, item TEXT NOT NULL, add_grade INTEGER, potential TEXT, price REAL NOT NULL, source TEXT NOT NULL, note TEXT, recorded_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS prices_item ON prices(item);
+            CREATE INDEX IF NOT EXISTS prices_item_time ON prices(item, recorded_at);
+            CREATE INDEX IF NOT EXISTS prices_item_grade_time ON prices(item, add_grade, recorded_at);
+            CREATE INDEX IF NOT EXISTS prices_time_source ON prices(recorded_at, source);
             CREATE INDEX IF NOT EXISTS snapshots_character_time ON snapshots(character_id, retrieved_at DESC);
             CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots(retrieved_at);
             CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id);
@@ -245,23 +248,39 @@ class Store:
 
     def search(self, query):
         tokens = [t for t in re.findall(r'[가-힣A-Za-z0-9]+', normalize(query).lower()) if len(t)>1]
+        if not tokens:
+            return [], False
         ranked = []
         current = datetime.now(KST)
-        for d in self.documents():
-            m = d['metadata']
-            eligible = m['verification_status'] == 'reviewed' and m.get('region') == 'KR' and m.get('server_type') == 'live'
-            for k in ('effective_from','valid_until'):
-                eligible = eligible and bool(m.get(k))
-            if not eligible:
-                continue
-            if timestamp(m['effective_from']) > current or timestamp(m['valid_until']) <= current or (m.get('effective_to') and timestamp(m['effective_to']) <= current):
-                continue
+        # 본문보다 작은 메타데이터를 먼저 확인한다. 승인 취소와 본문 조회 사이에
+        # 다른 쓰기가 끼어들지 않도록 두 조회는 같은 읽기 트랜잭션에서 한다.
+        with self.db() as db:
+            db.execute('BEGIN')
+            eligible = []
+            for row in db.execute('SELECT id, title, metadata FROM documents ORDER BY rowid DESC'):
+                d = dict(row)
+                m = d['metadata'] = json.loads(d['metadata'])
+                if (m.get('verification_status') != 'reviewed' or m.get('region') != 'KR'
+                        or m.get('server_type') != 'live' or not m.get('effective_from') or not m.get('valid_until')):
+                    continue
+                if (timestamp(m['effective_from']) > current or timestamp(m['valid_until']) <= current
+                        or (m.get('effective_to') and timestamp(m['effective_to']) <= current)):
+                    continue
+                eligible.append(d)
+            # 오래된 SQLite의 매개변수 개수 제한도 지킨다. 순위가 같으면 원래 최신순이다.
+            for start in range(0, len(eligible), 500):
+                batch = eligible[start:start + 500]
+                placeholders = ','.join('?' for _ in batch)
+                bodies = {r['id']: r['body'] for r in db.execute(
+                    f'SELECT id, body FROM documents WHERE id IN ({placeholders})', [d['id'] for d in batch])}
+                for d in batch:
+                    d['body'] = bodies[d['id']]
+        for d in eligible:
             haystack = normalize(d['title'] + ' ' + d['body']).lower()
             words = haystack.split()
             matches = [t for t in tokens if t in haystack or any(w.startswith(t[:max(2,len(t)-2)]) for w in words)]
             if matches:
                 d['score'] = sum(3 if t in d['title'].lower() else 1 for t in matches)
-                d['passages'] = [p.strip() for p in re.split(r'\n+',d['body']) if p.strip()]
                 ranked.append(d)
         ranked.sort(key=lambda x: x['score'], reverse=True)
         # Different active versions for the same reviewed topic are explicitly a conflict.
@@ -269,7 +288,10 @@ class Store:
         for d in ranked:
             topics.setdefault(d['metadata']['topic'],set()).add(d['metadata']['version'])
         conflict = any(len(v)>1 for v in topics.values())
-        return ranked[:5], conflict
+        selected = ranked[:5]
+        for d in selected:
+            d['passages'] = [p.strip() for p in re.split(r'\n+', d['body']) if p.strip()]
+        return selected, conflict
 
     # ---- 노작값 ----
     # 같은 장비라도 추옵 급과 잠재 등급에 따라 값이 크게 다르므로 함께 저장한다.
@@ -295,15 +317,19 @@ class Store:
     def price_lookup(self, item, add_grade=None):
         """가장 최근 값을 돌려준다. 급이 주어지면 급이 같은 기록을 먼저 본다."""
         if add_grade is not None:
-            rows = self.rows('SELECT * FROM prices WHERE item=? AND add_grade=? ORDER BY recorded_at DESC LIMIT 1',
+            rows = self.rows('SELECT * FROM prices WHERE item=? AND add_grade=? ORDER BY recorded_at DESC, rowid DESC LIMIT 1',
                              (item, int(add_grade)))
             if rows:
                 return rows[0]
-        rows = self.rows('SELECT * FROM prices WHERE item=? ORDER BY recorded_at DESC LIMIT 1', (item,))
+        rows = self.rows('SELECT * FROM prices WHERE item=? ORDER BY recorded_at DESC, rowid DESC LIMIT 1', (item,))
         return rows[0] if rows else None
 
     def prices(self, limit=500):
-        return self.rows('SELECT * FROM prices ORDER BY recorded_at DESC LIMIT ?', (int(limit),))
+        return self.rows('SELECT * FROM prices ORDER BY recorded_at DESC, rowid DESC LIMIT ?', (int(limit),))
+
+    def price_fetch_count(self, day):
+        return self.rows('SELECT COUNT(*) AS n FROM prices WHERE recorded_at>=? AND recorded_at<? AND source!=?',
+                         (day, (timestamp(day) + timedelta(days=1)).date().isoformat(), 'user'))[0]['n']
 
     def price_count(self):
         return self.rows('SELECT COUNT(*) AS n FROM prices')[0]['n']

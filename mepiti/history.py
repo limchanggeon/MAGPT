@@ -62,6 +62,7 @@ def fetch(store, nexon, days=14):
         raise AppError('기록은 한 번에 1~90일까지 불러올 수 있습니다.')
     fetched = set(store.setting(FETCHED) or [])
     now, added, asked, failed = today(), 0, 0, []
+    blocked = False
     for back in range(days):
         day = now - timedelta(days=back)
         if day < FIRST_DAY:
@@ -74,7 +75,8 @@ def fetch(store, nexon, days=14):
             rows = nexon.starforce_history(key)
         except AppError as e:
             failed.append(f'{key}: {e}')
-            if getattr(e, 'status', None) in (401, 403, 429):
+            if getattr(e, 'upstream', e.status) in (401, 403, 429):
+                blocked = True
                 break          # 키 문제나 한도 초과면 더 부르지 않는다.
             continue
         with store.db() as db:
@@ -89,7 +91,8 @@ def fetch(store, nexon, days=14):
                                      int(bool(r.get('superior'))))).rowcount
         fetched.add(key)
     store.set_setting(FETCHED, sorted(fetched)[-400:])
-    resolve_levels(store, nexon)
+    if not blocked:
+        resolve_levels(store, nexon)
     return {'days': days, 'requested_days': asked, 'added': added, 'failed': failed[:5]}
 
 

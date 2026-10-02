@@ -28,18 +28,24 @@ def meso_plan(store, target=None, current=None):
         saved = {'target': earnings.meso(target, '목표 메소', required=True),
                  'current': earnings.meso(current, '지금 가진 메소')}
         store.set_setting(MESO_GOAL, saved)
-    rows = store.rows('SELECT * FROM earnings')
+    day = earnings.today()
+    # 평균에 필요한 최근 30일만 읽는다. 전체 이력은 시작 날짜·존재 여부만 확인한다.
+    summary = store.rows('''SELECT COUNT(*) AS count, MIN(day) AS first,
+        MIN(CASE WHEN kind='boss' THEN day END) AS first_boss,
+        MAX(CASE WHEN kind='hunt' THEN 1 ELSE 0 END) AS has_hunts
+        FROM earnings WHERE day<=?''', (day.isoformat(),))[0]
+    month_ago = (day - timedelta(days=29)).isoformat()
+    rows = store.rows('''SELECT kind, day, meso, pieces, piece_price, flasks, crystal, party, extra
+        FROM earnings WHERE day>=? AND day<=? ORDER BY rowid''', (month_ago, day.isoformat()))
     for r in rows:
         r['total'] = earnings.total(r)
-    day = earnings.today()
-    first = min((date.fromisoformat(r['day']) for r in rows), default=None)
+    first = date.fromisoformat(summary['first']) if summary['first'] else None
     # 기록한 첫날부터 오늘까지(최대 7일). 기록 없는 날도 '안 한 날'로 평균에 넣는다.
     data_days = min(WINDOW_DAYS, (day - first).days + 1) if first else 0
     since = (day - timedelta(days=data_days - 1)).isoformat() if data_days else None
     hunts = [r for r in rows if r['kind'] == 'hunt']
     recent = [r for r in hunts if since and r['day'] >= since]
     # 재획비 1개당 수익은 표본을 넉넉히(최근 30일, 재획비 개수를 적은 기록만).
-    month_ago = (day - timedelta(days=29)).isoformat()
     timed = [r for r in hunts if r['day'] >= month_ago and r['flasks']]
     flasks_timed = sum(r['flasks'] for r in timed)
     per_flask = sum(r['total'] for r in timed) / flasks_timed if flasks_timed else None
@@ -54,7 +60,7 @@ def meso_plan(store, target=None, current=None):
     # 주보: 첫 주보 기록 주부터 이번 주까지(최대 4주)의 주간 평균.
     bosses = [r for r in rows if r['kind'] == 'boss']
     this_week = earnings.week_start(day)
-    first_boss = min((earnings.week_start(date.fromisoformat(r['day'])) for r in bosses), default=None)
+    first_boss = earnings.week_start(date.fromisoformat(summary['first_boss'])) if summary['first_boss'] else None
     boss_weeks = min(BOSS_WEEKS, (this_week - first_boss).days // 7 + 1) if first_boss else 0
     boss_since = (this_week - timedelta(weeks=boss_weeks - 1)).isoformat() if boss_weeks else None
     boss_total = sum(r['total'] for r in bosses if boss_since and r['day'] >= boss_since)
@@ -64,18 +70,27 @@ def meso_plan(store, target=None, current=None):
     remaining = max(0.0, (target_meso or 0) - current_meso) if target_meso else None
     days_needed = math.ceil(remaining / daily) if remaining and daily > 0 else (0 if remaining == 0 else None)
     notes = []
-    if not rows:
+    if not summary['count']:
         notes.append('수익 기록이 없어 계산할 수 없어요. 수익 탭에 재획·주보를 기록해 주세요.')
     elif data_days < WINDOW_DAYS:
         notes.append(f'기록이 {data_days}일치예요. 사냥 시간 평균은 7일쯤 쌓이면 정확해져요.')
-    if hunts and per_flask is None:
+    if summary['has_hunts'] and per_flask is None:
         notes.append('재획 기록에 재획비 개수를 적으면 사냥 시간(재획비 1개 = 30분)과 1개당 수익을 계산해요.')
+    eta = expected_date(day, days_needed)
+    if days_needed is not None and eta is None:
+        notes.append('예상 기간이 너무 길어 도달 날짜를 표시할 수 없어요.')
     return {'target': target_meso, 'current': current_meso, 'remaining': remaining,
-            'days': days_needed, 'eta': (day + timedelta(days=days_needed)).isoformat() if days_needed is not None else None,
+            'days': days_needed, 'eta': eta,
             'daily': daily, 'hunt_per_day': hunt_per_day, 'boss_per_week': boss_per_week, 'boss_weeks': boss_weeks,
             'per_flask': per_flask, 'flasks_per_day': flasks_per_day,
             'hours_per_day': flasks_per_day * FLASK_MINUTES / 60, 'data_days': data_days,
             'flask_minutes': FLASK_MINUTES, 'notes': notes}
+
+
+def expected_date(day, days):
+    if days is None or not math.isfinite(days) or days > (date.max - day).days or days < 0:
+        return None
+    return (day + timedelta(days=math.ceil(days))).isoformat()
 
 
 def required(point):
@@ -95,19 +110,32 @@ def exp_plan(store, nexon, name):
     """최근 7일 경험치 흐름과 다음 레벨까지 걸릴 날짜. 지난날 값은 저장해 두고 다시 부르지 않는다."""
     if not name:
         raise AppError('캐릭터를 골라 주세요.')
+    with store.operation(('exp_days', name)):
+        return _exp_plan(store, nexon, name)
+
+
+def _exp_plan(store, nexon, name):
     cache = store.setting(EXP_DAYS) or {}
     days = dict(cache.get(name) or {})
     today = earnings.today()
+    blocked = None
     for back in range(WINDOW_DAYS, 0, -1):
         key = (today - timedelta(days=back)).isoformat()
         if key not in days:
             try:
                 days[key] = nexon.basic_on(name, key)
-            except AppError:
+            except AppError as e:
+                if getattr(e, 'upstream', e.status) in (401, 403, 429):
+                    blocked = e
+                    break
                 continue                                    # 그날 기록이 없으면(캐릭터 생성 전 등) 건너뛴다
     keep = sorted(days)[-30:]
-    cache[name] = {k: days[k] for k in keep}
-    store.set_setting(EXP_DAYS, cache)
+    with store.operation('exp_days_write'):
+        cache = store.setting(EXP_DAYS) or {}
+        cache[name] = {k: days[k] for k in keep}
+        store.set_setting(EXP_DAYS, cache)
+    if blocked:
+        raise blocked
     latest = nexon.basic_on(name, None)                   # 지금 값(오늘 0시 이후 사냥 포함)
     points = [{'at': datetime.fromisoformat(k).replace(tzinfo=KST), **days[k]}
               for k in keep if k >= (today - timedelta(days=WINDOW_DAYS)).isoformat()]
@@ -134,6 +162,6 @@ def exp_plan(store, nexon, name):
     return {'name': name, 'level': latest['level'], 'rate': latest['rate'], 'exp': latest['exp'],
             'required': need_now, 'left': left, 'gain': gain, 'span_days': round(span_days, 2),
             'per_day': per_day, 'per_day_percent': per_day / need_now * 100 if need_now else None,
-            'days': days_left, 'eta': (today + timedelta(days=math.ceil(days_left))).isoformat() if days_left is not None else None,
+            'days': days_left, 'eta': expected_date(today, days_left),
             'flasks': flasks, 'per_flask_percent': (gain / flasks / need_now * 100) if flasks and need_now else None,
             'points': len(points), 'since': since, 'retrieved_at': now(), 'notes': notes}

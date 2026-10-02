@@ -14,7 +14,7 @@ from .prices import parse_price
 
 PIECE_PRICE = 'piece_price'      # 마지막으로 쓴 조각 가격. 다음 기록의 기본값이다.
 BOSS_PRICES = 'boss_prices'      # 보스별 마지막 결정석 판매가. 스케줄러로 불러올 때 채운다.
-MAX_MESO = 10_000_0000_0000      # 1경. 오타로 자릿수가 크게 넘어가는 것만 막는다.
+MAX_MESO = 10_000_0000_0000      # 1조. 오타로 자릿수가 크게 넘어가는 것만 막는다.
 PIECE_ITEM = '솔 에르다 조각'
 PIECE_AUCTION = 'piece_price_auction'   # 경매장에서 본 조각 시세 {price, world, at}. 한 시간 안에는 다시 검색하지 않는다
 PIECE_FRESH_MINUTES = 60

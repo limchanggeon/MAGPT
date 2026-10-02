@@ -25,9 +25,9 @@ function toast(message,error=false){const e=$('#toast');e.textContent=message;e.
 async function requestAPI(path,data){const response=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'X-Mepiti-Token':token,...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error||'요청에 실패했습니다.');return result;}
 const pendingGets = new Map();
 function api(path,data){
-  if(data!==undefined)return requestAPI(path,data);
+  if(data!==undefined)return requestAPI(path,data).then(result=>{pendingGets.clear();return result;});
   if(pendingGets.has(path))return pendingGets.get(path);
-  const pending=requestAPI(path).finally(()=>pendingGets.delete(path));
+  const pending=requestAPI(path).finally(()=>{if(pendingGets.get(path)===pending)pendingGets.delete(path);});
   pendingGets.set(path,pending);return pending;
 }
 async function guard(fn){try{return await fn();}catch(e){toast(e.message,true);}}
@@ -42,15 +42,46 @@ function scrollBottom(){$('#chat-scroll').scrollTop=$('#chat-scroll').scrollHeig
 // **굵게**만 살린다. 텍스트 노드로만 만들어 HTML이 끼어들 틈이 없다.
 function richText(cls,text){const box=el('div',cls);String(text||'').split(/(\*\*[^*\n]+?\*\*)/).forEach(part=>{if(/^\*\*[^*\n]+?\*\*$/.test(part))box.append(el('strong','',part.slice(2,-2)));else if(part)box.append(document.createTextNode(part));});return box;}
 function renderMessage(role,payload){$('#welcome').hidden=true;$$('#messages .choice-form').forEach(lockChoiceForm);const block=el('article','message '+role);if(role==='user'){block.textContent=payload.content;}else{const heading=el('div','message-heading');const icon=el('img');icon.src='/favicon.svg';icon.alt='';heading.append(icon,el('span','','메피티'));const status={held:'보류',clarify:'조건 확인',evidence:'근거 원문',term:'용어',context:'조회한 사실',analysis:'캐릭터 분석',ask_price:'노작값 필요',price:'값 저장됨',ask_conditions:'조건 선택',conditions:'조건 저장됨',ask:'확인 필요'};heading.append(el('span','badge',status[payload.status]||'안내'));block.append(heading,richText('message-body',payload.content));if(payload.form)block.append(renderChoiceForm(payload.form));if(payload.sources?.length){const sources=el('div','sources');payload.sources.forEach(s=>{const a=sourceLink(s.source_url,`[${s.citation}] ${s.title}`);a.className='source';a.append(el('small','',`${s.source_type==='official'?'공식':'커뮤니티'} · 버전 ${s.version}\n적용 ${s.effective_from} · 수집 ${s.retrieved_at}\n재검토 기한 ${s.valid_until}`));sources.append(a);});block.append(sources);}if(payload.links?.length){const links=el('div','sources');payload.links.forEach(l=>{const a=sourceLink(l.url,l.title);a.className='source';links.append(a);});block.append(links);}if(payload.facts){const facts=el('details','fact-sheet');facts.append(el('summary','','근거로 쓴 조회 사실'),el('pre','',payload.facts));block.append(facts);}if(payload.conditions?.length){const conditions=el('div','conditions');payload.conditions.forEach(c=>conditions.append(el('p','',c)));block.append(conditions);}}$('#messages').append(block);scrollBottom();}
-async function loadHistory(){const sessions=await api('sessions');const list=$('#history');list.replaceChildren();if(!sessions.length)list.append(el('div','history-empty','기록 없음'));sessions.forEach(s=>{const row=el('div','history-entry'+(s.id===sessionId?' active':''));const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(async()=>{if(busy)return;sessionId=s.id;$('#messages').replaceChildren();const messages=await api('messages?session_id='+s.id);const latest=[...messages].reverse().find(m=>m.payload?.topic_item)?.payload.topic_item;chatTopic=s.topic?{...s.topic,...(latest||{})}:null;renderTopicCard();messages.forEach(m=>renderMessage(m.role,m.payload));switchView('chat');loadHistory();}));const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));row.append(open,del);list.append(row);});}
-function newChat(){if(busy)return;sessionId=null;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
+let historyRequest=0, chatRequest=0, chatLoading=false;
+async function openSession(s){
+  if(busy)return;
+  const request=++chatRequest;
+  chatLoading=true;$('#send-button').disabled=true;
+  sessionId=s.id;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=true;
+  confirmedText='';renderAttachment();
+  try{
+    const messages=await api('messages?session_id='+s.id);
+    if(request!==chatRequest)return;
+    const latest=[...messages].reverse().find(m=>m.payload?.topic_item)?.payload.topic_item;
+    chatTopic=s.topic?{...s.topic,...(latest||{})}:null;renderTopicCard();
+    messages.forEach(m=>renderMessage(m.role,m.payload));$('#welcome').hidden=messages.length>0;
+    switchView('chat');await guard(loadHistory);
+  }catch(err){if(request===chatRequest){$('#welcome').hidden=false;throw err;}}
+  finally{if(request===chatRequest){chatLoading=false;$('#send-button').disabled=false;}}
+}
+async function loadHistory(){
+  const request=++historyRequest, sessions=await api('sessions');
+  if(request!==historyRequest)return;
+  const list=$('#history');list.replaceChildren();
+  if(!sessions.length)list.append(el('div','history-empty','기록 없음'));
+  sessions.forEach(s=>{
+    const row=el('div','history-entry'+(s.id===sessionId?' active':''));
+    const open=el('button','',s.title);open.title=s.title;open.addEventListener('click',()=>guard(()=>openSession(s)));
+    const del=el('button','','×');del.setAttribute('aria-label',s.title+' 대화 삭제');
+    del.addEventListener('click',()=>guard(async()=>{if(busy)return;if(!confirm('이 기록을 삭제합니다.'))return;
+      await api('sessions/delete',{id:s.id});if(sessionId===s.id)newChat();await loadHistory();}));
+    row.append(open,del);list.append(row);
+  });
+}
+function newChat(){if(busy)return;chatRequest++;chatLoading=false;$('#send-button').disabled=false;sessionId=null;chatTopic=null;renderTopicCard();$('#messages').replaceChildren();$('#welcome').hidden=false;confirmedText='';renderAttachment();switchView('chat');guard(loadHistory);$('#message').focus();}
 $('#new-chat').addEventListener('click',newChat);
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();newChat();}});
 $$('[data-prompt]').forEach(b=>b.addEventListener('click',()=>{$('#message').value=b.dataset.prompt;$('#message').focus();}));
 $('#message').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('#chat-form').requestSubmit();}});
-$('#chat-form').addEventListener('submit',e=>{e.preventDefault();guard(async()=>{if(busy)return;let message=$('#message').value.trim();if(!message&&!confirmedText)return;if(!confirmedText&&/^(내|제)\s*캐릭터(?:\s*(보여줘|보여주세요|보기|볼래|보고 싶어|보여 줘|보여 주세요))?[.!?]*$/.test(message)){$('#message').value='';switchView('characters');return;}if(confirmedText)message+='\n\n[사용자가 확인한 스크린샷 내용]\n'+confirmedText;if(message.length>12000)throw new Error('질문과 첨부를 합쳐 12,000자 이하.');const original=$('#message').value;$('#message').value='';try{await sendChat(message);confirmedText='';renderAttachment();}catch(err){$('#message').value=original;throw err;}});});
+$('#chat-form').addEventListener('submit',e=>{e.preventDefault();guard(async()=>{if(busy||chatLoading)return;let message=$('#message').value.trim();if(!message&&!confirmedText)return;if(!confirmedText&&/^(내|제)\s*캐릭터(?:\s*(보여줘|보여주세요|보기|볼래|보고 싶어|보여 줘|보여 주세요))?[.!?]*$/.test(message)){$('#message').value='';switchView('characters');return;}if(confirmedText)message+='\n\n[사용자가 확인한 스크린샷 내용]\n'+confirmedText;if(message.length>12000)throw new Error('질문과 첨부를 합쳐 12,000자 이하.');const original=$('#message').value;$('#message').value='';try{await sendChat(message);confirmedText='';renderAttachment();}catch(err){$('#message').value=original;throw err;}});});
 // 질문을 보내고 답을 그린다. answer는 선택창에서 고른 값(구조화된 답)이다.
 async function sendChat(message,answer){
+  if(busy||chatLoading)return;
   busy=true;$('#send-button').disabled=true;
   renderMessage('user',{content:message});
   const thinking=el('div','thinking','근거 확인 중…');$('#messages').append(thinking);scrollBottom();
@@ -278,7 +309,8 @@ function fillCharacterSelects(d){
 let accountListTried=false;
 async function ensureAccountCharacters(d){
   if(d.account_loaded||accountListTried)return;accountListTried=true;
-  try{await api('characters/discover',{});await loadEarnings();}catch{}
+  const request=catalogRequest;
+  try{await api('characters/discover',{});if(request===catalogRequest)await loadEarnings();}catch{}
 }
 // 솔 에르다 조각 시세 — 경매장(검색 기준 캐릭터 월드)의 판매 중 최저 개당 가격. 한 시간 안에 본 값은 다시 검색하지 않는다.
 let pieceEdited=false;
@@ -399,6 +431,7 @@ function captureReport(){
     if(c&&c.values)body.textContent=line(c.values);else if(c&&c.loading)body.textContent='읽는 중…';else body.textContent='여기를 누르고 붙여 넣기';
     s.classList.toggle('filled',!!(c&&c.values));s.classList.toggle('active',s.dataset.slot===captureSlot);});
   $('#capture-apply').disabled=true;out.textContent='';
+  captures.diff=null;
   const flasks=Number($('#capture-flasks').value||0);
   if(!(b&&a))return;
   // 사냥 전에 0이면 캡처에 안 보이기도 한다(0조각이면 아이템 칸 자체가 없음). 사냥 후에만 보이면 사냥 전은 0으로 본다.
@@ -418,15 +451,21 @@ function captureReport(){
 }
 async function readCaptureFile(file,slot){
   if(!file||!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('PNG·JPG 이미지를 넣어 주세요.');
+  const request={loading:true};captures[slot]=request;captureReport();
+  try{
   let url=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file);});
+  if(captures[slot]!==request)return;
   if(url.length>7_500_000){ // 너무 크면 JPEG로 다시 담는다(서버 요청 한도 8MB)
     const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=url;});
     const scale=Math.min(1,2560/Math.max(img.width,img.height)),c=document.createElement('canvas');c.width=img.width*scale;c.height=img.height*scale;
     c.getContext('2d').drawImage(img,0,0,c.width,c.height);url=c.toDataURL('image/jpeg',0.92);}
-  captures[slot]={loading:true};captureReport();
-  try{captures[slot]=await api('earnings/capture',{image:url});}catch(e){captures[slot]=null;captureReport();throw e;}
+  if(captures[slot]!==request)return;
+  const result=await api('earnings/capture',{image:url});
+  if(captures[slot]!==request)return;
+  captures[slot]=result;
   if(slot==='before'&&!captures.after)captureSlot='after';
   captureReport();
+  }catch(e){if(captures[slot]!==request)return;captures[slot]=null;captureReport();throw e;}
 }
 $$('.capture-slot').forEach(s=>{
   s.onclick=()=>{captureSlot=s.dataset.slot;captureReport();};
@@ -442,8 +481,8 @@ document.addEventListener('paste',e=>{
   e.preventDefault();guard(()=>readCaptureFile(item.getAsFile(),captureSlot));
 });
 $('#capture-apply').onclick=()=>{const f=$('#hunt-form').elements,d=captures.diff||{};
-  if(d.meso>0)f.meso.value=exactAmount(d.meso);if(d.pieces>0)f.pieces.value=d.pieces;
-  const flasks=Number($('#capture-flasks').value||0);if(flasks>0)f.flasks.value=flasks;
+  if(d.meso!=null&&d.meso>=0)f.meso.value=exactAmount(d.meso);if(d.pieces!=null&&d.pieces>=0)f.pieces.value=d.pieces;
+  const flasks=Number($('#capture-flasks').value||0);f.flasks.value=flasks>0?flasks:'';
   if(!f.day.value)f.day.value=todayText();huntPreview();toast('캡처 차이를 채웠어요. 확인한 뒤 저장하세요.');f.meso.focus();};
 $('#capture-reset').onclick=()=>{captures.before=captures.after=captures.diff=null;captureSlot='before';$('#capture-flasks').value='';captureReport();};
 $('#capture-flasks').addEventListener('input',()=>captureReport());

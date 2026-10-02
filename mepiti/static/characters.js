@@ -14,7 +14,7 @@ const profileCache = new Map();
 function resetCharacterCache(){
   keyRequest++;keyChecking=false;
   catalogRequest++;accountLoading=false;$('#discover-characters').disabled=false;
-  accountCatalog=null;profileCache.clear();selectedCharacterName='';shownPreset=null;profileRequest++;
+  accountCatalog=null;accountListTried=false;profileCache.clear();selectedCharacterName='';shownPreset=null;profileRequest++;
   $('#character-profile').removeAttribute('aria-busy');showProfileEmpty('캐릭터 목록을 다시 불러와 주세요.');
 }
 function nexonImage(url,alt,cls){
