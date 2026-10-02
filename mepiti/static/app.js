@@ -569,8 +569,31 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
 });
 
 // 기록 — 스타포스 강화 기록(넥슨 Open API)을 장비마다 묶어 실제 비용과 기대값을 비교한다.
+// 강화 기록은 계정 전체가 섞여 온다. 캐릭터를 고르면 그 캐릭터 장비만 합계·카드로 본다(2026-10-03 사용자 요청).
+let historyCharacter='',lastHistory=null;
+function renderHistoryCharacters(d){
+  const box=$('#history-characters');box.replaceChildren();
+  const names=[...new Set(d.groups.map(g=>g.character||'캐릭터 미확인'))];
+  if(historyCharacter&&!names.includes(historyCharacter))historyCharacter='';
+  if(names.length<2){box.hidden=true;return;}
+  box.hidden=false;
+  const chip=(label,value,groups)=>{
+    const compared=groups.filter(g=>g.difference!=null&&g.expected&&g.actual);const diff=compared.reduce((s,g)=>s+g.difference,0);
+    const b=el('button','history-chip'+(historyCharacter===value?' active':''),label);b.type='button';b.setAttribute('aria-pressed',String(historyCharacter===value));
+    b.append(el('small','',`장비 ${fmt(groups.length)}개`+(compared.length?` · ${diff>0?'손해':'이득'} ${mesoText(Math.abs(diff))}`:'')));
+    b.onclick=()=>{historyCharacter=value;renderForgeHistory(d);};box.append(b);
+  };
+  chip('전체','',d.groups);
+  names.sort((a,b)=>d.groups.filter(g=>(g.character||'캐릭터 미확인')===b).length-d.groups.filter(g=>(g.character||'캐릭터 미확인')===a).length)
+    .forEach(n=>chip(n,n,d.groups.filter(g=>(g.character||'캐릭터 미확인')===n)));
+}
 async function loadForgeHistory(){
-  const d=await api('history/starforce');
+  const d=await api('history/starforce');lastHistory=d;renderForgeHistory(d);
+}
+function renderForgeHistory(full){
+  renderHistoryCharacters(full);
+  const d={...full,groups:historyCharacter?full.groups.filter(g=>(g.character||'캐릭터 미확인')===historyCharacter):full.groups};
+  d.missing_level=d.groups.filter(g=>g.missing==='level').length;
   $('#history-status').textContent=d.fetched_days?`받아 둔 날짜 ${fmt(d.fetched_days)}일 · 최근 ${d.latest_day} · 강화 조건(MVP 할인) ${d.conditions}`:'아직 불러온 기록이 없습니다.';
   // 위쪽 합계: 기대값과 비교할 수 있는 장비들의 실제 쓴 돈 − 기대값. 카드를 하나씩 보지 않아도 이득·손해를 한눈에.
   const sum=$('#history-summary');sum.replaceChildren();
@@ -578,7 +601,7 @@ async function loadForgeHistory(){
   if(compared.length){
     const diff=compared.reduce((s,g)=>s+g.difference,0),expected=compared.reduce((s,g)=>s+g.expected.cost,0),spent=compared.reduce((s,g)=>s+g.actual.to_reach,0);
     const more=diff>0,box=el('div','panel history-total '+(more?'history-bad':'history-good'));
-    box.append(el('span','',`기대값과 비교한 장비 ${fmt(compared.length)}개 합계`),
+    box.append(el('span','',`${historyCharacter?historyCharacter+' · ':''}기대값과 비교한 장비 ${fmt(compared.length)}개 합계`),
       el('strong','',`기대보다 ${mesoText(Math.abs(diff))} ${more?'더 씀':'덜 씀'}`),
       el('small','',`실제 ${mesoText(spent)} · 기대 ${mesoText(expected)}`+(expected?` · 기대값의 ${fmt(Math.round(spent/expected*100))}%`:'')+
         ` · 이득 ${fmt(compared.filter(g=>g.difference<=0).length)}개 · 손해 ${fmt(compared.filter(g=>g.difference>0).length)}개`));

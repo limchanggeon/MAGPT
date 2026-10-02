@@ -1402,3 +1402,8 @@ node tests/test_frontend.js
 - CI 1차 실패(`067e700`, Windows만): `tests/test_frontend.js`가 `'\n'`으로 앱 코드를 잘라 실행하는데 Windows는 CRLF라 위치를 못 찾아 파일 끝까지 실행 → `document is not defined`. 검사 코드 문제(앱 아님).
   수정 `380201f`(줄끝을 맞춰 읽기). CRLF로 바꾼 사본으로도 로컬 통과 확인, CI 두 OS 통과.
 - **릴리스 v0.4.7**: `380201f`, `main` 빨리감기(`844088f..380201f`), 태그, 릴리스 성공(파일 5개), API latest v0.4.7. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.7
+
+### 2026-10-03 — 강화 기록 캐릭터별 보기 (사용자 요청)
+
+- 변경: `mepiti/static/app.js`(`renderHistoryCharacters`·`renderForgeHistory`), `index.html`, `style.css`, README·IMPLEMENTATION. 서버 변경 없음.
+- 검증: Python 전체·Node 회귀·JS 구문, 데모+WebKit. 임시 검사용 playwright 가상환경은 scratchpad `pw`로 새로 만듦(기존 `venv`가 비어 있었음). 미릴리스.

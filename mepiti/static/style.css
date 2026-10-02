@@ -840,3 +840,7 @@ body{zoom:var(--user-scale,1)}
 /* 화면 전체를 zoom으로 키우면 100dvh도 함께 커져 아래(대화 입력창)가 잘린다. 키운 만큼 나눠 화면 높이에 맞춘다. */
 .app-shell{min-height:calc(100dvh / var(--user-scale,1))}
 .chat-view{height:calc(100dvh / var(--user-scale,1) - 46px)}
+.history-characters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.history-chip{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--inset);color:var(--ink-dim);font-size:13px}
+.history-chip small{color:var(--muted);font-size:11px}
+.history-chip.active{border-color:var(--gold);color:var(--gold)}
