@@ -175,3 +175,30 @@ class PresetTests(unittest.TestCase):
     def test_hunting_lines(self):
         self.assertEqual(sc.hunting_lines([item('반지1', 'x', pots=('아이템 드롭률 +20%', '메소 획득량 +20%', 'STR +3%'))]), 2)
         self.assertEqual(sc.hunting_lines([{'potential': ['아이템 드롭률 +20%'], 'additional_potential': []}]), 1)
+
+
+class XenonAddOptionTests(unittest.TestCase):
+    """제논 추옵 급: 힘+덱+럭 + 공×6 + 올스탯%×20 (커뮤니티 제논식, 다른 직업과 견줄 때 ÷2)."""
+    def test_xenon_formula(self):
+        from mepiti.adapters import add_option_grade
+        item = {'item_add_option': {'str': '40', 'dex': '40', 'luk': '40', 'attack_power': '5', 'all_stat': '6'}, 'item_base_option': {}}
+        xenon = add_option_grade(item, '모자', 'xenon')
+        self.assertEqual(xenon['grade'], 120 + 30 + 120)
+        self.assertIn('제논식', xenon['label'])
+        self.assertIn('135급', xenon['label'])
+        self.assertEqual(add_option_grade(item, '모자', 'luk')['grade'], 40 + 60 + 20)    # 다른 직업은 그대로
+
+    def test_xenon_job_is_detected(self):
+        from mepiti.adapters import Nexon
+        class Key:
+            def get(self): return 'k'
+        n = Nexon(Key())
+        replies = {'id': {'ocid': 'o'}, 'character/basic': {'character_name': '제논이', 'character_level': 280, 'character_class': '제논'},
+                   'character/stat': {'final_stat': [{'stat_name': 'LUK', 'stat_value': '30000'}]},
+                   'character/item-equipment': {'item_equipment': [{'item_equipment_slot': '모자', 'item_name': '모자',
+                                                                     'item_add_option': {'str': '30', 'dex': '30', 'luk': '30'}}]},
+                   'character/android-equipment': {}}
+        n.get = lambda path, query: replies[path]
+        profile = n.character('제논이', details=True)
+        self.assertEqual(profile['main_stat'], 'STR·DEX·LUK')
+        self.assertEqual(profile['equipment'][0]['add_grade']['grade'], 90)

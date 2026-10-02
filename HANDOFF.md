@@ -1,8 +1,8 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.4.7 릴리스 완료(재점검·최적화 두 차례 + 캡처 0메소 수정). 전체 요구사항 완료 아님.
-- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.4.7(`380201f`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
+- 현재 단계: v0.4.8 릴리스 완료(강화 기록 캐릭터별, 목표 전투력대 찾기 속도). 이후 제논 추옵식(미릴리스). 전체 요구사항 완료 아님.
+- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.4.8(`ffadcfe`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
 - 앞선 점검 상세: [2026-10-03 보고서](docs/audit/2026-10-03.md), [측정 원자료](docs/audit/2026-10-03-benchmark.json). 이전 점검은 [2026-10-01 보고서](docs/audit/2026-10-01.md).
@@ -1413,3 +1413,8 @@ node tests/test_frontend.js
 - 변경: `mepiti/peers.py`(간격 0.3초·하루 600회·레벨대 학습 `learn`), `index.html`·`README.md` 문구, 테스트 1개. 미릴리스.
 - 사실·실측은 IMPLEMENTATION.md 같은 날짜. 넥슨 공식 한도 확인됨(개발 키 초당 5·하루 1,000).
 - 사용자가 준 '전투력 랭킹' API 명세는 다른 게임의 넥슨 API였다(사용자 확인). 메이플스토리에는 전투력 랭킹이 없으므로 지금 방식(후보를 한 명씩 확인, 빨라진 버전)을 유지한다.
+- **릴리스 v0.4.8**(2026-10-03, 사용자 "ㅇㅇㅇ"): `ffadcfe`, CI 통과, `main` 빨리감기(`380201f..ffadcfe`), 태그, 릴리스 성공(파일 5개), API latest v0.4.8. https://github.com/limchanggeon/MAGPT/releases/tag/v0.4.8
+
+### 2026-10-03 — 제논 추옵식 (사용자 요청)
+
+- 변경: `mepiti/adapters.py`(제논식), `mepiti/static/characters.js`(설명), 테스트 2개. 근거·한계는 IMPLEMENTATION.md. 미릴리스.

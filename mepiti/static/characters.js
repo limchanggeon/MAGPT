@@ -171,6 +171,7 @@ function renderEquipmentDetail(box,item){
     const addRows=el('div','item-options');Object.entries(item.add_options||{}).forEach(([k,v])=>{const row=el('div');row.append(el('span','',labels[k]||k),el('strong','',numericText(v)));addRows.append(row);});
     if(addRows.childElementCount)add.append(addRows);else add.append(el('p','hint','추가옵션 없음'));
     if(grade.tier)add.append(el('p','hint',`무기 공/마 추옵 ${fmt(grade.power)} / 기본 ${grade.power_name} 대비 ${Math.round((grade.ratio||0)*1000)/10}% → ${grade.tier}. 단계 경계는 아케인셰이드 기준 약식이며 게임이 주는 등급이 아닙니다.`));
+    else if(grade.grade&&/제논식/.test(grade.label||''))add.append(el('p','hint',`급 = ${grade.note||'—'} → ${fmt(grade.grade)}급(제논식). 힘·덱·럭 합 + 공격력 1=6 + 올스탯 1%=20으로 잡은 제논 커뮤니티 약식이며, 다른 직업 급과 견주려면 2로 나눕니다(약 ${fmt(Math.floor(grade.grade/2))}급).`));
     else if(grade.grade)add.append(el('p','hint',`급 = ${grade.note||'—'} → 주스탯 ${fmt(grade.grade)} 상당. 올스탯 1%=주스탯 10, 공/마 1=주스탯 4로 잡은 커뮤니티 약식 기준입니다.`));
     box.append(add);}
   [['잠재능력',item.potential_grade,item.potential],['에디셔널 잠재능력',item.additional_grade,item.additional_potential]].filter(([,grade,lines])=>grade||lines?.length).forEach(([label,grade,lines])=>{const section=el('div','potential '+gradeClass(grade));section.append(el('h4','',label+(grade?' · '+grade:'')));if(lines?.length)lines.forEach(line=>section.append(el('p','',line)));else section.append(el('p','hint','제공된 옵션 없음'));box.append(section);});

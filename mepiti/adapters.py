@@ -143,6 +143,7 @@ def add_option_grade(item, slot, main_stat):
     """추가옵션 등급.
 
     방어구·장신구는 커뮤니티 표기대로 `주스탯 + 올스탯% x 10 + 공/마 x 4`를 등급('급')으로 쓴다.
+    제논(main_stat='xenon')은 `힘+덱+럭 + 공 x 6 + 올스탯% x 20`(커뮤니티 제논식, 다른 직업과 견줄 때는 ÷2).
     무기는 공/마 추옵 단계를 n추로 부르고, 보공·데미지는 합쳐 보뎀으로 따로 표시한다.
     모두 커뮤니티 약식 기준이며 게임이 제공하는 등급이 아니다.
     """
@@ -171,6 +172,18 @@ def add_option_grade(item, slot, main_stat):
             parts.append(f'올 {all_stat}%')
         result['note'] = ' · '.join(parts)
         result['label'] = ' · '.join(filter(None, [result['tier'] or '등급 외', result['note']]))
+    elif main_stat == 'xenon':
+        # 제논 커뮤니티 약식(인벤 해적 게시판 2024-01-25): 힘+덱+럭 + 공×6 + 올스탯%×20. 다른 직업 급과 견주려면 ÷2.
+        trio = num(add, 'str') + num(add, 'dex') + num(add, 'luk')
+        result['stat'] = trio
+        result['grade'] = trio + power * 6 + all_stat * 20
+        pieces = [f'힘·덱·럭 {trio}'] if trio else []
+        if all_stat:
+            pieces.append(f'올스탯 {all_stat}%')
+        if power:
+            pieces.append(f'{power_name} {power}')
+        result['note'] = ' + '.join(pieces)
+        result['label'] = f"{result['grade']}급(제논식 · 일반 직업 기준 약 {result['grade'] // 2}급)" if result['grade'] else ''
     else:
         result['grade'] = stat + all_stat * 10 + power * 4
         pieces = []
@@ -382,8 +395,9 @@ class Nexon:
             data['equipment'] = []
             data['equipment_presets'] = {}
             data['equipment_status'] = 'unavailable'
-            main_stat = main_stat_key(data['stats'])
-            data['main_stat'] = main_stat.upper()
+            # 제논은 STR·DEX·LUK을 모두 주스탯으로 쓰고 추옵 급 계산식이 다르다(add_option_grade의 'xenon').
+            main_stat = 'xenon' if data.get('job') == '제논' else main_stat_key(data['stats'])
+            data['main_stat'] = 'STR·DEX·LUK' if main_stat == 'xenon' else main_stat.upper()
             try:
                 equipped = self.get('character/item-equipment', {'ocid':ocid})
                 if not isinstance(equipped,dict) or not isinstance(equipped.get('item_equipment'),list):
