@@ -7,7 +7,7 @@
 ; 실행 중이어야 하고, 대용량 진행률은 앱 화면이 더 잘 보여 주기 때문이다.
 ; 모델은 나중에 앱의 설정에서 언제든 바꿀 수 있다.
 
-#define AppVersion "0.4.4"
+#define AppVersion "0.4.5"
 
 [Setup]
 AppId=Mepiti.Local.Alpha
