@@ -167,7 +167,10 @@ def build(raw, tables=None):
         if set_name not in ledger.sets and full:
             ledger.sets[set_name] = {'count': 0, 'full': full, 'verified': False, 'lucky': False}
     ledger.items = equipment.get('item_equipment') or []
+    ledger.current_items = ledger.items
+    ledger.base_pairs, ledger.preset, ledger.preset_scores = [], equipment.get('preset_no'), {}
     verify_sets(ledger, ledger.items)
+    ledger.equipped = equipment
     for y in raw['character/symbol-equipment'].get('symbol') or []:
         for s in STATS:
             ledger.add(s, '심볼', y.get('symbol_name') or '', num(y.get('symbol_' + s.lower())))
@@ -219,6 +222,7 @@ def build(raw, tables=None):
         ledger.add(s, 'AP', 'AP 배분', ap)
         if ledger.anima:
             ledger.add(s, '아니마·메이플 용사', f'AP 투자 {ledger.anima}%', math.floor(ap * ledger.anima / 100))
+    choose_preset(ledger)
     return ledger
 
 
@@ -489,7 +493,16 @@ def swap(ledger, old_item, new_item, classify=None, defense=BOSS_DEFENSE):
 
 
 def swap_many(ledger, pairs, classify=None, defense=BOSS_DEFENSE):
-    """여러 부위를 함께 교체 → 스탯공격력·보스 기준 변화율 범위. 세트 효과는 모든 교체를 합쳐 한 번에 계산한다."""
+    """여러 부위를 함께 교체 → 스탯공격력·보스 기준 변화율 범위. 세트 효과는 모든 교체를 합쳐 한 번에 계산한다.
+
+    전투력이 가장 높은 프리셋(choose_preset)이 지금 적용 중인 프리셋과 다르면, 그 프리셋으로 바꾼 상태를 기준으로 계산한다."""
+    base = getattr(ledger, 'base_pairs', None)
+    if base:
+        return swap_from_preset(ledger, pairs, classify, defense)
+    return swap_raw(ledger, pairs, classify, defense)
+
+
+def swap_raw(ledger, pairs, classify=None, defense=BOSS_DEFENSE):
     report, models = calibrate(ledger, classify)
     sets = set_change_many(ledger, pairs)
     delta = items_delta(ledger.level, pairs, sets)
@@ -611,3 +624,113 @@ def unknown_sets(items, known):
         if any(name.startswith(m) for v in SET_MEMBERS.values() for m in v) and not set_of(name, names):
             return True
     return False
+
+
+# 프리셋 — 넥슨 장비 응답의 item_equipment는 '마지막에 적용 중이던 프리셋'이라 사냥(드롭·메획) 세팅일 수 있다.
+# 비교·상담은 전투력이 가장 높은 프리셋(보스 세팅)을 기준으로 한다(2026-10-02 사용자: "대체로 투력 기준으로 보면 돼").
+HUNT_WORDS = ('아이템 드롭률', '메소 획득량')
+
+
+def hunting_lines(items):
+    """드롭률·메소 획득량 잠재 줄 수(사냥 세팅일수록 많다). API 원본·변환된 장비 모두 받는다."""
+    count = 0
+    for i in items or []:
+        lines = list(potential_lines(i)) + list(i.get('potential') or []) + list(i.get('additional_potential') or [])
+        count += sum(1 for line in lines if any(w in str(line) for w in HUNT_WORDS))
+    return count
+
+
+def slot_key(item):
+    return (item or {}).get('item_equipment_slot') or (item or {}).get('slot')
+
+
+def preset_pairs(current, preset):
+    """지금 장비 → 프리셋 장비로 바꾸는 (옛, 새) 목록. 같은 장비인 부위는 뺀다."""
+    now = {slot_key(i): i for i in current or []}
+    then = {slot_key(i): i for i in preset or []}
+    pairs = []
+    for slot in set(now) | set(then):
+        a, b = now.get(slot), then.get(slot)
+        if (a or {}).get('item_name') == (b or {}).get('item_name') and (a or {}).get('starforce') == (b or {}).get('starforce') \
+                and list(potential_lines(a or {})) == list(potential_lines(b or {})):
+            continue
+        pairs.append((a, b))
+    return pairs
+
+
+def choose_preset(ledger):
+    """프리셋 1~3 중 전투력(보스 기준 추정)이 가장 높은 것을 기준 장비로 삼는다. 거의 같으면 드롭·메획 줄이 적은 쪽."""
+    equipped = getattr(ledger, 'equipped', None) or {}
+    current = ledger.current_items
+    scores = {}
+    for no in (1, 2, 3):
+        rows = equipped.get(f'item_equipment_preset_{no}') or []
+        if not rows:
+            continue
+        pairs = preset_pairs(current, rows)
+        if not pairs:
+            scores[no] = (0.0, hunting_lines(rows), rows, [])
+            continue
+        try:
+            result = swap_raw(ledger, pairs)
+            mid = sum(result['boss_range']) / 2
+        except Exception:
+            continue
+        scores[no] = (mid, hunting_lines(rows), rows, pairs)
+    if not scores:
+        return
+    best = max(scores.values(), key=lambda s: s[0])[0]
+    near = [no for no, s in scores.items() if s[0] >= best - 0.5]          # 0.5% 안이면 같은 투력으로 본다
+    no = min(near, key=lambda n: (scores[n][1], n != ledger.preset))
+    ledger.preset_scores = {n: round(s[0], 2) for n, s in scores.items()}
+    ledger.preset = no
+    ledger.items = scores[no][2]
+    ledger.base_pairs = scores[no][3]
+
+
+def preset_view(ledger):
+    """기준 프리셋 장비로 센 세트 수(교체 설명에 쓰는 세트 변화 표시용)."""
+    import copy
+    view = copy.copy(ledger)
+    view.sets = {k: dict(v) for k, v in ledger.sets.items()}
+    names = list(view.sets)
+    counts = {}
+    for i in ledger.items:
+        s = set_of(i.get('item_name'), names)
+        if s:
+            counts[s] = counts.get(s, 0) + 1
+    for name, info in view.sets.items():
+        info['pieces'] = counts.get(name, 0)
+    return view
+
+
+def swap_from_preset(ledger, pairs, classify=None, defense=BOSS_DEFENSE):
+    """기준 프리셋(지금 적용 중인 것과 다름) 상태에서 pairs를 바꿀 때의 변화율: (프리셋+교체) ÷ (프리셋) − 1."""
+    base = ledger.base_pairs
+    new_by_slot = {slot_key(o) or slot_key(n): n for o, n in pairs}
+    combined, used = [], set()
+    for cur, preset_item in base:
+        s = slot_key(cur) or slot_key(preset_item)
+        if s in new_by_slot:
+            combined.append((cur, new_by_slot[s]))
+            used.add(s)
+        else:
+            combined.append((cur, preset_item))
+    for o, n in pairs:
+        s = slot_key(o) or slot_key(n)
+        if s not in used:
+            combined.append((o, n))
+    full = swap_raw(ledger, combined, classify, defense)
+    basis = swap_raw(ledger, base, classify, defense)
+    rel = lambda a, b: round(((1 + (a or 0) / 100) / (1 + (b or 0) / 100) - 1) * 100, 3)
+    ways = {}
+    for w in ('flat', 'pct'):
+        f, b = full['by_assumption'][w], basis['by_assumption'][w]
+        ways[w] = {'change_pct': rel(f['change_pct'], b['change_pct']),
+                   'boss_change_pct': rel(f['boss_change_pct'], b['boss_change_pct']),
+                   'stats': {k: f['stats'][k] - b['stats'][k] for k in f['stats']}}
+    notes = set_change_many(preset_view(ledger), pairs)
+    return {**full, 'by_assumption': ways,
+            'range': sorted(x['change_pct'] for x in ways.values()),
+            'boss_range': sorted(x['boss_change_pct'] for x in ways.values()),
+            'sets': notes['notes'], 'unknown': notes['unknown'], 'preset': ledger.preset}

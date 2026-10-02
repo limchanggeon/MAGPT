@@ -145,6 +145,10 @@ def answer(store, model, data, nexon=None, peer_runner=None):
     plan = None
     if not structured and not picked and not skip_prices and not saved_prices:
         plan = make_plan(store, model, question, history, topic)
+    elif pending and isinstance(last.get('plan'), dict) and last['plan'].get('intents'):
+        # 조건·노작값을 답하고 원래 질문을 이어 갈 때는 그때 세운 계획(여러 장비 등)을 그대로 쓴다.
+        plan = {**{k: None for k in planner.FIELDS}, 'options': [], 'targets': [], 'combine': False, 'money': False, **last['plan'],
+                'rewritten': pending, 'clarify': None}
     if plan and plan.get('clarify') and len(plan.get('options') or []) >= 2 and not asked_before:
         ask(result, plan['clarify'], [{'label': o, 'reply': o} for o in plan['options']], question)
         store.message(sid, 'user', {'content': said})
@@ -152,7 +156,7 @@ def answer(store, model, data, nexon=None, peer_runner=None):
         return result
     if plan:
         question = planner.tool_question(plan, question)
-        result['plan'] = {k: plan[k] for k in ('intents', 'slot', 'target_star', 'target_cp', 'rewritten')}
+        result['plan'] = {k: plan.get(k) for k in ('intents', 'slot', 'target_star', 'target_cp', 'rewritten', 'targets', 'item')}
     want = set(plan['intents']) if plan else set()
     if topic and not SLOT_WORDS.search(question) and topic['name'] not in question:
         question = f"{topic['slot']} {question}"
@@ -167,7 +171,8 @@ def answer(store, model, data, nexon=None, peer_runner=None):
                                    and SLOT_WORDS.search(question)))
         events_route = not topic and bool(nexon) and bool(EVENT_INTENT.search(question))
         union_route = not topic and bool(UNION_INTENT.search(question))
-    flags = {'consult': 'consult' in want, 'starforce': 'starforce' in want, 'slot': plan.get('slot')} if plan else None
+    flags = {'consult': 'consult' in want, 'starforce': 'starforce' in want, 'slot': plan.get('slot'),
+             'targets': plan.get('targets') or []} if plan else None
     if terms and any(t['term'] in ('환산','대장장이') for t in terms) and not plan:
         result.update(status='clarify',content='\n\n'.join(t['meaning']+'\n'+t['question'] for t in terms))
         result['conditions'] = ['용어 해석: 요구사항 v0.1의 검토 용례. 현재 시세·수치·거래 조건의 근거는 아닙니다.']
@@ -354,7 +359,14 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
                      '다른 유저 경향을 지어내지 말 것. 목표 전투력을 물어보고, 캐릭터 화면에서 모으기를 시작하라고 안내할 것.')
             result['topic_notes'].append("목표 전투력대 유저 장비 통계가 아직 없어요. 캐릭터 화면의 '목표 전투력대 유저'에 목표 전투력을 적고 모으기를 시작하세요.")
     # 강화 기대값은 앱이 직접 계산해 사실로 넘긴다. 모델이 확률을 지어내지 못하게 하려는 것이다.
-    if wants_starforce:
+    targets = (flags or {}).get('targets') or []
+    if wants_starforce and targets and (len(targets) > 1 or any(not_worn(profile, x) for x in targets)):
+        # 여러 장비, 또는 지금 끼지 않은 장비('에테 상의 18성')의 기대값: 장비마다 계산해 합계까지.
+        computed = multi_starforce_facts(store, profile, targets, question, result)
+        if computed is None:
+            return
+        text += computed
+    elif wants_starforce:
         computed = starforce_facts(store, profile, question, result, item)
         if computed is None:
             return
@@ -859,3 +871,126 @@ def asked_slot_items(profile, question, slot=None):
             if (i['slot'] == w or re.sub(r'\d+$', '', i['slot']) == w) and i not in picked:
                 picked.append(i)
     return picked[:4]
+
+
+# 지금 끼지 않은 장비의 장비 레벨(스타포스 최대 성·비용에 필요). 방어구 세트는 세트마다 레벨이 같다.
+SET_LEVELS = (('에테르넬', 250), ('아케인셰이드', 200), ('앱솔랩스', 160), ('루타비스', 150), ('하이네스', 150), ('이글아이', 150), ('트릭스터', 150))
+SLOT_ALIAS = {'견장': '어깨장식', '어깨': '어깨장식', '얼장': '얼굴장식', '눈장': '눈장식', '귀걸이': '귀고리', '목걸이': '펜던트', '보조': '보조무기'}
+
+
+def all_items(profile):
+    """지금 장비 + 프리셋 1~3의 장비(이름으로 레벨·성을 찾을 때)."""
+    out = list(profile.get('equipment') or [])
+    for rows in (profile.get('equipment_presets') or {}).values():
+        out += rows or []
+    return out
+
+
+def worn_in(profile, slot):
+    slot = SLOT_ALIAS.get(slot, slot)
+    return next((i for i in profile.get('equipment') or [] if i.get('slot') == slot), None)
+
+
+def not_worn(profile, target):
+    """질문한 장비가 그 부위에 지금 낀 장비와 다른가(세트 이름이 들어 있지 않으면 다르다고 본다)."""
+    name = target.get('item')
+    if not name:
+        return False
+    worn = worn_in(profile, target.get('slot') or '')
+    if not worn:
+        return True
+    key = re.split(r'\s+', name)[0]
+    return not (worn.get('name') or '').startswith(key[:2]) and key not in (worn.get('name') or '')
+
+
+def target_level(profile, name):
+    """장비 이름으로 장비 레벨: 내 장비·프리셋에 같은 이름 → 방어구 세트 표 → 모르면 None."""
+    for i in all_items(profile):
+        if name and i.get('name') and (i['name'] == name or name in i['name']) and i.get('equip_level'):
+            return i['equip_level']
+    for key, level in SET_LEVELS:
+        if name and (key in name or name.startswith(key[:2])):
+            return level
+    return None
+
+
+def multi_starforce_facts(store, profile, targets, question, result):
+    """장비 여러 개(또는 끼지 않은 장비)의 강화 기대값. 모르는 레벨·노작값·조건은 한 번에 되묻는다."""
+    rows, unknown_price, unknown_level = [], [], []
+    # '에테 상하의·신발·견장·망토'처럼 한 세트로 물었는데 일부 장비 이름이 빠졌으면 같은 세트로 채운다.
+    sets = {re.split(r'\s+', x['item'])[0] for x in targets if x.get('item')}
+    if len(sets) == 1:
+        prefix = sets.pop()
+        targets = [x if x.get('item') or not x.get('slot') else {**x, 'item': f"{prefix} {SLOT_ALIAS.get(x['slot'], x['slot'])}"}
+                   for x in targets]
+    for x in targets:
+        slot = SLOT_ALIAS.get(x.get('slot') or '', x.get('slot') or '')
+        worn = worn_in(profile, slot)
+        if x.get('item') and not_worn(profile, x):
+            said_level = re.search(r'(\d{3})\s*(?:레벨|제)', question)          # 재질문에 '250레벨'로 답한 경우
+            name, level, start, new = (x['item'], target_level(profile, x['item']) or (int(said_level.group(1)) if said_level else None),
+                                       x.get('from_star') or 0, True)
+        elif worn:
+            name, level, start, new = worn['name'], worn.get('equip_level'), x.get('from_star') if x.get('from_star') is not None else worn.get('starforce') or 0, False
+            if not context.starforce_possible(worn):
+                rows.append({'slot': slot, 'name': name, 'skip': '스타포스를 올릴 수 없는 장비'})
+                continue
+        else:
+            rows.append({'slot': slot or '?', 'name': x.get('item') or '?', 'skip': '어느 장비인지 모름'})
+            continue
+        if not level:
+            unknown_level.append(name)
+            continue
+        if x['to_star'] <= start:
+            rows.append({'slot': slot, 'name': name, 'skip': f'이미 {start}성'})
+            continue
+        if x['to_star'] > max_star({'equip_level': level}):
+            rows.append({'slot': slot, 'name': name, 'skip': f"레벨 {level} 장비는 {max_star({'equip_level': level})}성까지"})
+            continue
+        price = prices.resolve(store, name, None)
+        if not price['known']:
+            unknown_price.append(price)
+        rows.append({'slot': slot, 'name': name, 'level': level, 'from': start, 'to': x['to_star'], 'new': new, 'price': price})
+    if unknown_level:
+        ask(result, f"{', '.join(unknown_level)}의 장비 레벨을 몰라요. 몇 레벨 장비인가요?",
+            [{'label': f'{lv}제', 'reply': f"{unknown_level[0]} {lv}레벨"} for lv in (140, 150, 160, 200, 250)], question,
+            note='방어구 세트(에테르넬·아케인셰이드·앱솔랩스·루타비스)는 이름만으로 알아요.')
+        return None
+    if not conditions.answered(store):
+        result.update(status='ask_conditions', content=conditions.ask_text(),
+                      form=conditions.form(conditions.load(store)), pending=question)
+        return None
+    if unknown_price:
+        # 스페어(파괴 시 같은 장비 하나 더) 값이 없으면 기대 비용이 성립하지 않는다. 모르는 것만 한 번에 묻는다.
+        result.update(status='ask_price', content=prices.ask_text(unknown_price) + ' (파괴되면 같은 장비를 하나 더 마련하는 값)',
+                      form=prices.form(unknown_price), pending=question)
+        result['asked'] = [{'item': p['item']} for p in unknown_price]
+        return None
+    picked = conditions.load(store)
+    total, lines, facts = 0, [], []
+    for r in rows:
+        if r.get('skip'):
+            lines.append(f"- **{r['slot']} {r['name']}**: 계산 안 함({r['skip']})")
+            facts.append(f"- {r['slot']} {r['name']}: 계산 안 함({r['skip']})")
+            continue
+        try:
+            calc = starforce.expected({'level': r['level'], 'current_star': r['from'], 'target_star': r['to'],
+                                       'spare_cost': r['price']['price'], **conditions.to_arguments(picked, r['from'], r['to'])})
+        except AppError as e:
+            lines.append(f"- **{r['slot']} {r['name']}**: 계산 못 함({e})")
+            continue
+        total += calc['expected_cost']
+        tag = ' (새 장비 0성부터)' if r['new'] and r['from'] == 0 else ''
+        lines.append(f"- **{r['slot']} {r['name']}**{tag} {r['from']}→{r['to']}성: **{calc['expected_cost']:,} 메소** "
+                     f"(시도 {calc['expected_attempts']}회, 파괴 {calc['expected_destroys']}회)")
+        facts.append(f"- {r['slot']} {r['name']} (레벨 {r['level']}{', 지금 끼지 않은 새 장비' if r['new'] else ''}) {r['from']}→{r['to']}성: "
+                     f"{calc['expected_cost']:,} 메소, 시도 {calc['expected_attempts']}회, 파괴 {calc['expected_destroys']}회")
+    swapped = [r for r in rows if r.get('new') and worn_in(profile, r['slot'])]
+    note = ''
+    if swapped:
+        note = ('\n\n지금 끼고 있는 ' + ', '.join(f"{worn_in(profile, r['slot'])['name']}" for r in swapped)
+                + '가 아니라, 물어보신 장비를 새로(0성부터) 맞추는 것으로 계산했어요. 이미 갖고 있다면 몇 성인지 알려 주세요.')
+    result['starforce_text'] = ('\n'.join(lines) + (f"\n\n**합계: {total:,} 메소**" if total else '')
+                                + f"\n- 적용 조건: {conditions.summary(picked)}" + note)
+    return ('\n\n[강화 기대값 — 여러 장비] 앱이 이미 계산해 사용자에게 그대로 보여 준 값이다. 다시 나열하거나 더하지 말 것.\n'
+            + '\n'.join(facts) + (f"\n- 합계: {total:,} 메소" if total else '') + f"\n- 적용 조건: {conditions.summary(picked)}")

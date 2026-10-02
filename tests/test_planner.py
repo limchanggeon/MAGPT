@@ -185,3 +185,51 @@ class AutoCharacterTests(unittest.TestCase):
         profile = FakeNexonProfile().character('x', True)
         self.assertEqual([i['slot'] for i in chat.asked_slot_items(profile, '반지들은?')], ['반지1', '반지2', '반지3'])
         self.assertEqual([i['slot'] for i in chat.asked_slot_items(profile, '이거 어때?', '장갑')], ['장갑'])
+
+
+class MultiStarforceTests(unittest.TestCase):
+    """여러 장비·지금 끼지 않은 장비의 기대값(에테 상하의 18성 등)."""
+    def setUp(self):
+        from mepiti import conditions
+        self.store = Store(tempfile.mkdtemp())
+        self.store.set_setting('model', 'gemini')
+        conditions.save(self.store, conditions.DEFAULTS)
+        self.store.character_save({'name': '나', 'budget': 0, 'goal': '', 'main': True})
+
+    def nexon(self):
+        class N(FakeNexonProfile):
+            def character(self, name, details=False):
+                p = super().character(name, details)
+                p['equipment'] += [{'slot': '상의', 'name': '도전자의 상의', 'starforce': 22, 'equip_level': 0},
+                                   {'slot': '어깨장식', 'name': '도전자의 어깨장식', 'starforce': 22, 'equip_level': 0}]
+                return p
+        return N()
+
+    def ask(self, targets, message='에테 상의랑 견장 18성까지 얼마?', answer=None, session=None):
+        model = FakePlanModel(plan(intents=['starforce'], rewritten=message, targets=targets))
+        data = {'message': message, **({'session_id': session} if session else {}), **({'answer': answer} if answer else {})}
+        return chat.answer(self.store, model, data, self.nexon()), model
+
+    def test_not_worn_items_are_new_and_set_name_filled(self):
+        targets = [{'slot': '상의', 'item': '에테르넬 상의', 'from_star': None, 'to_star': 18},
+                   {'slot': '견장', 'item': None, 'from_star': None, 'to_star': 18}]
+        r, _ = self.ask(targets)
+        self.assertEqual(r['status'], 'ask_price')                       # 스페어 값을 한 번에 묻는다
+        self.assertEqual([f['item'] for f in r['form']['fields']], ['에테르넬 상의', '에테르넬 어깨장식'])
+        r2, model = self.ask(targets, '값', answer={'kind': 'price', 'values': {'에테르넬 상의': '10억', '에테르넬 어깨장식': '10억'}},
+                             session=r['session_id'])
+        self.assertEqual(r2['status'], 'analysis')
+        self.assertIn('합계', r2['content'])
+        self.assertIn('0→18성', r2['content'])
+        self.assertIn('도전자의 상의', r2['content'])                    # 지금 낀 장비가 아니라고 알린다
+
+    def test_unknown_level_is_asked(self):
+        r, _ = self.ask([{'slot': '펜던트', 'item': '처음 보는 펜던트', 'from_star': None, 'to_star': 18},
+                         {'slot': '모자', 'item': None, 'from_star': None, 'to_star': 22}])
+        self.assertEqual(r['status'], 'ask')
+        self.assertIn('장비 레벨', r['content'])
+
+    def test_planner_targets_parse(self):
+        p = planner.parse(json.dumps(plan(intents=['starforce'], targets=[{'slot': '상의', 'item': '에테르넬 상의', 'from_star': None, 'to_star': 18},
+                                                                          {'slot': '하의', 'item': None, 'from_star': None, 'to_star': None}])))
+        self.assertEqual(len(p['targets']), 1)                           # 목표 성이 없는 항목은 버린다

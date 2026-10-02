@@ -145,3 +145,33 @@ class SetAndBossTests(unittest.TestCase):
         result = sc.swap(ledger, items[5], new)
         self.assertEqual(result['range'], [0.0, 0.0])
         self.assertGreater(result['boss_range'][0], 3)
+
+
+class PresetTests(unittest.TestCase):
+    """전투력(보스 기준 추정)이 가장 높은 프리셋을 비교·상담의 기준으로 고른다."""
+    def ledger(self):
+        hunt = [item('반지1', '사냥 반지', 0, 0, 0, 0, ('아이템 드롭률 +20%', '메소 획득량 +20%')),
+                item('모자', '모자', 300, 100, 50)]
+        boss = [item('반지1', '보스 반지', 200, 0, 30, 0, ('STR +12%',)), item('모자', '모자', 300, 100, 50)]
+        final = {'STR': 30000, 'DEX': 4000, '공격력': 4000, 'AP 배분 STR': 1000, '데미지': 50, '최종 데미지': 20,
+                 '보스 몬스터 데미지': 200, '방어율 무시': 90, '크리티컬 데미지': 70}
+        equipped = {'item_equipment': hunt, 'preset_no': 1,
+                    'item_equipment_preset_1': hunt, 'item_equipment_preset_2': boss, 'item_equipment_preset_3': hunt}
+        return sc.build(raw(final, hunt, **{'character/item-equipment': equipped})), hunt, boss
+
+    def test_picks_strongest_preset(self):
+        ledger, hunt, boss = self.ledger()
+        self.assertEqual(ledger.preset, 2)
+        self.assertEqual([i['item_name'] for i in ledger.items], ['보스 반지', '모자'])
+        self.assertGreater(ledger.preset_scores[2], ledger.preset_scores[1])
+
+    def test_swaps_are_relative_to_chosen_preset(self):
+        ledger, hunt, boss = self.ledger()
+        same = sc.swap(ledger, boss[1], boss[1])                          # 기준 프리셋에서 아무것도 안 바꾸면 0
+        self.assertEqual(same['range'], [0.0, 0.0])
+        better = copy.deepcopy(boss[1]); better['item_total_option']['str'] = '500'
+        self.assertGreater(sc.swap(ledger, boss[1], better)['boss_range'][0], 0)
+
+    def test_hunting_lines(self):
+        self.assertEqual(sc.hunting_lines([item('반지1', 'x', pots=('아이템 드롭률 +20%', '메소 획득량 +20%', 'STR +3%'))]), 2)
+        self.assertEqual(sc.hunting_lines([{'potential': ['아이템 드롭률 +20%'], 'additional_potential': []}]), 1)

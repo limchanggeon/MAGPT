@@ -227,6 +227,8 @@ class Peers:
         if not ocid:
             return None, None
         final = self.get('character/stat', {'ocid': ocid}).get('final_stat') or []
+        self.finals = getattr(self, 'finals', {})
+        self.finals[ocid] = final                 # 장비를 받을 때 투력 기준 프리셋을 고르는 데 쓴다(추가 호출 없음)
         cp = next((x.get('stat_value') for x in final if x.get('stat_name') == '전투력'), None)
         try:
             cp = float(str(cp).replace(',', '')) if cp is not None else None
@@ -331,7 +333,8 @@ class Peers:
             return True
         from .adapters import Nexon
         equipped = self.get('character/item-equipment', {'ocid': ocid})
-        originals = [item for item in (equipped.get('item_equipment') or []) if isinstance(item, dict) and item.get('item_name')]
+        originals = [item for item in best_preset(equipped, getattr(self, 'finals', {}).pop(ocid, None))
+                     if isinstance(item, dict) and item.get('item_name')]
         if statcalc.unknown_sets(originals, self.store.setting(statcalc.SET_TABLES) or {}):
             statcalc.learn_sets(self.store, self.get('character/set-effect', {'ocid': ocid}))
         rows = [Nexon.equipment_item(item, None) for item in originals]
@@ -522,7 +525,8 @@ def compare(store, profile, state=None, ledger=None):
     if not result['ready']:
         return result
     stats = slot_stats(people)
-    mine = summarize((profile or {}).get('equipment'))
+    rows, result['preset'], result['applied_preset'] = profile_rows(profile, ledger)
+    mine = summarize(rows)
     for slot, s in stats.items():
         if s['count'] < max(3, len(people) // 3):
             continue
@@ -592,7 +596,10 @@ def facts_text(compared):
     who = (f"같은 직업({t['job']}) {compared.get('people_exact', compared['people'])}명"
            + (f" + 같은 방어구·주스탯 계열({t.get('family')}) {compared['people_family']}명(무기·보조무기·엠블렘은 같은 직업만)"
               if compared.get('people_family') else ''))
-    lines = [f"[목표 전투력대 유저 장비 통계] 전투력 {t['cp'] / 1e8:.2f}억 ±{round(CP_BAND * 100)}%인 {who}, 모두 {compared['people']}명의 "
+    preset_note = (f"[기준 프리셋] 내 장비와 비교 유저 장비는 전투력이 가장 높은(보스) 프리셋 기준이다. 내 기준 프리셋 {compared.get('preset')}번"
+                   + (f"(지금 게임에서 적용 중인 것은 {compared.get('applied_preset')}번 — 사냥 세팅으로 보임)" if compared.get('preset') and compared.get('applied_preset')
+                      and str(compared['preset']) != str(compared['applied_preset']) else '') + '.')
+    lines = [preset_note, f"[목표 전투력대 유저 장비 통계] 전투력 {t['cp'] / 1e8:.2f}억 ±{round(CP_BAND * 100)}%인 {who}, 모두 {compared['people']}명의 "
              f"장비를 넥슨 Open API로 모은 통계다(최근 {KEEP_DAYS}일 안에 조회). 이 밖의 유저 경향은 모른다."]
     for s in compared['slots']:
         parts = [', '.join(f"{i['name']} {i['share']}%" for i in s['items'])]
@@ -635,3 +642,36 @@ def facts_text(compared):
                      '상담하듯 설명한다. 내 장비가 더 좋은 부위가 있으면 짧게 짚는다. 비용·확률·시세는 위 사실에 없으면 말하지 않는다. '
                      '레벨·심볼·유니온·스킬이 달라서, 같은 장비를 껴도 같은 성능이 된다고 단정하지 않는다.')
     return '\n'.join(lines)
+
+
+def best_preset(equipped, final=None):
+    """비교 유저의 기준 장비: 전투력(보스 기준 추정)이 가장 높은 프리셋. 스탯을 모르면 드롭·메획 줄이 가장 적은 프리셋."""
+    from . import statcalc
+    current = equipped.get('item_equipment') or []
+    if final:
+        empty = {p: {} for p in statcalc.PATHS}
+        try:
+            ledger = statcalc.build({**empty, 'character/stat': {'final_stat': final}, 'character/item-equipment': equipped, 'skills': []})
+            return ledger.items or current
+        except Exception:
+            pass
+    presets = {n: equipped.get(f'item_equipment_preset_{n}') or [] for n in (1, 2, 3)}
+    presets = {n: rows for n, rows in presets.items() if rows}
+    if not presets:
+        return current
+    applied = equipped.get('preset_no')
+    no = min(presets, key=lambda n: (statcalc.hunting_lines(presets[n]), n != applied))
+    return presets[no]
+
+
+def profile_rows(profile, ledger=None):
+    """내 장비 중 비교·상담에 쓸 프리셋(화면용으로 바꾼 장비). (장비, 기준 프리셋 번호, 적용 중 번호)."""
+    from . import statcalc
+    profile = profile or {}
+    applied = profile.get('equipment_preset')
+    presets = profile.get('equipment_presets') or {}
+    no = getattr(ledger, 'preset', None) if ledger is not None else None
+    if no is None and presets:
+        no = int(min(presets, key=lambda n: (statcalc.hunting_lines(presets[n]), str(n) != str(applied))))
+    rows = presets.get(str(no)) if no is not None else None
+    return (rows or profile.get('equipment') or []), no or applied, applied
