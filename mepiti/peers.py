@@ -59,6 +59,7 @@ PROBE_COUNT = 6               # 층-전투력 관계를 어림할 표본 수
 CP_BAND = 0.15                # 목표 전투력 ±15%
 PROBES = 7                    # 목표 전투력 쪽 찾기에서 볼 랭킹 쪽 수(쪽마다 2명 확인)
 DAILY_SETTING = 'peer_daily_calls'
+PAUSE_MINUTES = 15            # 넥슨 요청 한도 초과(429) 뒤 모으기를 쉬는 시간
 TARGET = 'peer_target'        # {job, level, world_type, rank, at} — 마지막으로 고른 기준
 QUEUE = 'peer_queue'          # 아직 장비를 보지 않은 후보 [{name, level}]
 CALLS = 'peer_calls'          # {day, count, blocked}
@@ -198,6 +199,8 @@ class Peers:
 
     def _get(self, path, query):
         if self.left() <= 0:
+            if paused(self.store):
+                raise AppError('넥슨 요청 한도에 걸려 모으기를 잠시(15분) 쉬어요. 화면 조회는 그대로 됩니다.', 429)
             raise AppError('오늘 목표 전투력대 유저 조회 몫을 다 썼어요. 내일 이어서 모읍니다.', 429)
         wait = GAP_SECONDS - (time.monotonic() - self.last_call)
         if wait > 0:
@@ -210,7 +213,8 @@ class Peers:
             return self.nexon().get(path, query)
         except AppError as e:
             if getattr(e, 'upstream', None) == 429:
-                state['blocked'] = True
+                # 앱이 이미 몇 번 쉬었다가 다시 불렀는데도 한도 초과면 모으기만 15분 쉰다(화면 조회 몫을 남긴다).
+                state['pause_until'] = (datetime.now(KST) + timedelta(minutes=PAUSE_MINUTES)).isoformat(timespec='seconds')
                 self.store.set_setting(CALLS, state)
             raise
 
@@ -407,9 +411,14 @@ def daily_calls(store):
         return DAILY_CALLS
 
 
+def paused(store):
+    until = calls(store).get('pause_until')
+    return bool(until) and until > datetime.now(KST).isoformat(timespec='seconds')
+
+
 def left(store):
     state = calls(store)
-    return 0 if state.get('blocked') else max(0, daily_calls(store) - state['count'])
+    return 0 if paused(store) else max(0, daily_calls(store) - state['count'])
 
 
 def since():

@@ -7,6 +7,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -246,6 +248,30 @@ class FixedKey:
     def get(self): return self.key
 
 
+class Gate:
+    """호출 사이 최소 간격(여러 스레드 공용). pause는 한도 초과 뒤 모두를 잠시 멈춘다."""
+    def __init__(self, interval, clock=time.monotonic, sleep=time.sleep):
+        self.interval, self.clock, self.sleep = interval, clock, sleep
+        self.lock = threading.Lock()
+        self.next_at = 0.0
+
+    def wait(self):
+        with self.lock:
+            now = self.clock()
+            at = max(now, self.next_at)
+            self.next_at = at + self.interval
+        if at > now:
+            self.sleep(at - now)
+
+    def pause(self, seconds):
+        with self.lock:
+            self.next_at = max(self.next_at, self.clock() + seconds)
+        self.wait()
+
+
+NEXON_GATE = Gate(0.25)      # 앱 전체에서 넥슨 호출은 초당 최대 4회
+
+
 class Nexon:
     BASE = 'https://open.api.nexon.com/maplestory/v1/'
     def __init__(self,vault):
@@ -261,7 +287,17 @@ class Nexon:
         key = self.vault.get()
         if not key:
             raise AppError('설정에서 본인의 넥슨 API 키를 등록해 주세요.')
-        return request_json(self.BASE + path + '?' + urlencode(query), headers={'x-nxopen-api-key':key})
+        url = self.BASE + path + '?' + urlencode(query)
+        # 넥슨 개발 키는 초당 호출 수에 한도가 있다. 화면 조회·비교 유저 모으기·스탯 출처 받기가 겹치면 넘기 쉬워,
+        # 앱 전체의 넥슨 호출을 한 줄로 세워 간격을 두고, 한도 초과(429)면 잠시 쉬었다가 다시 부른다(2026-10-02 사용자 보고).
+        for attempt in range(4):
+            NEXON_GATE.wait()
+            try:
+                return request_json(url, headers={'x-nxopen-api-key':key})
+            except AppError as e:
+                if getattr(e, 'upstream', None) != 429 or attempt == 3:
+                    raise
+                NEXON_GATE.pause(1.0 + attempt)
 
     def characters(self):
         result = self.get('character/list', {})

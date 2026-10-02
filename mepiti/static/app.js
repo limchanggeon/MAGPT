@@ -11,6 +11,10 @@ if(inAppWindow){
   document.addEventListener('dragstart',e=>{if(e.target.closest('img,a'))e.preventDefault();});
 }
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+// 글씨 크기(설정 → 화면). 화면 전체를 비율로 키운다. 이 컴퓨터(앱 저장소)에 남긴다.
+const FONT_SCALES=['0.9','1','1.12','1.25'];
+function applyFontScale(v){if(!FONT_SCALES.includes(v))v='1';document.documentElement.style.setProperty('--user-scale',v);return v;}
+let fontScale='1';try{fontScale=applyFontScale(localStorage.getItem('mepiti-font-scale')||'1');}catch{}
 let token = '', sessionId = null, busy = false, confirmedText = '', previewUrl = null, downloadTimer;
 let accountCatalog = null, accountLoading = false, catalogRequest=0, managedNames = new Set(), managedCharacters = [];
 const titles = {chat:'대화',characters:'캐릭터',calculator:'수익',goals:'목표',library:'기록',settings:'설정'};
@@ -998,3 +1002,5 @@ async function discoverCharacters(){
 }
 $('#discover-characters').onclick=discoverCharacters;
 $('#account-search').oninput=renderAccountCharacters;
+
+{const select=$('#font-scale');if(select){select.value=fontScale;select.onchange=()=>{const v=applyFontScale(select.value);try{localStorage.setItem('mepiti-font-scale',v);}catch{}toast('글씨 크기를 바꿨어요.');};}}
