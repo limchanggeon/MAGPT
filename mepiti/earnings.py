@@ -389,7 +389,7 @@ def overview(store, week=None, month=None, limit=200):
             'reboot_rate': REBOOT_RATE,
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],
-            'crystal_source': CRYSTAL_SOURCE,
+            'crystal_source': CRYSTAL_SOURCE, 'crystal_community_source': COMMUNITY_SOURCE,
             'crystal_alert': store.setting('crystal_price_alert') or None}
 
 
@@ -403,14 +403,20 @@ def difficulty_ko(value):
     return DIFFICULTY_KO.get(text.lower(), text)
 
 
+def crystal_row(name, difficulty):
+    """결정석 표의 한 줄. 이름이 똑같은 줄을 먼저('힐라'가 '진 힐라'로 잡히지 않게), 없으면 짧은 이름('세렌' → '선택받은 세렌')."""
+    key, level = _squash(name), _squash(difficulty_ko(difficulty))
+    if not key or not level:
+        return None
+    rows = [r for r in CRYSTALS if r[1] == level]
+    return (next((r for r in rows if _squash(r[0]) == key), None)
+            or next((r for r in rows if key in _squash(r[0]) or _squash(r[0]) in key), None))
+
+
 def table_name(name, difficulty):
     """스케줄러의 짧은 이름('세렌')을 결정석 표 이름('선택받은 세렌')으로. 표에 없으면 그대로."""
-    key, level = _squash(name), _squash(difficulty_ko(difficulty))
-    for boss, diff, _, _ in CRYSTALS:
-        full = _squash(boss)
-        if diff == level and (full == key or key in full or full in key):
-            return boss
-    return name
+    row = crystal_row(name, difficulty)
+    return row[0] if row else name
 
 
 def boss_label(boss):
@@ -448,7 +454,8 @@ def scheduled_bosses(store, nexon, names):
             official = crystal_for(store, state['character'], boss['name'], boss.get('difficulty'), world=state.get('world'))
             bosses.append({'key': key, 'character': state['character'], 'boss': label, 'cycle': boss.get('cycle'),
                            'recorded': key in recorded or legacy in recorded, 'price': official or remembered.get(label),
-                           'price_source': 'official' if official else ('remembered' if remembered.get(label) else None)})
+                           'price_source': ('community' if crystal_from_community(boss['name'], boss.get('difficulty')) else 'official') if official
+                           else ('remembered' if remembered.get(label) else None)})
     for c in characters:
         if not c.get('error'):
             c['recorded_count'] = weekly_boss_count(store, c['name'], week_start(today()))
@@ -507,6 +514,33 @@ CRYSTALS = (
     ('검은 마법사', '하드', 665_000_000, 465_000_000),
     ('검은 마법사', '익스트림', 8_740_000_000, 5_680_000_000),
 )
+# 공지 표에 없던 보스·난이도. 커뮤니티 정리표(정심심 블로그 '메이플스토리 보스 결정 가격 정리', 2026-09-17 수정, 본섭 패치 반영)에서 옮겼다(2026-10-03 사용자가 링크).
+# 그 표의 공지 46개 값은 위 표와 모두 같았다. 표 머리 'HARD'는 보스에 따라 하드·카오스(편의상 통일) — 게임 난이도 이름에 맞췄다. 변경 전 가격이 따로 없어 같은 값.
+COMMUNITY_SOURCE = {'name': '정심심 블로그 — 메이플스토리 보스 결정 가격 정리(2026-09-17 수정)', 'official': False,
+                    'url': 'https://matsu1207.tistory.com/757', 'recorded': '2026-10-03'}
+COMMUNITY_CRYSTALS = tuple((boss, diff, price, price) for boss, diff, price in (
+    ('자쿰', '이지', 114_000), ('자쿰', '노멀', 349_000),
+    ('매그너스', '이지', 411_000), ('매그너스', '노멀', 1_160_000),
+    ('힐라', '노멀', 455_000), ('힐라', '하드', 1_280_000),
+    ('카웅', '노멀', 712_000),
+    ('파풀라투스', '이지', 390_000), ('파풀라투스', '노멀', 1_200_000),
+    ('피에르', '노멀', 551_000), ('반반', '노멀', 551_000), ('블러디퀸', '노멀', 551_000), ('벨룸', '노멀', 551_000),
+    ('반 레온', '이지', 602_000), ('반 레온', '노멀', 830_000), ('반 레온', '하드', 1_070_000),
+    ('혼테일', '이지', 502_000), ('혼테일', '노멀', 576_000), ('혼테일', '카오스', 770_000),
+    ('아카이럼', '이지', 656_000), ('아카이럼', '노멀', 1_110_000),
+    ('핑크빈', '노멀', 799_000), ('핑크빈', '카오스', 1_320_000),
+    ('시그너스', '노멀', 1_360_000),
+    ('감시자 칼로스', '익스트림', 4_104_000_000),
+    ('카링', '익스트림', 5_387_000_000),
+    ('림보', '하드', 2_385_000_000),
+    ('발드릭스', '하드', 3_078_000_000),
+    ('최초의 대적자', '익스트림', 4_712_000_000),
+    ('찬란한 흉성', '하드', 2_678_000_000),
+    ('유피테르', '하드', 4_845_000_000),
+    ('벨로나', '하드', 2_950_000_000),
+))
+COMMUNITY_KEYS = {(boss, diff) for boss, diff, _, _ in COMMUNITY_CRYSTALS}
+CRYSTALS = CRYSTALS + COMMUNITY_CRYSTALS
 DELAYED = {'검은 마법사': '2026-10-01'}   # 이 날짜 전 기록에는 기존 가격을 쓴다.
 
 
@@ -551,16 +585,18 @@ def crystal_for(store, character, name, difficulty, day=None, world=None):
 
 def crystal_price(name, difficulty, day=None):
     """보스 이름·난이도의 결정석 판매가. 스케줄러의 짧은 이름('세렌')도 표의 이름('선택받은 세렌')과 맞춘다."""
-    key, level = _squash(name), _squash(difficulty_ko(difficulty))
-    if not key or not level:
+    row = crystal_row(name, difficulty)
+    if not row:
         return None
-    for boss, diff, old, new in CRYSTALS:
-        full = _squash(boss)
-        if diff == level and (full == key or key in full or full in key):
-            since = DELAYED.get(boss)
-            when = str(day or today().isoformat())
-            return old if since and when < since else new
-    return None
+    boss, _, old, new = row
+    since = DELAYED.get(boss)
+    when = str(day or today().isoformat())
+    return old if since and when < since else new
+
+
+def crystal_from_community(name, difficulty):
+    row = crystal_row(name, difficulty)
+    return bool(row) and (row[0], row[1]) in COMMUNITY_KEYS
 
 
 def crystal_label(name, difficulty):

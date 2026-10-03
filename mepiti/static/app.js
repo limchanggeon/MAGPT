@@ -610,7 +610,7 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
       const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
       const toggle=el('label','boss-include');const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;
       toggle.append(check,el('span','',b.recorded?'기록함':'포함'));check.setAttribute('aria-label',`${b.character} ${b.boss} 포함`);
-      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${({bossWeekly:'주간',bossMonthly:'월간',bossMonthl:'월간',bossDaily:'일간'})[b.cycle]||b.cycle} · `:'')+(b.price_source==='official'?(info.reboot?'공식 판매가의 절반(리부트)':'공식 판매가'):b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
+      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${({bossWeekly:'주간',bossMonthly:'월간',bossMonthl:'월간',bossDaily:'일간'})[b.cycle]||b.cycle} · `:'')+(b.price_source==='official'||b.price_source==='community'?(b.price_source==='official'?'공식 판매가':'정리표 판매가(커뮤니티)')+(info.reboot?'의 절반(리부트)':''):b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
       let priceBox,price;
       if(b.price){priceBox=el('span','boss-price',mesoText(b.price));price=()=>b.price;}
       else{priceBox=el('input');priceBox.placeholder='결정석 판매가(억)';priceBox.autocomplete='off';priceBox.disabled=b.recorded;price=()=>readAmount(priceBox.value);priceBox.oninput=refresh;}
@@ -627,7 +627,7 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
     if(!picked.length)throw new Error('저장할 보스를 켜 주세요.');
     let saved=0;const errors=[];
     for(const r of picked){
-      const crystal=r.b.price_source==='official'?'':(r.b.price?String(r.b.price):r.priceBox.value);
+      const crystal=(r.b.price_source==='official'||r.b.price_source==='community')?'':(r.b.price?String(r.b.price):r.priceBox.value);
       try{await api('earnings',{kind:'boss',boss:r.b.boss,crystal,party:r.party.value,character:r.character,source_key:r.b.key,day:todayText()});saved++;
         r.b.recorded=true;r.row.classList.add('recorded');r.check.checked=false;r.check.disabled=true;r.party.disabled=true;}
       catch(err){errors.push(`${r.character} ${r.b.boss}: ${err.message}`);}}

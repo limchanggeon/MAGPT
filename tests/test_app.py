@@ -1333,7 +1333,14 @@ class SchedulerImportTests(unittest.TestCase):
 class CrystalPriceTests(unittest.TestCase):
     """결정석 판매가 — 공식 공지(업데이트 813) 표. 사용자가 붙여 준 내용."""
     def test_table_values(self):
-        self.assertEqual(len(earnings.CRYSTALS),46)
+        self.assertEqual(len(earnings.CRYSTALS),46+32)   # 공지 46 + 커뮤니티 정리표 32
+        self.assertEqual(earnings.crystal_price('힐라','하드'),1_280_000)             # '진 힐라'로 잡히지 않음
+        self.assertEqual(earnings.crystal_price('진 힐라','하드'),100_000_000)
+        self.assertEqual(earnings.crystal_price('칼로스','extreme'),4_104_000_000)
+        self.assertEqual(earnings.crystal_price('유피테르','hard'),4_845_000_000)
+        self.assertTrue(earnings.crystal_from_community('림보','하드'))
+        self.assertFalse(earnings.crystal_from_community('림보','노멀'))
+        self.assertEqual(len({(b,d) for b,d,_,_ in earnings.CRYSTALS}),len(earnings.CRYSTALS))   # 겹치는 줄 없음
         self.assertEqual(earnings.crystal_price('선택받은 세렌','하드'),302_000_000)
         self.assertEqual(earnings.crystal_price('세렌','하드'),302_000_000)          # 스케줄러의 짧은 이름
         self.assertEqual(earnings.crystal_price('감시자 칼로스','카오스'),1_230_000_000)
