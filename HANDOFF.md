@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
-- 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.5.3 릴리스 완료(결정석 표 보강: 커뮤니티 정리표 32개). 전체 요구사항 완료 아님.
+- 최종 갱신: 2026-10-04 (KST)
+- 현재 단계: v0.5.3 릴리스 후, 검은 마법사 한 달 한 번 제한(미릴리스). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.3(`9bf03d9`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
@@ -1450,3 +1450,10 @@ node tests/test_frontend.js
 - 검증(이번): Python 488개 통과, `tests/test_frontend.js` 통과. 기존 공지 46개가 정리표와 일치함을 확인.
 - 남은 것: 커뮤니티 값의 공식 대조, 일간 보스가 주 12개에 들어가는지 게임 규칙 확인.
 - **릴리스 v0.5.3**(2026-10-03, 사용자 "응"): `9bf03d9`, CI 통과, `main` 빨리감기(`250e734..9bf03d9`), 태그, 릴리스 성공(파일 5개), API latest v0.5.3. https://github.com/limchanggeon/MAGPT/releases/tag/v0.5.3
+
+### 2026-10-04 — 검은 마법사 한 달 한 번 (사용자 보고)
+
+- 변경: `mepiti/earnings.py`(`monthly_boss_done`, 저장 거부, 불러오기 기록 표시, `overview.monthly_done`), `static/app.js`(체크 막기·안내), `tests/test_earnings_ui.py` 2개, README, IMPLEMENTATION.md. 미릴리스.
+- 검증(이번): Python 490개 통과, `tests/test_frontend.js` 통과. 브라우저 화면 확인 안 함.
+- 참고: 주간 보스도 같은 주에 같은 보스를 직접 두 번 기록하는 것은 아직 막지 않는다(불러오기만 막음). 일간 보스가 섞여 있어 규칙 확인 후 결정.
+

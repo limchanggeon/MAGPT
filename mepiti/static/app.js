@@ -541,9 +541,12 @@ function bossLimitState(){
 }
 function applyBossLimit(){
   const s=bossLimitState();
-  $('#boss-checklist').querySelectorAll('input').forEach(i=>{const full=s.left<=0&&!i.checked&&!MONTHLY_BOSS.test(i.value);
+  // 검은 마법사는 캐릭터당 한 달에 한 번 — 이번 달에 이미 기록했으면 체크를 막는다.
+  const monthDone=((lastEarnings||{}).monthly_done||[]).includes($('#boss-form').elements.character.value||'');
+  $('#boss-checklist').querySelectorAll('input').forEach(i=>{const monthly=MONTHLY_BOSS.test(i.value);
+    const full=(s.left<=0&&!i.checked&&!monthly)||(monthly&&monthDone);if(full&&i.checked){i.checked=false;i.closest('.boss-row').classList.remove('picked');}
     i.disabled=full;i.closest('.boss-check').classList.toggle('full',full);});
-  const note=$('#boss-limit');if(note)note.textContent=`이번 주 이 캐릭터: 기록 ${fmt(s.recorded)} + 선택 ${fmt(s.picked)} / ${fmt(s.limit)} (검은 마법사 제외)`+(rebootRate()<1?' · 리부트(에오스·헬리오스) 캐릭터라 결정석 가격 절반':'')+(s.left<0?' — 12개를 넘었어요':'');
+  const note=$('#boss-limit');if(note)note.textContent=`이번 주 이 캐릭터: 기록 ${fmt(s.recorded)} + 선택 ${fmt(s.picked)} / ${fmt(s.limit)} (검은 마법사 제외)`+(monthDone?' · 검은 마법사는 이번 달 기록함':'')+(rebootRate()<1?' · 리부트(에오스·헬리오스) 캐릭터라 결정석 가격 절반':'')+(s.left<0?' — 12개를 넘었어요':'');
 }
 // 리부트 월드(에오스·헬리오스) 캐릭터는 결정석 시세가 절반이라 공식 판매가에 0.5를 곱해 보여 준다(저장도 서버가 같은 규칙으로 계산).
 function rebootRate(){const d=lastEarnings||{},name=$('#boss-form').elements.character.value||'';

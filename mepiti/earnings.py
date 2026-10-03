@@ -153,6 +153,10 @@ def add(store, data):
                 who = row['character'] or '캐릭터 미지정'
                 raise AppError(f"{who}은(는) {start.isoformat()} 주에 주간 보스를 이미 {WEEKLY_BOSS_LIMIT}개 기록했어요"
                                f"(캐릭터당 주 {WEEKLY_BOSS_LIMIT}개, 검은 마법사 제외).", 409)
+        if not counts_toward_limit(boss) and boss.startswith(MONTHLY_BOSSES) and monthly_boss_done(store, row['character'], day):
+            # 검은 마법사는 한 달에 한 번(난이도 상관없이). 2026-10-04 사용자: "검마도 한달에 한번인데 중복으로 가능하네".
+            who = row['character'] or '캐릭터 미지정'
+            raise AppError(f"{who}은(는) {day.isoformat()[:7]}에 검은 마법사를 이미 기록했어요(한 달에 한 번).", 409)
         if row['source_key'] and store.rows('SELECT 1 FROM earnings WHERE source_key=?', (row['source_key'],)):
             raise AppError(f"{row['character'] or ''} {boss}은(는) 이번 주에 이미 기록했습니다.".strip(), 409)
         if row['crystal'] and row['crystal'] != crystal_for(store, row['character'], *parse_label(boss), day.isoformat()):
@@ -178,6 +182,15 @@ def counts_toward_limit(boss):
     """주 12개 제한에 들어가는 보스인가(검은 마법사·'추가 드롭' 줄은 빼고)."""
     name = str(boss or '')
     return not name.startswith(MONTHLY_BOSSES) and name not in NOT_BOSSES
+
+
+def monthly_boss_done(store, character, day):
+    """그 캐릭터가 그 달(1일 초기화)에 월간 보스(검은 마법사)를 이미 기록했나."""
+    first = day.replace(day=1)
+    last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    rows = store.rows('SELECT boss FROM earnings WHERE kind=? AND day BETWEEN ? AND ? AND character IS ?',
+                      ('boss', first.isoformat(), last.isoformat(), character))
+    return any(str(r['boss'] or '').startswith(MONTHLY_BOSSES) for r in rows)
 
 
 def weekly_boss_count(store, character, start):
@@ -385,6 +398,8 @@ def overview(store, week=None, month=None, limit=200):
             'boss_counts': {name: sum(1 for r in in_week if r['kind'] == 'boss' and (r.get('character') or '') == name
                                       and counts_toward_limit(r['boss']))
                             for name in {r.get('character') or '' for r in in_week if r['kind'] == 'boss'}},
+            'monthly_done': [c['name'] for c in choices if monthly_boss_done(store, c['name'], today())]
+                            + ([''] if monthly_boss_done(store, None, today()) else []),
             'reboot_characters': [name for name, world in worlds(store).items() if world in REBOOT_WORLDS],
             'reboot_rate': REBOOT_RATE,
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
@@ -452,8 +467,10 @@ def scheduled_bosses(store, nexon, names):
             # 이전 버전은 스케줄러 이름·영어 난이도 그대로 키를 만들었다('세렌 (hard)'). 그 키로 이미 기록했으면 기록한 것으로 본다.
             legacy = f"{week}|{state['character']}|{crystal_label(boss['name'], boss.get('difficulty'))}"
             official = crystal_for(store, state['character'], boss['name'], boss.get('difficulty'), world=state.get('world'))
+            # 월간 보스는 스케줄러가 한 달 내내 완료로 보여 줘서, 주 키 대신 이번 달 기록 여부로 본다.
+            monthly = label.startswith(MONTHLY_BOSSES) and monthly_boss_done(store, state['character'], today())
             bosses.append({'key': key, 'character': state['character'], 'boss': label, 'cycle': boss.get('cycle'),
-                           'recorded': key in recorded or legacy in recorded, 'price': official or remembered.get(label),
+                           'recorded': key in recorded or legacy in recorded or monthly, 'price': official or remembered.get(label),
                            'price_source': ('community' if crystal_from_community(boss['name'], boss.get('difficulty')) else 'official') if official
                            else ('remembered' if remembered.get(label) else None)})
     for c in characters:

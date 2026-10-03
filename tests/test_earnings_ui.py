@@ -227,3 +227,30 @@ class RebootWorldTests(unittest.TestCase):
         self.assertIn('관리캐', earnings.overview(self.store)['reboot_characters'])
         row = earnings.add(self.store, {'kind': 'boss', 'boss': '선택받은 세렌 (하드)', 'character': '관리캐'})
         self.assertEqual(row['crystal'], round(self.full * 0.5))
+
+
+class MonthlyBossTests(unittest.TestCase):
+    """검은 마법사는 캐릭터당 한 달에 한 번(난이도 상관없이) — 2026-10-04 사용자 보고."""
+    def setUp(self):
+        self.store = Store(tempfile.mkdtemp())
+
+    def test_second_black_mage_in_same_month_is_refused(self):
+        from mepiti.core import AppError
+        day = earnings.today().replace(day=1)
+        earnings.add(self.store, {'kind': 'boss', 'boss': '검은 마법사 (하드)', 'character': '본캐', 'day': day.isoformat()})
+        with self.assertRaises(AppError):
+            earnings.add(self.store, {'kind': 'boss', 'boss': '검은 마법사 (익스트림)', 'character': '본캐',
+                                      'day': (day + timedelta(days=8)).isoformat()})
+        earnings.add(self.store, {'kind': 'boss', 'boss': '검은 마법사 (하드)', 'character': '부캐', 'day': day.isoformat()})
+        prev = (day - timedelta(days=1))
+        earnings.add(self.store, {'kind': 'boss', 'boss': '검은 마법사 (하드)', 'character': '본캐', 'day': prev.isoformat()})  # 지난달은 따로
+        if earnings.today().month == day.month:
+            self.assertIn('본캐', earnings.overview(self.store)['monthly_done'])
+
+    def test_scheduler_marks_black_mage_recorded_this_month(self):
+        earnings.add(self.store, {'kind': 'boss', 'boss': '검은 마법사 (하드)', 'character': '본캐'})
+        class Nexon:
+            def scheduler(self, name):
+                return {'character': name, 'bosses': [{'name': '검은 마법사', 'difficulty': 'hard', 'complete': True, 'cycle': 'bossMonthly'}]}
+        d = earnings.scheduled_bosses(self.store, Nexon(), ['본캐'])
+        self.assertTrue(d['bosses'][0]['recorded'])
