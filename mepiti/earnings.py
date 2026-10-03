@@ -140,7 +140,7 @@ def add(store, data):
         row['crystal'] = meso(data.get('crystal'), '결정석 판매가')
         if not row['crystal'] and not str(data.get('crystal') or '').strip():
             # 결정석 가격을 비워 두면 공식 공지 가격표에서 채운다.
-            row['crystal'] = crystal_price(*parse_label(boss), day.isoformat()) or 0.0
+            row['crystal'] = crystal_for(store, row['character'], *parse_label(boss), day.isoformat()) or 0.0
         row['party'] = int(count(data.get('party'), '파티 인원', 1, 6, 1))
         row['extra'] = meso(data.get('extra'), '추가 드롭 수익')
         if not row['crystal'] and not row['extra']:
@@ -155,7 +155,7 @@ def add(store, data):
                                f"(캐릭터당 주 {WEEKLY_BOSS_LIMIT}개, 검은 마법사 제외).", 409)
         if row['source_key'] and store.rows('SELECT 1 FROM earnings WHERE source_key=?', (row['source_key'],)):
             raise AppError(f"{row['character'] or ''} {boss}은(는) 이번 주에 이미 기록했습니다.".strip(), 409)
-        if row['crystal'] and row['crystal'] != crystal_price(*parse_label(boss), day.isoformat()):
+        if row['crystal'] and row['crystal'] != crystal_for(store, row['character'], *parse_label(boss), day.isoformat()):
             # 공식 가격과 다른 값을 적었을 때만 기억한다(표에 없는 보스 등).
             remembered = store.setting(BOSS_PRICES) or {}
             remembered[boss] = row['crystal']
@@ -385,6 +385,8 @@ def overview(store, week=None, month=None, limit=200):
             'boss_counts': {name: sum(1 for r in in_week if r['kind'] == 'boss' and (r.get('character') or '') == name
                                       and counts_toward_limit(r['boss']))
                             for name in {r.get('character') or '' for r in in_week if r['kind'] == 'boss'}},
+            'reboot_characters': [name for name, world in worlds(store).items() if world in REBOOT_WORLDS],
+            'reboot_rate': REBOOT_RATE,
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],
             'crystal_source': CRYSTAL_SOURCE,
@@ -434,7 +436,8 @@ def scheduled_bosses(store, nexon, names):
             characters.append({'name': name, 'error': str(e)})
             continue
         characters.append({'name': state['character'], 'level': state.get('level'), 'job': state.get('job'),
-                           'weekly_clear': state.get('weekly_clear'), 'weekly_limit': state.get('weekly_limit')})
+                           'weekly_clear': state.get('weekly_clear'), 'weekly_limit': state.get('weekly_limit'),
+                           'world': state.get('world'), 'reboot': is_reboot(store, state['character'], state.get('world'))})
         for boss in state['bosses']:
             if not boss['complete']:
                 continue
@@ -442,7 +445,7 @@ def scheduled_bosses(store, nexon, names):
             key = f"{week}|{state['character']}|{label}"
             # 이전 버전은 스케줄러 이름·영어 난이도 그대로 키를 만들었다('세렌 (hard)'). 그 키로 이미 기록했으면 기록한 것으로 본다.
             legacy = f"{week}|{state['character']}|{crystal_label(boss['name'], boss.get('difficulty'))}"
-            official = crystal_price(boss['name'], boss.get('difficulty'))
+            official = crystal_for(store, state['character'], boss['name'], boss.get('difficulty'), world=state.get('world'))
             bosses.append({'key': key, 'character': state['character'], 'boss': label, 'cycle': boss.get('cycle'),
                            'recorded': key in recorded or legacy in recorded, 'price': official or remembered.get(label),
                            'price_source': 'official' if official else ('remembered' if remembered.get(label) else None)})
@@ -509,6 +512,41 @@ DELAYED = {'검은 마법사': '2026-10-01'}   # 이 날짜 전 기록에는 기
 
 def _squash(text):
     return re.sub(r'\s+', '', str(text or ''))
+
+
+# 리부트 월드(에오스·헬리오스)는 결정석 시세가 절반이다(2026-10-03 사용자: "에오스·헬리오스 캐릭터는 메소 계산을 반토막, 특히 보스").
+# 앱이 자동으로 채우는 공식 결정석 가격에만 적용한다. 사용자가 직접 적은 금액(재획 메소·직접 적은 결정석 값)은 그대로.
+REBOOT_WORLDS = ('에오스', '헬리오스')
+REBOOT_RATE = 0.5
+
+
+def worlds(store):
+    """캐릭터 이름 → 월드. 관리 중인 캐릭터의 최근 조회 기록, 계정 캐릭터 목록(이쪽이 우선) 순으로 채운다."""
+    out = {}
+    for c in store.characters():
+        world = next(((s.get('data') or {}).get('world') for s in c.get('snapshots') or [] if (s.get('data') or {}).get('world')), None)
+        if world:
+            out[c['name']] = world
+    for c in store.setting(ACCOUNT_CHARACTERS) or []:
+        if c.get('name') and c.get('world'):
+            out[c['name']] = c['world']
+    return out
+
+
+def world_of(store, character):
+    return worlds(store).get(character) if character else None
+
+
+def is_reboot(store, character, world=None):
+    return (world or world_of(store, character) or '') in REBOOT_WORLDS
+
+
+def crystal_for(store, character, name, difficulty, day=None, world=None):
+    """그 캐릭터 기준 결정석 판매가(리부트면 절반)."""
+    price = crystal_price(name, difficulty, day)
+    if price and is_reboot(store, character, world):
+        return round(price * REBOOT_RATE)
+    return price
 
 
 def crystal_price(name, difficulty, day=None):

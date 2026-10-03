@@ -313,7 +313,7 @@ function fillCharacterSelects(d){
     const groups=new Map();choices.forEach(c=>{if(!groups.has(c.group)){const g=el('optgroup');g.label=c.group==='계정'?'계정 캐릭터':c.group==='기록'?'예전 기록':'관리 중';groups.set(c.group,g);select.append(g);}
       const o=el('option','',c.name+(c.level?` · ${c.world||''} Lv.${c.level}`:''));o.value=c.name;groups.get(c.group).append(o);});
     select.value=names.includes(keep)?keep:'';
-    select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});applyBossLimit();};
+    select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});bossPreview();};
   });
 }
 // 계정 캐릭터 목록을 한 번도 안 불러왔으면 한 번 불러와 고르기 목록을 채운다(넥슨 API 키가 있을 때).
@@ -543,10 +543,13 @@ function applyBossLimit(){
   const s=bossLimitState();
   $('#boss-checklist').querySelectorAll('input').forEach(i=>{const full=s.left<=0&&!i.checked&&!MONTHLY_BOSS.test(i.value);
     i.disabled=full;i.closest('.boss-check').classList.toggle('full',full);});
-  const note=$('#boss-limit');if(note)note.textContent=`이번 주 이 캐릭터: 기록 ${fmt(s.recorded)} + 선택 ${fmt(s.picked)} / ${fmt(s.limit)} (검은 마법사 제외)`+(s.left<0?' — 12개를 넘었어요':'');
+  const note=$('#boss-limit');if(note)note.textContent=`이번 주 이 캐릭터: 기록 ${fmt(s.recorded)} + 선택 ${fmt(s.picked)} / ${fmt(s.limit)} (검은 마법사 제외)`+(rebootRate()<1?' · 리부트(에오스·헬리오스) 캐릭터라 결정석 가격 절반':'')+(s.left<0?' — 12개를 넘었어요':'');
 }
-function checkedBosses(){
-  return [...$('#boss-checklist').querySelectorAll('input:checked')].map(i=>({boss:i.value,price:Number(i.dataset.price),
+// 리부트 월드(에오스·헬리오스) 캐릭터는 결정석 시세가 절반이라 공식 판매가에 0.5를 곱해 보여 준다(저장도 서버가 같은 규칙으로 계산).
+function rebootRate(){const d=lastEarnings||{},name=$('#boss-form').elements.character.value||'';
+  return (d.reboot_characters||[]).includes(name)?(d.reboot_rate||0.5):1;}
+function checkedBosses(){const rate=rebootRate();
+  return [...$('#boss-checklist').querySelectorAll('input:checked')].map(i=>({boss:i.value,price:Number(i.dataset.price)*rate,
     party:Number(i.closest('.boss-row').querySelector('.boss-party').value)}));
 }
 function bossPreview(){
@@ -607,7 +610,7 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
       const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
       const toggle=el('label','boss-include');const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;
       toggle.append(check,el('span','',b.recorded?'기록함':'포함'));check.setAttribute('aria-label',`${b.character} ${b.boss} 포함`);
-      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${({bossWeekly:'주간',bossMonthly:'월간',bossMonthl:'월간',bossDaily:'일간'})[b.cycle]||b.cycle} · `:'')+(b.price_source==='official'?'공식 판매가':b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
+      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${({bossWeekly:'주간',bossMonthly:'월간',bossMonthl:'월간',bossDaily:'일간'})[b.cycle]||b.cycle} · `:'')+(b.price_source==='official'?(info.reboot?'공식 판매가의 절반(리부트)':'공식 판매가'):b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
       let priceBox,price;
       if(b.price){priceBox=el('span','boss-price',mesoText(b.price));price=()=>b.price;}
       else{priceBox=el('input');priceBox.placeholder='결정석 판매가(억)';priceBox.autocomplete='off';priceBox.disabled=b.recorded;price=()=>readAmount(priceBox.value);priceBox.oninput=refresh;}

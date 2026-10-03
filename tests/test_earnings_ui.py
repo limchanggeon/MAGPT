@@ -188,3 +188,42 @@ class SchedulerPriceTests(unittest.TestCase):
         prices = {b['boss']: (b['price'], b['price_source']) for b in d['bosses']}
         self.assertEqual(prices['선택받은 세렌 (하드)'][1], 'official')
         self.assertIsNone(prices['모르는보스 (하드)'][0])          # 표에 없으면 직접 입력
+
+
+class RebootWorldTests(unittest.TestCase):
+    """에오스·헬리오스(리부트) 캐릭터는 결정석 시세가 절반 — 앱이 채우는 공식 가격만 반으로(2026-10-03 사용자 요청)."""
+    def setUp(self):
+        self.store = Store(tempfile.mkdtemp())
+        self.store.set_setting(earnings.ACCOUNT_CHARACTERS, [{'name': '리부트캐', 'world': '에오스', 'level': 280},
+                                                             {'name': '일반캐', 'world': '스카니아', 'level': 270}])
+        self.full = earnings.crystal_price('세렌', '하드')
+
+    def test_official_price_is_halved_only_for_reboot(self):
+        reboot = earnings.add(self.store, {'kind': 'boss', 'boss': '선택받은 세렌 (하드)', 'character': '리부트캐'})
+        normal = earnings.add(self.store, {'kind': 'boss', 'boss': '선택받은 세렌 (하드)', 'character': '일반캐'})
+        self.assertEqual(reboot['crystal'], round(self.full * 0.5))
+        self.assertEqual(normal['crystal'], self.full)
+        # 사용자가 직접 적은 금액은 그대로
+        typed = earnings.add(self.store, {'kind': 'boss', 'boss': '선택받은 세렌 (하드)', 'crystal': '3', 'character': '리부트캐'})
+        self.assertEqual(typed['crystal'], 3e8)
+        self.assertEqual(earnings.overview(self.store)['reboot_characters'], ['리부트캐'])
+
+    def test_scheduler_import_uses_world_from_api(self):
+        class Nexon:
+            def scheduler(self, name):
+                return {'character': name, 'world': '헬리오스',
+                        'bosses': [{'name': '세렌', 'difficulty': 'hard', 'complete': True, 'cycle': 'bossWeekly'}]}
+        d = earnings.scheduled_bosses(self.store, Nexon(), ['새캐'])
+        self.assertTrue(d['characters'][0]['reboot'])
+        self.assertEqual(d['bosses'][0]['price'], round(self.full * 0.5))
+
+    def test_managed_character_world_from_snapshot(self):
+        import json
+        from mepiti.core import now
+        saved = self.store.character_save({'name': '관리캐', 'budget': 0})
+        cid = saved['id'] if isinstance(saved, dict) else self.store.characters(include_snapshots=False)[0]['id']
+        with self.store.db() as db:
+            db.execute('INSERT INTO snapshots VALUES(?,?,?,?)', ('s1', cid, json.dumps({'world': '헬리오스'}), now()))
+        self.assertIn('관리캐', earnings.overview(self.store)['reboot_characters'])
+        row = earnings.add(self.store, {'kind': 'boss', 'boss': '선택받은 세렌 (하드)', 'character': '관리캐'})
+        self.assertEqual(row['crystal'], round(self.full * 0.5))

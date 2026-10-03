@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.5.1 릴리스 후, 주보 불러오기 결정석 가격 자동(영어 난이도 맞춤)·닫기(미릴리스). 전체 요구사항 완료 아님.
+- 현재 단계: v0.5.2 준비 — 주보 불러오기 결정석 가격 자동·닫기, 리부트(에오스·헬리오스) 결정석 절반. 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.1(`0519e95`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
@@ -1436,3 +1436,10 @@ node tests/test_frontend.js
 
 - 변경: `mepiti/earnings.py`(난이도·이름 맞춤, 예전 키 인정), `static/app.js`·`style.css`(닫기, 주기 표시), 테스트(`test_app.py` 기대값, `test_earnings_ui.py` 2개). 결과 IMPLEMENTATION.md. 미릴리스.
 - 남은 것: 결정석 표(업데이트 813 기준)에 없는 보스·난이도(칼로스 익스트림, 카링 익스트림, 림보·발드릭스·유피테르 하드 등)는 가격 직접 입력 — 공식 가격표를 받으면 추가.
+
+### 2026-10-03 — 리부트(에오스·헬리오스) 결정석 절반 (사용자 요청)
+
+- 변경: `mepiti/earnings.py`(`REBOOT_WORLDS`·`worlds`·`crystal_for`, 직접 기록·불러오기·overview), `static/app.js`(미리보기 절반·안내), `test_earnings_ui.py` 3개, README, IMPLEMENTATION.md. 버전 0.5.2(3개 파일).
+- 범위: 앱이 채우는 공식 결정석 가격만 절반. 직접 적은 금액은 그대로. 월드를 모르는 캐릭터(계정 목록·조회 기록 없음)는 일반 가격.
+- 검증(이번): Python 488개 통과, `tests/test_frontend.js` 통과. 실제 리부트 캐릭터 화면 확인은 안 함.
+
