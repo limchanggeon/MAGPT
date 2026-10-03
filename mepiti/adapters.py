@@ -748,6 +748,35 @@ def capture_messages():
 
 PIECE_ICON = Path(__file__).resolve().parent / 'static' / 'sol-erda-piece.png'
 
+# 시세표 이미지(커뮤니티의 경매장 최저가 정리 등)에서 노작값 읽기. 모델은 보이는 글자만 옮기고 숫자 변환은 앱이 한다(prices.read_table).
+PRICE_TABLE_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['unit', 'server', 'rows'], 'properties': {
+    'unit': {'type': ['string', 'null']}, 'server': {'type': ['string', 'null']},
+    'rows': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False, 'required': ['item', 'price'],
+                                        'properties': {'item': {'type': 'string'}, 'price': {'type': 'string'}}}}}}
+
+
+def price_table_messages():
+    return [{'role': 'system', 'content': (
+                '메이플스토리 아이템 시세표 이미지에서 아이템 이름과 가격만 옮겨 적는다. 계산·추측하지 않는다.\n'
+                "- unit: 표 머리에 적힌 가격 단위(예: '단위 : 억' → '억'). 없으면 null.\n"
+                "- server: 표에 적힌 서버·월드(예: '본 서버', '스카니아'). 없으면 null.\n"
+                "- rows: 아이템 한 줄마다 {item: 이미지에 적힌 이름 그대로, price: 가격 칸 글자 그대로(예: '19.56', '90만', '32억')}.\n"
+                "- 표가 줄 머리(부위 등)와 칸 머리(직업 등)로 된 격자이면 칸마다 한 항목으로, item은 '칸 머리 줄 머리'(예: '전사 모자')로 적는다. "
+                '표에 없는 세트 이름은 붙이지 않는다.\n'
+                '- 날짜, 전날 대비 변동(↑↓ 붙은 값), 순위 같은 다른 칸은 가격으로 옮기지 않는다. 읽을 수 없는 줄은 빼고, 이름을 지어내지 않는다.')},
+            {'role': 'user', 'content': '이 시세표에서 아이템 이름과 가격을 JSON으로 옮겨 적어라.'}]
+
+
+def price_table_result(text):
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        raise AppError('시세표를 읽지 못했어요. 표가 잘 보이게 다시 넣어 주세요.', 502)
+    rows = [{'item': str(r.get('item') or '').strip()[:100], 'price': str(r.get('price') or '').strip()[:40]}
+            for r in (data.get('rows') or []) if isinstance(r, dict) and str(r.get('item') or '').strip()]
+    return {'unit': (str(data.get('unit')).strip()[:10] if data.get('unit') else None),
+            'server': (str(data.get('server')).strip()[:30] if data.get('server') else None), 'rows': rows[:200]}
+
 
 def capture_images(mime, data):
     """캡처 앞에 솔 에르다 조각 기준 아이콘을 붙인다(아이콘만으로 다른 아이템과 구분하게)."""
@@ -922,6 +951,15 @@ class Gemini:
                                    'responseMimeType': 'application/json', 'responseSchema': schema}, images=capture_images(mime, data))
         return capture_result(text), meta
 
+    def read_price_table(self, mime, data):
+        schema = {'type': 'OBJECT', 'required': ['unit', 'server', 'rows'], 'properties': {
+            'unit': {'type': 'STRING', 'nullable': True}, 'server': {'type': 'STRING', 'nullable': True},
+            'rows': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'required': ['item', 'price'],
+                                                  'properties': {'item': {'type': 'STRING'}, 'price': {'type': 'STRING'}}}}}}
+        text, meta = self.generate(price_table_messages(), {'temperature': 0, 'maxOutputTokens': 8192,
+                                   'responseMimeType': 'application/json', 'responseSchema': schema}, images=[(mime, data)])
+        return price_table_result(text), meta
+
     def select(self, model, question, passages):
         text, meta = self.generate(select_messages(question, passages), {
             'temperature': 0, 'maxOutputTokens': 1024, 'responseMimeType': 'application/json',
@@ -1068,6 +1106,11 @@ class Claude:
                                    max_tokens=2000, images=capture_images(mime, data))
         return capture_result(text), meta
 
+    def read_price_table(self, mime, data):
+        text, meta = self.generate(price_table_messages(), {'format': {'type': 'json_schema', 'schema': PRICE_TABLE_SCHEMA}},
+                                   max_tokens=8000, images=[(mime, data)])
+        return price_table_result(text), meta
+
     def select(self, model, question, passages):
         schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
                   'required': ['ids'], 'additionalProperties': False}
@@ -1174,6 +1217,11 @@ class OpenAI:
             'type': 'json_schema', 'name': 'capture', 'schema': CAPTURE_SCHEMA, 'strict': True}}}, images=capture_images(mime, data))
         return capture_result(text), meta
 
+    def read_price_table(self, mime, data):
+        text, meta = self.generate(price_table_messages(), {'text': {'format': {
+            'type': 'json_schema', 'name': 'price_table', 'schema': PRICE_TABLE_SCHEMA, 'strict': True}}}, images=[(mime, data)])
+        return price_table_result(text), meta
+
     def select(self, model, question, passages):
         schema = {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'integer'}}},
                   'required': ['ids'], 'additionalProperties': False}
@@ -1221,6 +1269,13 @@ class ModelRouter:
         if target is self.local or not hasattr(target, 'read_capture'):
             raise AppError('캡처 읽기는 클라우드 모델(Gemini·Claude·ChatGPT)에서만 돼요. 숫자를 직접 적어 주세요.', 400)
         return target.read_capture(mime, data)
+
+    def read_price_table(self, model, mime, data):
+        """시세표 이미지에서 장비 이름·가격 읽기(노작값). 로컬 모델은 이미지를 못 읽는다."""
+        target = self._for(model)
+        if target is self.local or not hasattr(target, 'read_price_table'):
+            raise AppError('시세표 읽기는 클라우드 모델(Gemini·Claude·ChatGPT)에서만 돼요. 값을 직접 적어 주세요.', 400)
+        return target.read_price_table(mime, data)
 
     def __getattr__(self, name):
         return getattr(self.local, name)

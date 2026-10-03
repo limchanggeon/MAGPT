@@ -133,3 +133,38 @@ class ScrollHistoryTests(unittest.TestCase):
         self.assertFalse(history.scroll_jump(self.row(0, 5, 7, events=[{'plus': True}])))
         self.assertTrue(history.scroll_jump(self.row(0, 5, 7)))
         self.assertTrue(history.scroll_jump(self.row(0, 12, 17, events=[{'plus': True}])))
+
+
+class PriceTableTests(unittest.TestCase):
+    """시세표 이미지 → 노작값(확인 후 저장). 모델은 글자만 옮기고 단위 변환은 앱이 한다."""
+    def model(self, raw):
+        class M:
+            def read_price_table(self, selected, mime, data):
+                return raw, {}
+        return M()
+
+    def test_header_unit_and_inline_units(self):
+        from mepiti import prices
+        raw = {'unit': '억', 'server': '본 서버', 'rows': [{'item': '몽환의 벨트', 'price': '41.68'}, {'item': '에스텔라 이어링', 'price': '90만'},
+                                                         {'item': '창세의 뱃지', 'price': '166.67'}, {'item': '알 수 없음', 'price': '-'}]}
+        r = prices.read_table(self.model(raw), 'gemini', 'data:image/png;base64,AA')
+        self.assertEqual([x['price'] for x in r['rows']], [4_168_000_000, 900_000, 16_667_000_000, None])
+
+    def test_no_unit_means_eok_and_save_many(self):
+        from mepiti import prices
+        store = Store(tempfile.mkdtemp())
+        raw = {'unit': None, 'server': None, 'rows': [{'item': '전사 모자', 'price': '0.30'}]}
+        r = prices.read_table(self.model(raw), 'gemini', 'data:image/webp;base64,AA')
+        self.assertEqual(r['rows'][0]['price'], 30_000_000)
+        out = prices.save_many(store, [{'item': '아케인셰이드 전사 모자', 'price': '3000만'}, {'item': '', 'price': '1'}], '시세표 이미지')
+        self.assertEqual(out['saved'], 1)
+        self.assertEqual(store.price_lookup('아케인셰이드 전사 모자', None)['price'], 30_000_000)
+
+    def test_rejects_non_image_and_local_model(self):
+        from mepiti import prices
+        from mepiti.adapters import ModelRouter
+        from mepiti.core import AppError
+        with self.assertRaises(AppError):
+            prices.read_table(self.model({}), 'gemini', 'data:text/plain;base64,AA')
+        with self.assertRaises(AppError):
+            ModelRouter(object(), {'gemini': object()}).read_price_table('qwen3.5:2b', 'image/png', 'AA')

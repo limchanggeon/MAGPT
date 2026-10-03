@@ -74,6 +74,15 @@ class FakeGemini:
                 'sol_erda_pieces': '147' if not more else '189', 'maple_points': None}, {'model': 'demo'}
 
 
+def _fake_price_table(self, mime, data):
+    # 데모: 시세표를 실제로 읽지 않고 예시 줄을 돌려준다.
+    return {'unit': '억', 'server': '본 서버', 'rows': [{'item': '몽환의 벨트', 'price': '41.68'}, {'item': '거대한 공포', 'price': '45.56'},
+                                                      {'item': '에스텔라 이어링', 'price': '90만'}]}, {'model': 'demo'}
+
+
+FakeGemini.read_price_table = _fake_price_table
+
+
 class FakePaidCloud:
     """실제 회사를 부르지 않는 Claude·ChatGPT. 'sk-bad'로 시작하는 키는 거절한 것처럼 응답한다."""
     def __init__(self, real, name):

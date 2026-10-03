@@ -1135,3 +1135,54 @@ $('#discover-characters').onclick=discoverCharacters;
 $('#account-search').oninput=renderAccountCharacters;
 
 {const select=$('#font-scale');if(select){select.value=fontScale;select.onchange=()=>{const v=applyFontScale(select.value);try{localStorage.setItem('mepiti-font-scale',v);}catch{}toast('글씨 크기를 바꿨어요.');};}}
+
+// 시세표 이미지로 노작값 넣기 — 클라우드 모델이 이름·가격을 읽고(저장 안 함), 사용자가 확인·수정·선택한 것만 저장한다.
+async function imageDataUrl(file){
+  if(!file||!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('PNG·JPG·WEBP 이미지를 넣어 주세요.');
+  let url=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file);});
+  if(url.length>7_500_000){const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=url;});
+    const scale=Math.min(1,2560/Math.max(img.width,img.height)),c=document.createElement('canvas');c.width=img.width*scale;c.height=img.height*scale;
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);url=c.toDataURL('image/jpeg',0.92);}
+  return url;
+}
+async function readPriceTable(file){
+  const drop=$('#price-drop'),box=$('#price-review');
+  const url=await imageDataUrl(file);drop.querySelector('.capture-body').textContent='읽는 중…';box.replaceChildren();
+  let d;try{d=await api('prices/image',{image:url});}finally{drop.querySelector('.capture-body').textContent='여기를 누르고 붙여 넣기';}
+  renderPriceReview(d);
+}
+function renderPriceReview(d){
+  const box=$('#price-review');box.replaceChildren();
+  if(!d.rows.length){box.append(el('p','hint','표에서 아이템과 가격을 찾지 못했어요.'));return;}
+  box.append(el('p','hint',`${fmt(d.rows.length)}줄 읽음`+(d.unit?` · 표 단위 ${d.unit}`:' · 표에 단위가 없어 숫자는 억으로 읽었어요')+(d.server?` · ${d.server}`:'')+' · 저장 전에 이름·가격을 확인하세요.'));
+  const prefixRow=el('div','inline-form');const prefix=el('input');prefix.placeholder="앞에 붙일 이름(예: 아케인셰이드) — 표에 세트 이름이 없을 때";prefix.maxLength=40;
+  const apply=el('button','secondary','모든 이름 앞에 붙이기');apply.type='button';prefixRow.append(prefix,apply);box.append(prefixRow);
+  const table=el('table','peer-table price-review-table');const head=el('tr');['저장','아이템 이름','가격','읽은 글자'].forEach(h=>head.append(el('th','',h)));table.append(head);
+  const rows=d.rows.map(r=>{
+    const tr=el('tr');const check=el('input');check.type='checkbox';check.checked=!!r.price;
+    const name=el('input');name.value=r.item;name.maxLength=100;const price=el('input');price.value=r.price?exactAmount(r.price):'';price.placeholder='예: 32(억)';
+    tr.append(Object.assign(el('td'),{}),el('td'),el('td'),el('td','hint',r.price_text));tr.children[0].append(check);tr.children[1].append(name);tr.children[2].append(price);table.append(tr);
+    return {check,name,price};
+  });
+  apply.onclick=()=>{const p=prefix.value.trim();if(!p)return;rows.forEach(r=>{if(!r.name.value.startsWith(p))r.name.value=`${p} ${r.name.value}`;});};
+  box.append(table);
+  const save=el('button','primary','고른 값 저장');save.type='button';
+  save.onclick=()=>task(save,async()=>{
+    const picked=rows.filter(r=>r.check.checked&&r.name.value.trim()&&r.price.value.trim()).map(r=>({item:r.name.value.trim(),price:r.price.value.trim()}));
+    if(!picked.length)throw new Error('저장할 줄을 고르세요.');
+    const res=await api('prices/bulk',{rows:picked,note:`시세표 이미지${d.server?' · '+d.server:''} · ${todayText()}`});
+    toast(`노작값 ${fmt(res.saved)}개를 저장했어요.`);box.replaceChildren();await loadPrices();
+  });
+  box.append(save);
+}
+{const drop=$('#price-drop');if(drop){
+  drop.ondblclick=()=>$('#price-file').click();
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag');};drop.ondragleave=()=>drop.classList.remove('drag');
+  drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');guard(()=>readPriceTable(e.dataTransfer.files[0]));};
+  $('#price-file').onchange=()=>{const f=$('#price-file').files[0];$('#price-file').value='';if(f)guard(()=>readPriceTable(f));};
+  document.addEventListener('paste',e=>{
+    if($('#view-settings').hidden)return;if(e.target.closest&&e.target.closest('input,textarea'))return;
+    const item=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(!item)return;
+    e.preventDefault();guard(()=>readPriceTable(item.getAsFile()));
+  });
+}}

@@ -161,3 +161,38 @@ def parse_price(text, default_unit=None):
             value *= DEFAULT_SCALES[default_unit]
         return value
     return None
+
+
+TABLE_TYPES = ('image/png', 'image/jpeg', 'image/webp')
+
+
+def read_table(model, selected, image):
+    """시세표 이미지(data URL)에서 아이템 이름·가격을 읽어 메소로 바꾼다. 저장하지 않는다 — 사용자가 확인하고 고른 것만 저장한다.
+
+    단위 없는 숫자는 표 머리의 단위(억·만)로, 머리에 단위가 없으면 억으로 읽는다('19.56' → 19억 5600만, '90만'은 그대로)."""
+    head, _, data = str(image or '').partition(',')
+    mime = head[5:].split(';')[0] if head.startswith('data:') else ''
+    if mime not in TABLE_TYPES or ';base64' not in head or not data:
+        raise AppError('PNG·JPG·WEBP 시세표 이미지를 넣어 주세요.')
+    raw, meta = model.read_price_table(selected, mime, data)
+    unit = '만' if (raw.get('unit') or '').strip().startswith('만') else '억'
+    rows = []
+    for r in raw['rows']:
+        price = parse_price(r['price'], unit)
+        rows.append({'item': r['item'], 'price_text': r['price'], 'price': round(price) if price and price > 0 else None})   # 166.67억 같은 소수 오차는 메소 단위로 반올림
+    return {'unit': raw.get('unit'), 'server': raw.get('server'), 'rows': rows,
+            'model': meta.get('model') if isinstance(meta, dict) else None}
+
+
+def save_many(store, rows, note=None):
+    """시세표에서 고른 값들을 한 번에 저장(출처 '시세표 이미지')."""
+    saved = []
+    for r in rows[:200]:
+        price = r.get('price')
+        if isinstance(price, str):
+            price = parse_price(price, '억')
+        if not r.get('item') or not price:
+            continue
+        saved.append(store.price_save({'item': str(r['item'])[:100], 'price': price, 'source': '시세표 이미지',
+                                       'note': (note or '')[:300] or None}))
+    return {'saved': len(saved)}

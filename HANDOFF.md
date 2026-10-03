@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.5.0 릴리스 완료(금액 기본 단위·소재비·재획 회차·주보 12개/캐릭터별/월보 구분·불러오기 개편·강화권 제외). 전체 요구사항 완료 아님.
+- 현재 단계: v0.5.0 릴리스 후, 시세표 이미지로 노작값 넣기(미릴리스). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.0(`b974d90`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
@@ -1425,3 +1425,8 @@ node tests/test_frontend.js
 - 변경: `mepiti/prices.py`·`earnings.py`·`chat.py`(기본 단위·보스 제한·월보 구분), `history.py`(강화권), `static/app.js`·`index.html`·`style.css`, README, 테스트(`test_app.py`·`test_earnings_ui.py`).
 - 검증·한계는 IMPLEMENTATION.md 같은 날짜. 스케줄러 불러오기 새 화면은 실제 넥슨 스케줄러로 확인 필요.
 - **릴리스 v0.5.0**(2026-10-03, 사용자 "릴리즈"): `b974d90`, CI 통과, `main` 빨리감기(`fc3c058..b974d90`), 태그, 릴리스 성공(파일 5개), API latest v0.5.0. https://github.com/limchanggeon/MAGPT/releases/tag/v0.5.0
+
+### 2026-10-03 — 시세표 이미지로 노작값 (사용자: mitemprice에서 못 가져오나 → 인벤 글처럼 이미지로)
+
+- 사실: mitemprice.kr 약관이 자동 수집·2차 가공 금지, robots.txt가 api.php 금지 — 자동 수집하지 않음.
+- 변경: `mepiti/adapters.py`·`prices.py`·`server.py`, `static/index.html·app.js·style.css`, `scripts/demo_server.py`(가짜 시세표), README, 테스트 3개. 결과는 IMPLEMENTATION.md. 미릴리스.

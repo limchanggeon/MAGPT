@@ -508,6 +508,12 @@ class Application:
                 return earnings.scheduled_bosses(s, self.nexon, names[:20])
             if path == '/api/starforce': return starforce.expected(data)
             if path == '/api/prices': return s.price_save(data)
+            if path == '/api/prices/image': return prices.read_table(self.model, s.setting('model'), required(data, 'image', 8_100_000))
+            if path == '/api/prices/bulk':
+                rows = data.get('rows')
+                if not isinstance(rows, list):
+                    raise AppError('저장할 값 목록이 필요합니다.')
+                return prices.save_many(s, rows, data.get('note'))
             if path == '/api/prices/delete':
                 with s.db() as db:
                     db.execute('DELETE FROM prices WHERE id=?',(required(data,'id',100),))

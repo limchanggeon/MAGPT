@@ -853,3 +853,7 @@ body{zoom:var(--user-scale,1)}
 .boss-check.full{opacity:.4}
 .legend-monthly::before{background:var(--epic)}
 .trend-monthly{background:var(--epic)}
+.price-image{margin:14px 0}.price-image h3{font-size:13px;margin:0 0 4px}
+.price-drop{max-width:420px;margin:8px 0}
+.price-review .inline-form{display:flex;gap:8px;margin:6px 0}.price-review .inline-form input{flex:1}
+.price-review-table input[type=text],.price-review-table input:not([type]){width:100%}
