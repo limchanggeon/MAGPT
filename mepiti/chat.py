@@ -565,7 +565,7 @@ def save_price_answer(store, values, last):
             raise AppError(f'묻지 않은 장비입니다: {item}')
         if not str(text or '').strip():
             continue
-        price = prices.parse_price(str(text))
+        price = prices.parse_price(str(text), '억')        # 노작값 입력칸: 단위 없이 '32'면 32억
         if not price:
             raise AppError(f"{item} 값을 읽지 못했습니다. '2천만', '32억'처럼 적어 주세요.")
         saved.append(store.price_save({'item':item,'price':price,'source':'user'}))

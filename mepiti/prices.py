@@ -128,10 +128,14 @@ UNITS = (('조', 1_0000_0000_0000), ('억', 1_0000_0000), ('만', 1_0000))
 _THOUSAND = re.compile(r'(\d+(?:\.\d+)?)\s*천')
 
 
-def parse_price(text):
+DEFAULT_SCALES = {'억': 1_0000_0000, '만': 1_0000}
+
+
+def parse_price(text, default_unit=None):
     """'32억', '1조 2000억', '3,000만', '2천만', '1억 5천만', '25000000000' 형태를 메소 숫자로.
 
     '메소', '정도' 같은 말이 붙어 있어도 금액 부분만 읽는다. 금액이 없으면 None.
+    default_unit('억'·'만')을 주면 단위 없이 적은 작은 수(10만 미만)를 그 단위로 읽는다: 12.5 → 12억 5천만(사용자 입력칸).
     """
     if not isinstance(text, str):
         return None
@@ -152,5 +156,8 @@ def parse_price(text):
             total += float(plain[0])
         return total or None
     if len(plain) == 1 and float(plain[0]) > 0:
-        return float(plain[0])
+        value = float(plain[0])
+        if default_unit in DEFAULT_SCALES and value < 100000 and re.fullmatch(r'\s*[\d.]+\s*(?:메소)?\s*', cleaned):
+            value *= DEFAULT_SCALES[default_unit]
+        return value
     return None

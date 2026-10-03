@@ -53,8 +53,8 @@ def week_start(day):
     return day - timedelta(days=(day.weekday() - 3) % 7)
 
 
-def meso(value, label, required=False):
-    """'12억', '3,500만', '2천만', 숫자를 메소로. 빈칸이면 0(필수면 오류)."""
+def meso(value, label, required=False, unit='억'):
+    """'12억', '3,500만', '2천만', 숫자를 메소로. 빈칸이면 0(필수면 오류). 단위 없이 적은 작은 수는 unit(기본 억)으로 읽는다(12.5 → 12억 5천만)."""
     if value is None or str(value).strip() == '':
         if required:
             raise AppError(f'{label}을(를) 입력해 주세요.')
@@ -66,9 +66,9 @@ def meso(value, label, required=False):
     elif re.fullmatch(r'\s*0+(?:\.0+)?\s*', str(value)):
         amount = 0.0
     else:
-        amount = parse_price(str(value))
+        amount = parse_price(str(value), unit)
         if amount is None:
-            raise AppError(f"{label}을(를) 읽지 못했습니다. '12억', '3500만'처럼 적어 주세요.")
+            raise AppError(f"{label}을(를) 읽지 못했습니다. '12.5'(억 단위)나 '3500만'처럼 적어 주세요.")
     if not 0 <= amount <= MAX_MESO or amount != amount:
         raise AppError(f'{label}은(는) 0 이상이어야 합니다.')
     return amount
@@ -120,8 +120,8 @@ def add(store, data):
     if kind == 'hunt':
         row['meso'] = meso(data.get('meso'), '번 메소')
         row['pieces'] = int(count(data.get('pieces'), '조각 개수', 0, 100000, 0))
-        row['piece_price'] = meso(data.get('piece_price'), '조각 가격')
-        flasks = count(data.get('flasks'), '재획비 개수', 0, 100, 0)
+        row['piece_price'] = meso(data.get('piece_price'), '조각 가격', unit='만')     # 조각은 수백만 — 단위 없이 '650'이면 650만
+        flasks = count(data.get('flasks'), '소재비 개수', 0, 100, 0)
         row['flasks'] = flasks or None
         if not row['meso'] and not row['pieces']:
             raise AppError('번 메소나 조각 개수 중 하나는 적어 주세요.')
@@ -145,6 +145,14 @@ def add(store, data):
         row['extra'] = meso(data.get('extra'), '추가 드롭 수익')
         if not row['crystal'] and not row['extra']:
             raise AppError('결정석 판매가나 추가 드롭 수익 중 하나는 적어 주세요.')
+        if counts_toward_limit(boss):
+            # 주간 보스 결정석은 캐릭터마다 주 12개까지(검은 마법사는 월간이라 빼고 센다). 2026-10-03 사용자 확인.
+            start = week_start(day)
+            used = weekly_boss_count(store, row['character'], start)
+            if used >= WEEKLY_BOSS_LIMIT:
+                who = row['character'] or '캐릭터 미지정'
+                raise AppError(f"{who}은(는) {start.isoformat()} 주에 주간 보스를 이미 {WEEKLY_BOSS_LIMIT}개 기록했어요"
+                               f"(캐릭터당 주 {WEEKLY_BOSS_LIMIT}개, 검은 마법사 제외).", 409)
         if row['source_key'] and store.rows('SELECT 1 FROM earnings WHERE source_key=?', (row['source_key'],)):
             raise AppError(f"{row['character'] or ''} {boss}은(는) 이번 주에 이미 기록했습니다.".strip(), 409)
         if row['crystal'] and row['crystal'] != crystal_price(*parse_label(boss), day.isoformat()):
@@ -159,6 +167,23 @@ def add(store, data):
                    'note,created_at,character,source_key) VALUES(:id,:kind,:day,:meso,:pieces,:piece_price,:flasks,'
                    ':boss,:crystal,:party,:extra,:note,:created_at,:character,:source_key)', row)
     return {**row, 'total': total(row)}
+
+
+WEEKLY_BOSS_LIMIT = 12
+MONTHLY_BOSSES = ('검은 마법사',)
+NOT_BOSSES = ('추가 드롭',)
+
+
+def counts_toward_limit(boss):
+    """주 12개 제한에 들어가는 보스인가(검은 마법사·'추가 드롭' 줄은 빼고)."""
+    name = str(boss or '')
+    return not name.startswith(MONTHLY_BOSSES) and name not in NOT_BOSSES
+
+
+def weekly_boss_count(store, character, start):
+    rows = store.rows('SELECT boss FROM earnings WHERE kind=? AND day BETWEEN ? AND ? AND character IS ?',
+                      ('boss', start.isoformat(), (start + timedelta(days=6)).isoformat(), character))
+    return sum(1 for r in rows if counts_toward_limit(r['boss']))
 
 
 def piece_price(store, auction, refresh=False):
@@ -232,18 +257,26 @@ def shift_month(first, months):
     return date(index // 12, index % 12 + 1, 1)
 
 
+def category(row):
+    """합계에서 나누는 갈래: 재획(hunt), 주간 보스(boss), 월간 보스(monthly — 검은 마법사)."""
+    if row['kind'] == 'boss' and str(row.get('boss') or '').startswith(MONTHLY_BOSSES):
+        return 'monthly'
+    return row['kind']
+
+
 def breakdown(rows):
-    """기록 묶음의 합계: 재획·주보·전체, 그리고 캐릭터별(큰 순)."""
-    out = {'hunt': 0.0, 'boss': 0.0, 'hunt_count': 0, 'boss_count': 0}
+    """기록 묶음의 합계: 재획·주보·월보(검은 마법사)·전체, 그리고 캐릭터별(큰 순)."""
+    out = {'hunt': 0.0, 'boss': 0.0, 'monthly': 0.0, 'hunt_count': 0, 'boss_count': 0, 'monthly_count': 0}
     people = {}
     for r in rows:
-        out[r['kind']] += r['total']
-        out[r['kind'] + '_count'] += 1
+        kind = category(r)
+        out[kind] += r['total']
+        out[kind + '_count'] += 1
         who = people.setdefault(r.get('character') or NO_CHARACTER,
-                                {'name': r.get('character') or NO_CHARACTER, 'hunt': 0.0, 'boss': 0.0, 'total': 0.0})
-        who[r['kind']] += r['total']
+                                {'name': r.get('character') or NO_CHARACTER, 'hunt': 0.0, 'boss': 0.0, 'monthly': 0.0, 'total': 0.0})
+        who[kind] += r['total']
         who['total'] += r['total']
-    out['total'] = out['hunt'] + out['boss']
+    out['total'] = out['hunt'] + out['boss'] + out['monthly']
     out['characters'] = sorted(people.values(), key=lambda c: (c['name'] == NO_CHARACTER, -c['total']))
     return out
 
@@ -348,6 +381,10 @@ def overview(store, week=None, month=None, limit=200):
             'default_character': default_character, 'account_loaded': bool(store.setting(ACCOUNT_CHARACTERS)),
             'piece_price': store.setting(PIECE_PRICE) or None, 'piece_auction': store.setting(PIECE_AUCTION) or None,
             'boss_prices': store.setting(BOSS_PRICES) or {},
+            'boss_limit': WEEKLY_BOSS_LIMIT,
+            'boss_counts': {name: sum(1 for r in in_week if r['kind'] == 'boss' and (r.get('character') or '') == name
+                                      and counts_toward_limit(r['boss']))
+                            for name in {r.get('character') or '' for r in in_week if r['kind'] == 'boss'}},
             'crystals': [{'label': crystal_label(b, d), 'name': b, 'difficulty': d, 'price': crystal_price(b, d)}
                          for b, d, _, _ in CRYSTALS],
             'crystal_source': CRYSTAL_SOURCE,
@@ -386,7 +423,10 @@ def scheduled_bosses(store, nexon, names):
             bosses.append({'key': key, 'character': state['character'], 'boss': label, 'cycle': boss.get('cycle'),
                            'recorded': key in recorded, 'price': official or remembered.get(label),
                            'price_source': 'official' if official else ('remembered' if remembered.get(label) else None)})
-    return {'week_start': week, 'characters': characters, 'bosses': bosses}
+    for c in characters:
+        if not c.get('error'):
+            c['recorded_count'] = weekly_boss_count(store, c['name'], week_start(today()))
+    return {'week_start': week, 'characters': characters, 'bosses': bosses, 'boss_limit': WEEKLY_BOSS_LIMIT}
 
 # 강렬한 힘의 결정 판매 가격. 공식 공지(메이플스토리 업데이트 813, '보스 리워드 개편')의 표를 옮겼다.
 # 사용자가 공지 내용을 붙여 준 것으로, 이 컨테이너에서 공지 페이지를 직접 열어 대조하지는 못했다(2026-09-28).

@@ -844,3 +844,12 @@ body{zoom:var(--user-scale,1)}
 .history-chip{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--inset);color:var(--ink-dim);font-size:13px}
 .history-chip small{color:var(--muted);font-size:11px}
 .history-chip.active{border-color:var(--gold);color:var(--gold)}
+.boss-char-head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:10px 0 4px;padding-bottom:4px;border-bottom:1px solid var(--line-soft)}
+.boss-char-head small{color:var(--muted);font-size:11.5px}
+.boss-import-group{margin-bottom:10px}
+.boss-import-row{display:grid;grid-template-columns:70px 1fr 130px 80px;gap:8px;align-items:center;padding:4px 0}
+.boss-include{display:flex;align-items:center;gap:4px;font-size:12px;margin:0}
+.boss-price{font-size:12.5px;color:var(--ink-dim)}
+.boss-check.full{opacity:.4}
+.legend-monthly::before{background:var(--epic)}
+.trend-monthly{background:var(--epic)}

@@ -1,7 +1,7 @@
 """목표 탭 — 메소 목표까지 걸릴 기간, 다음 레벨까지 걸릴 기간.
 
 메소: 수익 기록으로 하루 평균 수익을 낸다.
-  - 사냥(재획): 재획비 1개 = 30분. 재획비 1개당 수익(조각 포함) × 최근 7일 하루 평균 재획비 개수.
+  - 사냥(재획): 소재비 1개 = 30분. 소재비 1개당 수익(조각 포함) × 최근 7일 하루 평균 소재비 개수.
   - 주보: 최근 몇 주(최대 4주)의 주간 평균 ÷ 7.
   기록이 7일보다 짧으면 '기록이 쌓일수록 정확해진다'고 알린다. 앱이 지어낸 값은 없다(모두 사용자가 적은 기록).
 경험치: 넥슨 Open API의 날짜별 캐릭터 기본 정보(레벨·경험치·경험치 %)로 최근 7일 하루 평균 경험치를 낸다.
@@ -45,7 +45,7 @@ def meso_plan(store, target=None, current=None):
     since = (day - timedelta(days=data_days - 1)).isoformat() if data_days else None
     hunts = [r for r in rows if r['kind'] == 'hunt']
     recent = [r for r in hunts if since and r['day'] >= since]
-    # 재획비 1개당 수익은 표본을 넉넉히(최근 30일, 재획비 개수를 적은 기록만).
+    # 소재비 1개당 수익은 표본을 넉넉히(최근 30일, 소재비 개수를 적은 기록만).
     timed = [r for r in hunts if r['day'] >= month_ago and r['flasks']]
     flasks_timed = sum(r['flasks'] for r in timed)
     per_flask = sum(r['total'] for r in timed) / flasks_timed if flasks_timed else None
@@ -53,7 +53,7 @@ def meso_plan(store, target=None, current=None):
     flasks_per_day = flasks_recent / data_days if data_days else 0.0
     untimed = [r for r in recent if not r['flasks']]
     if per_flask is not None:
-        # 재획비를 적지 않은 기록도 수익에는 들어간다(시간만 모를 뿐).
+        # 소재비를 적지 않은 기록도 수익에는 들어간다(시간만 모를 뿐).
         hunt_per_day = (per_flask * flasks_per_day) + (sum(r['total'] for r in untimed) / data_days if data_days else 0)
     else:
         hunt_per_day = sum(r['total'] for r in recent) / data_days if data_days else 0.0
@@ -75,7 +75,7 @@ def meso_plan(store, target=None, current=None):
     elif data_days < WINDOW_DAYS:
         notes.append(f'기록이 {data_days}일치예요. 사냥 시간 평균은 7일쯤 쌓이면 정확해져요.')
     if summary['has_hunts'] and per_flask is None:
-        notes.append('재획 기록에 재획비 개수를 적으면 사냥 시간(재획비 1개 = 30분)과 1개당 수익을 계산해요.')
+        notes.append('재획 기록에 소재비 개수를 적으면 사냥 시간(소재비 1개 = 30분)과 1개당 수익을 계산해요.')
     eta = expected_date(day, days_needed)
     if days_needed is not None and eta is None:
         notes.append('예상 기간이 너무 길어 도달 날짜를 표시할 수 없어요.')
@@ -154,7 +154,7 @@ def _exp_plan(store, nexon, name):
         notes.append('하루에 2레벨 넘게 오른 날은 그 사이 레벨의 경험치를 몰라 조금 적게 잡혔어요.')
     if per_day <= 0:
         notes.append('최근 7일 동안 경험치가 오르지 않았어요.')
-    # 그 캐릭터의 재획 기록과 맞춰 재획비 1개당 경험치 %.
+    # 그 캐릭터의 재획 기록과 맞춰 소재비 1개당 경험치 %.
     earnings.ensure(store)
     since = points[0]['at'].date().isoformat()
     flasks = sum(r['flasks'] or 0 for r in store.rows(

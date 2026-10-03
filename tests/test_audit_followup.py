@@ -110,7 +110,7 @@ class DataFollowupTests(unittest.TestCase):
             plan = goals.meso_plan(self.store)
         self.assertEqual(plan['data_days'], 7)
         self.assertEqual(plan['daily'], 0)
-        self.assertTrue(any('재획비' in note for note in plan['notes']))
+        self.assertTrue(any('소재비' in note for note in plan['notes']))
         self.assertFalse(any('수익 기록이 없어' in note for note in plan['notes']))
 
     def test_extreme_goal_keeps_numeric_estimate_without_date_overflow(self):

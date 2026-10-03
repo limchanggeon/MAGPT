@@ -184,8 +184,32 @@ def event_name(events, star):
     return '없음'
 
 
+def scroll_jump(row):
+    """스타포스 강화권(주문서)을 쓴 기록인가: 한 번에 2성 이상 올랐는데 10성 이하 1+1 이벤트로 설명되지 않는다."""
+    if row['after'] - row['before'] < 2:
+        return False
+    one_plus_one = any((e.get('plus') if isinstance(e, dict) else '1+1' in str(e)) for e in events_of(row)) and row['before'] <= 10
+    return not (one_plus_one and row['after'] - row['before'] == 2)
+
+
 def analyse(store, character, item, rows, picked, levels):
     rows = sorted(rows, key=lambda r: r['created'])
+    # 강화권(주문서)으로 한 번에 올린 기록은 메소를 쓴 강화가 아니다. 마지막 강화권 뒤부터만 실제 비용·기대값을 비교한다
+    # (예: 0→18성 강화권 뒤 18성에서 강화 — 18성까지 이득을 본 것으로 계산되던 문제, 2026-10-03 사용자 보고).
+    scrolls = [i for i, r in enumerate(rows) if scroll_jump(r)]
+    scroll_note = None
+    if scrolls:
+        last = rows[scrolls[-1]]
+        scroll_note = (f"{last['created'][:10]} 강화권(주문서)으로 {last['before']}→{last['after']}성 올린 기록은 메소를 쓴 강화가 아니라서 "
+                       f"그 뒤({last['after']}성부터)만 비교했습니다." + (f" 강화권 기록 {len(scrolls)}개." if len(scrolls) > 1 else ''))
+        rows = rows[scrolls[-1] + 1:]
+        if not rows:
+            return {'character': character, 'item': item, 'level': levels.get(item) or guess_level(item),
+                    'start': last['after'], 'reached': last['after'], 'end': last['after'],
+                    'first': last['created'][:10], 'last': last['created'][:10], 'attempts': 0, 'success': 0, 'destroy': 0,
+                    'safeguard': 0, 'fail': 0, 'spare_price': None, 'actual': None, 'expected': None,
+                    'notes': [scroll_note + ' 강화권 뒤 강화 기록은 아직 없습니다.'], 'missing': 'scroll_only', 'level_guessed': False,
+                    'scroll': {'from': last['before'], 'to': last['after']}}
     start, reached, end = rows[0]['before'], max(r['after'] for r in rows), rows[-1]['after']
     counts = {'attempts': len(rows), 'success': sum(r['after'] > r['before'] for r in rows),
               'destroy': sum(destroyed(r) for r in rows), 'safeguard': sum(bool(r['safeguard']) for r in rows)}
@@ -197,6 +221,9 @@ def analyse(store, character, item, rows, picked, levels):
              'spare_price': spare['price'] if spare['known'] else None,
              'actual': None, 'expected': None, 'notes': [], 'missing': None,
              'level_guessed': bool(level and item not in levels)}
+    if scroll_note:
+        group['notes'].append(scroll_note)
+        group['scroll'] = {'from': rows[0]['before'], 'to': rows[0]['before']}
     if any(r.get('superior') for r in rows):
         group['missing'] = 'superior'
         group['notes'].append('슈페리얼 장비는 강화 확률·비용 규칙이 달라 계산하지 않았습니다.')

@@ -243,9 +243,9 @@ $('#character-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
 $('#character-form').onreset=()=>{$('#character-form-title').textContent='캐릭터 등록';setTimeout(()=>$('#character-form').elements.id.value='',0);};
 // 수익 — 재획(메소 + 조각 x 조각 가격)과 주간 보스(결정석 / 파티 인원 + 추가 드롭).
 function mesoText(v){return v==null?'—':amountText(Math.round(v))+' 메소';}
-function readAmount(text){const v=String(text||'').trim();if(!v)return 0;if(/^0+(\.0+)?$/.test(v))return 0;return parsePrice(v);}
+function readAmount(text,unit='억'){const v=String(text||'').trim();if(!v)return 0;if(/^0+(\.0+)?$/.test(v))return 0;return parsePrice(v,unit);}
 function huntPreview(){
-  const f=$('#hunt-form').elements;const m=readAmount(f.meso.value),price=readAmount(f.piece_price.value),n=Number(f.pieces.value||0);
+  const f=$('#hunt-form').elements;const m=readAmount(f.meso.value),price=readAmount(f.piece_price.value,'만'),n=Number(f.pieces.value||0);
   const box=$('#hunt-preview');
   if(m==null||price==null){box.textContent="금액은 '12억 3500만'처럼 적어 주세요.";return;}
   if(!m&&!n){box.textContent='';return;}
@@ -253,6 +253,14 @@ function huntPreview(){
   box.textContent=`이번 재획 총수익 ${mesoText(m+n*price)}`+(n?` (메소 ${mesoText(m)} + 조각 ${fmt(n)}개 × ${mesoText(price)} = ${mesoText(n*price)})`:'');
 }
 function todayText(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+// 하루에 재획을 여러 번 했으면 그날 몇 번째인지(기록한 순서) 붙인다: '재획 2회차'.
+function huntOrder(rows){
+  const byDay={},seen=new Set();
+  // 서버 목록은 최신 먼저다. 같은 초에 적은 기록은 시각이 같아 목록 순서를 거꾸로 써서 먼저 적은 것이 앞에 오게 한다.
+  rows.filter(r=>r&&!seen.has(r.id)&&seen.add(r.id)).map((r,i)=>[r,i]).sort((a,b)=>String(a[0].created_at).localeCompare(String(b[0].created_at))||b[1]-a[1]).map(x=>x[0])
+    .forEach(r=>(byDay[r.day]=byDay[r.day]||[]).push(r.id));
+  return r=>{const list=byDay[r.day]||[];return list.length>1?` ${list.indexOf(r.id)+1}회차`:'';};
+}
 function earningsRow(r,label,detail){
   const row=el('div','earnings-row');const left=el('div');
   left.append(el('strong','',label),el('small','',`${r.day} · ${detail}`+(r.note?` · ${r.note}`:'')));
@@ -270,9 +278,11 @@ function addMonths(ym,months){const [y,m]=ym.split('-').map(Number);const i=y*12
 function characterTable(box,data,empty){
   box.replaceChildren();
   if(!data.characters.length){box.append(el('p','hint',empty));return;}
-  const table=el('table','totals-table');const head=el('tr');['캐릭터','재획','주보','합계'].forEach(h=>head.append(el('th','',h)));table.append(head);
-  data.characters.forEach(c=>{const tr=el('tr');tr.append(el('td','',c.name),el('td','num',mesoText(c.hunt)),el('td','num',mesoText(c.boss)),el('td','num total',mesoText(c.total)));table.append(tr);});
-  if(data.characters.length>1){const tr=el('tr','sum');tr.append(el('td','','합계'),el('td','num',mesoText(data.hunt)),el('td','num',mesoText(data.boss)),el('td','num total',mesoText(data.total)));table.append(tr);}
+  const monthly=data.monthly>0;   // 검은 마법사(월보) 기록이 있을 때만 열을 보인다
+  const table=el('table','totals-table');const head=el('tr');['캐릭터','재획','주보',...(monthly?['월보(검마)']:[]),'합계'].forEach(h=>head.append(el('th','',h)));table.append(head);
+  const cells=(c)=>[el('td','num',mesoText(c.hunt)),el('td','num',mesoText(c.boss)),...(monthly?[el('td','num',mesoText(c.monthly||0))]:[]),el('td','num total',mesoText(c.total))];
+  data.characters.forEach(c=>{const tr=el('tr');tr.append(el('td','',c.name),...cells(c));table.append(tr);});
+  if(data.characters.length>1){const tr=el('tr','sum');tr.append(el('td','','합계'),...cells(data));table.append(tr);}
   box.append(table);
 }
 function renderTrend(d){
@@ -282,11 +292,12 @@ function renderTrend(d){
     const isWeek=earningsTrend==='weeks',key=isWeek?x.week_start:x.month;
     const picked=isWeek?key===d.week.start:key===d.month.month;
     const col=el('button','trend-col'+(picked?' picked':''));col.type='button';
-    col.title=`${isWeek?dayShort(key)+' 주':monthText(key)} · 합계 ${mesoText(x.total)} (재획 ${mesoText(x.hunt)} · 주보 ${mesoText(x.boss)})`;
+    col.title=`${isWeek?dayShort(key)+' 주':monthText(key)} · 합계 ${mesoText(x.total)} (재획 ${mesoText(x.hunt)} · 주보 ${mesoText(x.boss)}`+(x.monthly?` · 월보(검마) ${mesoText(x.monthly)}`:'')+')';
     col.setAttribute('aria-label',col.title);
     const stack=el('div','trend-stack');
+    const monthly=el('span','trend-monthly');monthly.style.height=`${(x.monthly||0)/max*100}%`;
     const boss=el('span','trend-boss');boss.style.height=`${x.boss/max*100}%`;const hunt=el('span','trend-hunt');hunt.style.height=`${x.hunt/max*100}%`;
-    stack.append(boss,hunt);
+    stack.append(monthly,boss,hunt);
     col.append(el('small','trend-value',x.total?amountText(Math.round(x.total)):''),stack,el('span','trend-label',isWeek?dayShort(key):`${Number(key.slice(5))}월`));
     col.onclick=()=>{if(isWeek)earningsWeek=key;else earningsMonth=key;guard(loadEarnings);};
     box.append(col);
@@ -302,7 +313,7 @@ function fillCharacterSelects(d){
     const groups=new Map();choices.forEach(c=>{if(!groups.has(c.group)){const g=el('optgroup');g.label=c.group==='계정'?'계정 캐릭터':c.group==='기록'?'예전 기록':'관리 중';groups.set(c.group,g);select.append(g);}
       const o=el('option','',c.name+(c.level?` · ${c.world||''} Lv.${c.level}`:''));o.value=c.name;groups.get(c.group).append(o);});
     select.value=names.includes(keep)?keep:'';
-    select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});};
+    select.onchange=()=>{earningsCharacter=select.value;$$('.earnings-character').forEach(s=>{if(s!==select)s.value=select.value;});applyBossLimit();};
   });
 }
 // 계정 캐릭터 목록을 한 번도 안 불러왔으면 한 번 불러와 고르기 목록을 채운다(넥슨 API 키가 있을 때).
@@ -343,9 +354,10 @@ async function loadEarnings(){
   $('#week-label').textContent=weekText+(w.current?' · 이번 주':'');$('#month-label').textContent=monthText(m.month)+(m.current?' · 이번 달':'');
   $('#week-next').disabled=w.current;$('#month-next').disabled=m.current;$('#week-now').hidden=w.current;$('#month-now').hidden=m.current;
   const box=$('#earnings-summary');box.replaceChildren();
-  [[w.current?'이번 주':`${dayShort(w.start)} 주`,w.total,`재획 ${fmt(w.hunt_count)}회 ${mesoText(w.hunt)} · 주보 ${fmt(w.boss_count)}건 ${mesoText(w.boss)}`],
-   [m.current?'이번 달':monthText(m.month),m.total,`재획 ${mesoText(m.hunt)} · 주보 ${mesoText(m.boss)}`],
-   ['전체',a.total,(a.first_day?`${a.first_day}부터 · `:'')+`조각 ${fmt(a.pieces)}개 · 재획 평균 ${mesoText(a.hunt_average)}`+(a.per_flask?` · 재획비 1개당 ${mesoText(a.per_flask)}`:'')]]
+  const mb=(x)=>x.monthly?` · 월보(검마) ${mesoText(x.monthly)}`:'';
+  [[w.current?'이번 주':`${dayShort(w.start)} 주`,w.total,`재획 ${fmt(w.hunt_count)}회 ${mesoText(w.hunt)} · 주보 ${fmt(w.boss_count)}건 ${mesoText(w.boss)}`+mb(w)],
+   [m.current?'이번 달':monthText(m.month),m.total,`재획 ${mesoText(m.hunt)} · 주보 ${mesoText(m.boss)}`+mb(m)],
+   ['전체',a.total,(a.first_day?`${a.first_day}부터 · `:'')+`조각 ${fmt(a.pieces)}개 · 재획 평균 ${mesoText(a.hunt_average)}`+(a.per_flask?` · 소재비 1개당 ${mesoText(a.per_flask)}`:'')]]
    .forEach(([label,value,sub])=>{const c=el('div','earnings-stat');c.append(el('span','',label),el('strong','',mesoText(value)),el('small','',sub));box.append(c);});
   $('#week-chars-title').textContent=`캐릭터별 · ${w.current?'이번 주':weekText}`;$('#month-chars-title').textContent=`캐릭터별 · ${m.current?'이번 달':monthText(m.month)}`;
   characterTable($('#week-characters'),w,'이 주에는 기록이 없습니다.');characterTable($('#month-characters'),m,'이 달에는 기록이 없습니다.');
@@ -354,12 +366,21 @@ async function loadEarnings(){
   const who=(r)=>r.character?` · ${r.character}`:'';
   const hunts=$('#hunt-list');hunts.replaceChildren();
   if(!d.hunts.length)hunts.append(el('p','hint','이 주에는 재획 기록이 없습니다.'));
-  d.hunts.forEach(r=>hunts.append(earningsRow(r,'재획'+who(r)+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
+  const nth=huntOrder(d.month_hunts&&d.month_hunts.length?[...d.month_hunts,...d.hunts]:d.hunts);
+  d.hunts.forEach(r=>hunts.append(earningsRow(r,'재획'+nth(r)+who(r)+(r.flasks?` · 소재비 ${fmt(r.flasks)}개`:''),
     `메소 ${mesoText(r.meso)}`+(r.pieces?` + 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)} = ${mesoText(r.pieces*(r.piece_price||0))}`:''))));
+  applyBossLimit();
   const bosses=$('#boss-list');bosses.replaceChildren();
   if(!d.bosses.length)bosses.append(el('p','hint','이 주에는 주보 기록이 없습니다.'));
-  d.bosses.forEach(r=>bosses.append(earningsRow(r,r.boss+who(r),
-    `결정석 ${mesoText(r.crystal)}`+(r.party>1?` ÷ ${r.party}명`:'')+(r.extra?` · 드롭 ${mesoText(r.extra)}`:''))));
+  // 여러 캐릭터로 보스를 도는 사람을 위해 캐릭터별로 묶고, 캐릭터마다 주간 n/12를 보인다(검은 마법사 제외).
+  const byChar=new Map();d.bosses.forEach(r=>{const k=r.character||'';if(!byChar.has(k))byChar.set(k,[]);byChar.get(k).push(r);});
+  byChar.forEach((rows,name)=>{
+    const used=(d.boss_counts||{})[name]||0,sum=rows.reduce((s,r)=>s+r.total,0);
+    const head=el('div','boss-char-head');head.append(el('strong','',name||'캐릭터 미지정'),el('small','',`주간 보스 ${fmt(used)}/${fmt(d.boss_limit||12)} · ${mesoText(sum)}`));
+    if(byChar.size>1||name)bosses.append(head);
+    rows.forEach(r=>bosses.append(earningsRow(r,r.boss,
+      `결정석 ${mesoText(r.crystal)}`+(r.party>1?` ÷ ${r.party}명`:'')+(r.extra?` · 드롭 ${mesoText(r.extra)}`:''))));
+  });
 }
 $('#week-prev').onclick=()=>{earningsWeek=addDays(lastEarnings?lastEarnings.week.start:todayText(),-7);guard(loadEarnings);};
 $('#week-next').onclick=()=>{earningsWeek=addDays(lastEarnings?lastEarnings.week.start:todayText(),7);guard(loadEarnings);};
@@ -377,6 +398,8 @@ function earningsForm(id,kind,after){
     after();await loadEarnings();toast('기록을 저장했습니다.');});};
 }
 earningsForm('hunt-form','hunt',huntPreview);
+// 입력하는 동안 총수익 미리보기(2026-09-28 주보 체크박스 작업 때 빠졌던 것을 되살림).
+['meso','pieces','piece_price'].forEach(k=>$('#hunt-form').elements[k].addEventListener('input',huntPreview));
 // 수익 하위 탭 — 요약 · 재획(달력·캡처) · 주보.
 let earnTab='summary';
 function showEarnTab(name){earnTab=name;$$('.earn-tabs button').forEach(b=>{const on=b.dataset.earn===name;b.classList.toggle('active',on);b.setAttribute('aria-selected',on?'true':'false');});
@@ -385,14 +408,14 @@ $$('.earn-tabs button').forEach(b=>b.onclick=()=>showEarnTab(b.dataset.earn));
 // 정확한 금액 표기(입력 칸 채우기용): 1234567890 -> '12억 3456만 7890'
 function exactAmount(v){v=Math.round(Math.abs(v));const parts=[];[[1e12,'조'],[1e8,'억'],[1e4,'만']].forEach(([s,u])=>{const n=Math.floor(v/s);if(n){parts.push(n+u);v-=n*s;}});if(v||!parts.length)parts.push(String(v));return parts.join(' ');}
 function shortAmount(v){if(!v)return '';if(v>=1e8)return (Math.round(v/1e7)/10)+'억';if(v>=1e4)return Math.round(v/1e4)+'만';return fmt(v);}
-// 재획 달력: 고른 달을 목요일 시작 주로 나눈다. 칸에는 그날 재획 합계·재획비, 오른쪽 끝은 주 합계. 날짜를 누르면 그날 기록을 보고 그 날짜로 적는다.
+// 재획 달력: 고른 달을 목요일 시작 주로 나눈다. 칸에는 그날 재획 합계·소재비, 오른쪽 끝은 주 합계. 날짜를 누르면 그날 기록을 보고 그 날짜로 적는다.
 let calendarDay='';
 function renderCalendar(d){
   const box=$('#hunt-calendar');if(!box)return;box.replaceChildren();
   const days=d.hunt_days||{},m=d.month,first=m.start,last=m.end;
   $('#calendar-title').textContent=`재획 달력 · ${monthText(m.month)}`;
   const monthTotal=Object.values(days).reduce((s,x)=>s+x.total,0),flasks=Object.values(days).reduce((s,x)=>s+x.flasks,0);
-  $('#calendar-total').textContent=`이 달 재획 ${mesoText(monthTotal)}`+(flasks?` · 재획비 ${fmt(flasks)}개`:'');
+  $('#calendar-total').textContent=`이 달 재획 ${mesoText(monthTotal)}`+(flasks?` · 소재비 ${fmt(flasks)}개`:'');
   ['목','금','토','일','월','화','수','주 합계'].forEach(w=>box.append(el('div','cal-head',w)));
   const dow=new Date(first+'T00:00:00').getDay();let cursor=addDays(first,-((dow-4+7)%7));const today=todayText();
   while(cursor<=last){
@@ -401,7 +424,7 @@ function renderCalendar(d){
       const day=cursor,inMonth=day>=first&&day<=last,info=days[day];
       const cell=el('button','cal-cell'+(inMonth?'':' outside')+(info?' has':'')+(day===today?' today':'')+(day===calendarDay?' selected':''));cell.type='button';
       cell.append(el('span','cal-date',String(Number(day.slice(8)))));
-      if(info){week+=info.total;cell.append(el('strong','',shortAmount(info.total)));if(info.flasks)cell.append(el('small','',`재획비 ${fmt(info.flasks)}`));}
+      if(info){week+=info.total;cell.append(el('strong','',shortAmount(info.total)));if(info.flasks)cell.append(el('small','',`소재비 ${fmt(info.flasks)}`));}
       cell.title=info?`${day} · ${mesoText(info.total)} · ${info.count}회`:day;
       cell.disabled=day>today;
       cell.onclick=()=>{calendarDay=day;renderCalendar(d);};
@@ -419,7 +442,9 @@ function renderCalendarDay(d){
   add.onclick=()=>{$('#hunt-form').elements.day.value=calendarDay;$('#hunt-form').scrollIntoView({behavior:'smooth',block:'center'});};
   head.append(add);box.append(head);
   if(!rows.length){box.append(el('p','hint',calendarDay>=d.month.start&&calendarDay<=d.month.end?'이 날은 재획 기록이 없습니다.':'다른 달의 날짜입니다. ◀ ▶로 그 달을 보세요.'));return;}
-  rows.forEach(r=>box.append(earningsRow(r,'재획'+(r.character?` · ${r.character}`:'')+(r.flasks?` · 재획비 ${fmt(r.flasks)}개`:''),
+  const nth=huntOrder(rows);
+  rows.sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
+  rows.forEach(r=>box.append(earningsRow(r,'재획'+nth(r)+(r.character?` · ${r.character}`:'')+(r.flasks?` · 소재비 ${fmt(r.flasks)}개`:''),
     `메소 ${mesoText(r.meso)}`+(r.pieces?` + 조각 ${fmt(r.pieces)}개 × ${mesoText(r.piece_price)}`:''))));
 }
 // 캡처로 입력 — 사냥 전·후 캡처를 클라우드 모델이 읽고(메소·조각), 차이를 재획 기록 칸에 채운다. 저장은 사용자가 확인하고 누른다.
@@ -445,7 +470,7 @@ function captureReport(){
   out.textContent=(meso!=null?`번 메소 ${meso<0?'-':''}${exactAmount(meso)}`:'메소 차이를 못 구했어요(두 캡처에 인벤 메소가 보여야 해요)')
     +(pieces!=null?` · 조각 ${pieces>=0?'+':''}${fmt(pieces)}개`:' · 조각 차이 없음(한쪽에서 못 찾음)')
     +(both('storage_meso')?' · 창고 메소 변화 포함':'')+(meso!=null&&meso<0?' — 메소가 줄었어요. 캡처 순서를 확인하세요.':'')
-    +(flasks>0&&meso>0?` · 재획비 ${fmt(flasks)}개 → 1개당 메소 ${exactAmount(meso/flasks)}`:'')
+    +(flasks>0&&meso>0?` · 소재비 ${fmt(flasks)}개 → 1개당 메소 ${exactAmount(meso/flasks)}`:'')
     +(assumed.length?` (사냥 전 캡처에서 ${assumed.join('·')}을 못 찾아 0으로 봤어요)`:'');
   $('#capture-apply').disabled=!(meso>0||pieces>0);
 }
@@ -506,6 +531,20 @@ function renderBossChecklist(crystals){
     row.append(options,party);box.append(row);
   });
 }
+// 주간 보스 결정석은 캐릭터당 주 12개(검은 마법사 제외). 이미 기록한 수 + 지금 체크한 수가 12면 더 못 고르게 한다.
+const MONTHLY_BOSS=/^검은 마법사/;
+function bossLimitState(){
+  const f=$('#boss-form').elements,d=lastEarnings||{};const limit=d.boss_limit||12;
+  const recorded=((d.boss_counts||{})[f.character.value||'']||0);
+  const picked=[...$('#boss-checklist').querySelectorAll('input:checked')].filter(i=>!MONTHLY_BOSS.test(i.value)).length+(f.boss.value.trim()&&!MONTHLY_BOSS.test(f.boss.value.trim())?1:0);
+  return {limit,recorded,picked,left:limit-recorded-picked};
+}
+function applyBossLimit(){
+  const s=bossLimitState();
+  $('#boss-checklist').querySelectorAll('input').forEach(i=>{const full=s.left<=0&&!i.checked&&!MONTHLY_BOSS.test(i.value);
+    i.disabled=full;i.closest('.boss-check').classList.toggle('full',full);});
+  const note=$('#boss-limit');if(note)note.textContent=`이번 주 이 캐릭터: 기록 ${fmt(s.recorded)} + 선택 ${fmt(s.picked)} / ${fmt(s.limit)} (검은 마법사 제외)`+(s.left<0?' — 12개를 넘었어요':'');
+}
 function checkedBosses(){
   return [...$('#boss-checklist').querySelectorAll('input:checked')].map(i=>({boss:i.value,price:Number(i.dataset.price),
     party:Number(i.closest('.boss-row').querySelector('.boss-party').value)}));
@@ -518,6 +557,7 @@ function bossPreview(){
   const sum=picked.reduce((s,b)=>s+b.price/b.party,0)+custom+x;
   const count=picked.length+(custom?1:0);
   box.textContent=count||x?`${count}개 보스 · 내 몫 합계 ${mesoText(sum)}`:'';
+  applyBossLimit();
 }
 ['crystal','party','extra','boss'].forEach(k=>$('#boss-form').elements[k].addEventListener('input',bossPreview));
 $('#boss-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
@@ -538,34 +578,56 @@ $('#boss-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
 $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
   const box=$('#boss-import');box.hidden=false;box.replaceChildren(el('p','hint','캐릭터별 스케줄러 조회 중'));
   const d=await api('earnings/scheduler',{});box.replaceChildren();
-  const chips=el('div','boss-import-chars');
-  d.characters.forEach(c=>chips.append(el('span','badge',c.error?`${c.name} · 조회 실패`:`${c.name} · 주보 ${c.weekly_clear??'—'}/${c.weekly_limit??'—'}`)));
-  box.append(chips);
+  const limit=d.boss_limit||12;
   const failed=d.characters.filter(c=>c.error);if(failed.length)box.append(el('p','hint',failed.map(c=>`${c.name}: ${c.error}`).join(' / ')));
   if(!d.bosses.length){box.append(el('p','hint',`${d.week_start} 주에 완료한 보스가 없습니다. 스케줄러는 보스를 잡은 뒤에 갱신됩니다.`));return;}
-  const list=el('div','boss-import-list');
-  d.bosses.forEach(b=>{
-    const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
-    const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;check.setAttribute('aria-label',`${b.character} ${b.boss} 저장`);
-    const name=el('div');name.append(el('strong','',b.boss),el('small','',b.character+(b.cycle?` · ${b.cycle}`:'')+(b.price_source==='official'?' · 공식 가격':b.price_source==='remembered'?' · 지난 입력 가격':'')+(b.recorded?' · 이미 기록함':'')));
-    const price=el('input');price.placeholder='결정석 판매가';price.autocomplete='off';price.setAttribute('aria-label',`${b.boss} 결정석 판매가`);if(b.price)price.value=amountText(b.price);price.disabled=b.recorded;
-    const party=el('input');party.type='number';party.min=1;party.max=6;party.value=1;party.setAttribute('aria-label',`${b.boss} 파티 인원`);party.disabled=b.recorded;
-    row.append(check,name,price,party);row._boss=b;list.append(row);
+  // 캐릭터별로 묶는다. 결정석 판매가는 공식 가격표로 자동(모르는 보스만 직접 입력), '포함'을 끄면 저장하지 않는다.
+  const groups=new Map();d.bosses.forEach(b=>{if(!groups.has(b.character))groups.set(b.character,[]);groups.get(b.character).push(b);});
+  const rows=[];
+  const refresh=()=>groups.forEach((list,name)=>{
+    const g=box.querySelector(`[data-char="${CSS.escape(name)}"]`);if(!g)return;
+    const info=d.characters.find(c=>c.name===name)||{};const used=info.recorded_count||0;
+    const on=rows.filter(r=>r.character===name&&r.check.checked&&!r.check.disabled&&!MONTHLY_BOSS.test(r.b.boss));
+    const left=limit-used-on.length;
+    rows.filter(r=>r.character===name&&!r.b.recorded).forEach(r=>{if(!MONTHLY_BOSS.test(r.b.boss))r.check.disabled=!r.check.checked&&left<=0;});
+    const share=rows.filter(r=>r.character===name&&r.check.checked&&!r.b.recorded).reduce((s,r)=>s+(r.price()||0)/Math.max(1,Number(r.party.value||1)),0);
+    g.querySelector('.boss-char-count').textContent=`기록 ${fmt(used)} + 이번에 ${fmt(on.length)} / ${fmt(limit)} · 내 몫 ${mesoText(share)}`+(left<0?' — 12개 초과':'');
   });
-  const head=el('div','boss-import-row boss-import-head');head.append(el('span',''),el('span','','보스'),el('span','','결정석 판매가'),el('span','','인원'));
-  const save=el('button','primary','선택한 보스 저장');save.type='button';
+  groups.forEach((list,name)=>{
+    const info=d.characters.find(c=>c.name===name)||{};
+    const g=el('div','boss-import-group');g.dataset.char=name;
+    const head=el('div','boss-char-head');head.append(el('strong','',name),el('small','boss-char-count',''));
+    if(info.weekly_clear!=null)head.append(el('small','',`스케줄러 주보 ${info.weekly_clear}/${info.weekly_limit??'—'}`));
+    g.append(head);
+    list.forEach(b=>{
+      const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
+      const toggle=el('label','boss-include');const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;
+      toggle.append(check,el('span','',b.recorded?'기록함':'포함'));check.setAttribute('aria-label',`${b.character} ${b.boss} 포함`);
+      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${b.cycle} · `:'')+(b.price_source==='official'?'공식 판매가':b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
+      let priceBox,price;
+      if(b.price){priceBox=el('span','boss-price',mesoText(b.price));price=()=>b.price;}
+      else{priceBox=el('input');priceBox.placeholder='결정석 판매가(억)';priceBox.autocomplete='off';priceBox.disabled=b.recorded;price=()=>readAmount(priceBox.value);priceBox.oninput=refresh;}
+      const party=el('select','boss-party');[1,2,3,4,5,6].forEach(n=>{const o=el('option','',n===1?'솔로':`${n}인`);o.value=n;party.append(o);});party.disabled=b.recorded;party.onchange=refresh;
+      check.onchange=refresh;
+      row.append(toggle,label,priceBox,party);g.append(row);
+      rows.push({b,character:name,check,party,price,priceBox,row});
+    });
+    box.append(g);
+  });
+  const save=el('button','primary','포함한 보스 저장');save.type='button';
   save.onclick=()=>task(save,async()=>{
-    const rows=[...list.children].filter(r=>r.querySelector('input[type=checkbox]').checked);
-    if(!rows.length)throw new Error('저장할 보스를 고르세요.');
+    const picked=rows.filter(r=>r.check.checked&&!r.b.recorded);
+    if(!picked.length)throw new Error('저장할 보스를 켜 주세요.');
     let saved=0;const errors=[];
-    for(const r of rows){const [,price,party]=r.querySelectorAll('input');const b=r._boss;
-      try{await api('earnings',{kind:'boss',boss:b.boss,crystal:price.value,party:party.value,character:b.character,source_key:b.key,day:todayText()});saved++;
-        r.classList.add('recorded');r.querySelectorAll('input').forEach(i=>i.disabled=true);r.querySelector('input[type=checkbox]').checked=false;}
-      catch(err){errors.push(`${b.character} ${b.boss}: ${err.message}`);}}
-    await loadEarnings();
+    for(const r of picked){
+      const crystal=r.b.price_source==='official'?'':(r.b.price?String(r.b.price):r.priceBox.value);
+      try{await api('earnings',{kind:'boss',boss:r.b.boss,crystal,party:r.party.value,character:r.character,source_key:r.b.key,day:todayText()});saved++;
+        r.b.recorded=true;r.row.classList.add('recorded');r.check.checked=false;r.check.disabled=true;r.party.disabled=true;}
+      catch(err){errors.push(`${r.character} ${r.b.boss}: ${err.message}`);}}
+    await loadEarnings();refresh();
     if(errors.length)toast(`${saved}건 저장, ${errors.length}건 실패 — ${errors[0]}`,true);else toast(`${saved}건 저장했습니다.`);
   });
-  box.append(head,list,save);
+  box.append(save);refresh();
 });
 
 // 기록 — 스타포스 강화 기록(넥슨 Open API)을 장비마다 묶어 실제 비용과 기대값을 비교한다.
@@ -695,12 +757,14 @@ $('#price-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
   if(price==null)throw new Error("노작값은 '32억' 또는 숫자로 입력하세요.");
   await api('prices',{item:d.item,price,add_grade:d.add_grade||null,note:d.note||null,source:'user'});
   e.target.reset();await loadPrices();toast('노작값을 저장했습니다.');});};
-function parsePrice(text){
+// 단위 없이 적은 작은 수(10만 미만)는 unit(억·만)으로 읽는다: 12.5 → 12억 5천만. unit이 없으면 그대로(캡처 등).
+function parsePrice(text,unit){
   if(!text)return null;let c=String(text).replaceAll(',','').trim().replace(/(\d+(?:\.\d+)?)\s*천/g,(_,n)=>String(parseFloat(n)*1000));let total=0,hit=false;
   [['조',1e12],['억',1e8],['만',1e4]].forEach(([u,scale])=>{
     const m=c.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*'+u));if(m){total+=parseFloat(m[1])*scale;hit=true;c=c.replace(m[0],' ');}});
   if(hit){const rest=c.match(/\d+(?:\.\d+)?/g)||[];if(rest.length===1&&parseFloat(rest[0])<10000)total+=parseFloat(rest[0]);return total;}  // '2764만 4807'
-  return /^\d+(\.\d+)?$/.test(c)?parseFloat(c):null;
+  if(!/^\d+(\.\d+)?$/.test(c))return null;const v=parseFloat(c);
+  return unit&&v<100000?v*({'억':1e8,'만':1e4}[unit]||1):v;
 }
 // 업데이트 — 새 버전이 있으면 위쪽에 알린다. '업데이트'를 누르면 받아서 확인한 뒤 업데이터가 바꾸고 다시 켠다.
 let updateTimer,updateDismissed=false;
@@ -745,14 +809,14 @@ function renderMesoPlan(p,flasksOverride){
     box.append(head);
   }
   const basis=el('dl','goal-basis');const pair=(k,v)=>basis.append(el('dt','',k),el('dd','',v));
-  pair('사냥',p.per_flask!=null?`하루 재획비 ${fmt(Math.round(flasks*10)/10)}개(${fmt(Math.round(flasks*p.flask_minutes/6)/10)}시간) × 1개당 ${mesoText(p.per_flask)} = 하루 ${mesoText(huntDay)}`:`하루 ${mesoText(huntDay)} (재획비 개수를 적은 기록이 없어 시간은 몰라요)`);
+  pair('사냥',p.per_flask!=null?`하루 소재비 ${fmt(Math.round(flasks*10)/10)}개(${fmt(Math.round(flasks*p.flask_minutes/6)/10)}시간) × 1개당 ${mesoText(p.per_flask)} = 하루 ${mesoText(huntDay)}`:`하루 ${mesoText(huntDay)} (소재비 개수를 적은 기록이 없어 시간은 몰라요)`);
   pair('주보',p.boss_weeks?`주 ${mesoText(p.boss_per_week)} (최근 ${fmt(p.boss_weeks)}주 평균) = 하루 ${mesoText(p.boss_per_week/7)}`:'기록 없음');
   pair('기준',`최근 ${fmt(p.data_days)}일 기록 · 조각은 기록한 가격으로 포함`);
   box.append(basis);
   if(p.per_flask!=null){
     const whatif=el('label','goal-whatif');const input=el('input');input.type='number';input.min=0;input.max=48;input.step=0.5;input.value=Math.round(flasks*10)/10;
     input.oninput=()=>renderMesoPlan(lastMesoPlan,Number(input.value)||0);
-    whatif.append(document.createTextNode('하루 재획비를 '),input,document.createTextNode('개 쓰면'));box.append(whatif);
+    whatif.append(document.createTextNode('하루 소재비를 '),input,document.createTextNode('개 쓰면'));box.append(whatif);
     if(flasksOverride!=null)requestAnimationFrame(()=>box.querySelector('.goal-whatif input').focus());   // 다시 그려도 계속 입력하게
   }
   p.notes.forEach(n=>box.append(el('p','hint',n)));
@@ -773,7 +837,7 @@ $('#exp-load').onclick=e=>task(e.currentTarget,async()=>{
   box.append(head);
   if(p.per_day!=null){const basis=el('dl','goal-basis');const pair=(k,v)=>basis.append(el('dt','',k),el('dd','',v));
     pair('최근',`${p.since}부터 ${fmt(p.span_days)}일 동안 +${(p.gain/p.required*100).toFixed(2)}% (현재 레벨 기준)`);
-    if(p.per_flask_percent!=null)pair('재획비 1개당',`약 +${p.per_flask_percent.toFixed(2)}% (이 캐릭터 재획 기록 ${fmt(p.flasks)}개 기준)`);
+    if(p.per_flask_percent!=null)pair('소재비 1개당',`약 +${p.per_flask_percent.toFixed(2)}% (이 캐릭터 재획 기록 ${fmt(p.flasks)}개 기준)`);
     box.append(basis);}
   (p.notes||[]).forEach(n=>box.append(el('p','hint',n)));
 });

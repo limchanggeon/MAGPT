@@ -1267,14 +1267,14 @@ class EarningsTests(unittest.TestCase):
         self.assertEqual([(c['name'],c['group']) for c in o['character_choices']],
                          [('본캐','관리 중'),('부캐','계정'),('유니온캐','계정'),('지운캐','기록')])
         self.assertEqual(o['default_character'],'본캐'); self.assertTrue(o['account_loaded'])
-    def test_piece_price_without_unit_is_refused(self):
-        # 사용자 보고(2026-09-29): 조각이 수익 합계에 안 들어간다 — '650'처럼 단위 없이 적으면 650메소로 계산된다.
-        with self.assertRaises(AppError) as e:
-            earnings.add(self.store,{'kind':'hunt','meso':'8억','pieces':'30','piece_price':'650'})
-        self.assertIn('650만',str(e.exception))
+    def test_amounts_without_unit_use_default_units(self):
+        # 사용자 보고(2026-09-29): '650'처럼 단위 없이 적으면 조각이 650메소로 계산됐다.
+        # 사용자 요청(2026-10-03): 단위 없이 적으면 메소는 억(12.5 → 12억 5천만), 조각 가격은 만(650 → 650만).
+        first=earnings.add(self.store,{'kind':'hunt','meso':'12.5','pieces':'30','piece_price':'650'})
+        self.assertEqual((first['meso'],first['piece_price']),(1_250_000_000,6_500_000))
         r=earnings.add(self.store,{'kind':'hunt','meso':'8억','pieces':'30','piece_price':'650만'})
         self.assertEqual(r['total'],800_000_000+30*6_500_000)
-        self.assertEqual(earnings.overview(self.store)['week']['hunt'],r['total'])   # 합계에 조각 몫이 들어간다
+        self.assertEqual(earnings.overview(self.store)['week']['hunt'],first['total']+r['total'])   # 합계에 조각 몫이 들어간다
     def test_validation(self):
         for bad in [{'kind':'x'},{'kind':'hunt'},{'kind':'hunt','meso':'abc'},{'kind':'hunt','pieces':5},
                     {'kind':'hunt','meso':'1억','day':'2999-01-01'},{'kind':'boss','crystal':'1억'},
@@ -1982,7 +1982,7 @@ class GoalTests(unittest.TestCase):
         from datetime import date
         from mepiti import goals
         with patch('mepiti.earnings.today', return_value=date(2026, 9, 30)):
-            # 7일 동안 재획비 14개(하루 2개 = 1시간), 1개당 1억(조각 포함) → 사냥 하루 2억
+            # 7일 동안 소재비 14개(하루 2개 = 1시간), 1개당 1억(조각 포함) → 사냥 하루 2억
             for i in range(7):
                 earnings.add(self.store, {'kind': 'hunt', 'meso': '1억 5000만', 'pieces': '10', 'piece_price': '500만',
                                           'flasks': '2', 'day': f'2026-09-{24 + i}'})
@@ -2002,7 +2002,7 @@ class GoalTests(unittest.TestCase):
             earnings.add(self.store, {'kind': 'hunt', 'meso': '3억', 'day': '2026-09-29'})
             p = goals.meso_plan(self.store, '30억')
         self.assertEqual(p['data_days'], 2); self.assertEqual(p['daily'], 150_000_000)
-        self.assertTrue(any('7일' in n for n in p['notes'])); self.assertTrue(any('재획비 개수' in n for n in p['notes']))
+        self.assertTrue(any('7일' in n for n in p['notes'])); self.assertTrue(any('소재비 개수' in n for n in p['notes']))
         self.assertEqual(p['days'], 20)
     def test_exp_plan_with_level_up(self):
         from datetime import date, datetime as real_dt
