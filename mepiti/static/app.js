@@ -578,6 +578,10 @@ $('#boss-form').onsubmit=e=>{e.preventDefault();task(e.submitter,async()=>{
 $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
   const box=$('#boss-import');box.hidden=false;box.replaceChildren(el('p','hint','캐릭터별 스케줄러 조회 중'));
   const d=await api('earnings/scheduler',{});box.replaceChildren();
+  // 불러온 목록을 닫는 버튼(저장하지 않고 접기). 다시 누르면 새로 불러온다.
+  const bar=el('div','boss-import-bar');const close=el('button','secondary','닫기');close.type='button';
+  close.onclick=()=>{box.hidden=true;box.replaceChildren();};
+  bar.append(el('strong','',`${d.week_start} 주 스케줄러에서 불러온 보스`),close);box.append(bar);
   const limit=d.boss_limit||12;
   const failed=d.characters.filter(c=>c.error);if(failed.length)box.append(el('p','hint',failed.map(c=>`${c.name}: ${c.error}`).join(' / ')));
   if(!d.bosses.length){box.append(el('p','hint',`${d.week_start} 주에 완료한 보스가 없습니다. 스케줄러는 보스를 잡은 뒤에 갱신됩니다.`));return;}
@@ -603,7 +607,7 @@ $('#boss-import-button').onclick=e=>task(e.currentTarget,async()=>{
       const row=el('div','boss-import-row'+(b.recorded?' recorded':''));
       const toggle=el('label','boss-include');const check=el('input');check.type='checkbox';check.checked=!b.recorded;check.disabled=b.recorded;
       toggle.append(check,el('span','',b.recorded?'기록함':'포함'));check.setAttribute('aria-label',`${b.character} ${b.boss} 포함`);
-      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${b.cycle} · `:'')+(b.price_source==='official'?'공식 판매가':b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
+      const label=el('div');label.append(el('strong','',b.boss),el('small','',(b.cycle?`${({bossWeekly:'주간',bossMonthly:'월간',bossMonthl:'월간',bossDaily:'일간'})[b.cycle]||b.cycle} · `:'')+(b.price_source==='official'?'공식 판매가':b.price_source==='remembered'?'지난번 입력 가격':'가격표에 없음 — 직접 적어 주세요')));
       let priceBox,price;
       if(b.price){priceBox=el('span','boss-price',mesoText(b.price));price=()=>b.price;}
       else{priceBox=el('input');priceBox.placeholder='결정석 판매가(억)';priceBox.autocomplete='off';priceBox.disabled=b.recorded;price=()=>readAmount(priceBox.value);priceBox.oninput=refresh;}

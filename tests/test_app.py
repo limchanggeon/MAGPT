@@ -1305,7 +1305,8 @@ class SchedulerImportTests(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
     def test_only_completed_bosses(self):
         d=earnings.scheduled_bosses(self.store,self.nexon,['본캐','부캐','없는캐'])
-        self.assertEqual([(b['character'],b['boss']) for b in d['bosses']],[('본캐','세렌 (하드)'),('부캐','루시드 (노멀)')])
+        # 스케줄러의 짧은 이름은 결정석 표 이름으로 맞춘다('세렌' → '선택받은 세렌', 2026-10-03).
+        self.assertEqual([(b['character'],b['boss']) for b in d['bosses']],[('본캐','선택받은 세렌 (하드)'),('부캐','루시드 (노멀)')])
         self.assertEqual([b['price'] for b in d['bosses']],[302_000_000,17_800_000])   # 공식 공지 가격
         self.assertEqual(d['bosses'][0]['price_source'],'official')
         self.assertEqual(d['characters'][2]['error'],'조회 실패')

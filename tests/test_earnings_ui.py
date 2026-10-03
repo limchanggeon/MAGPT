@@ -168,3 +168,23 @@ class PriceTableTests(unittest.TestCase):
             prices.read_table(self.model({}), 'gemini', 'data:text/plain;base64,AA')
         with self.assertRaises(AppError):
             ModelRouter(object(), {'gemini': object()}).read_price_table('qwen3.5:2b', 'image/png', 'AA')
+
+
+class SchedulerPriceTests(unittest.TestCase):
+    """스케줄러는 난이도를 영어로 준다 — 결정석 표(한국어)와 맞춰 가격을 채운다(2026-10-03 실제 응답 확인)."""
+    def test_english_difficulty_and_short_names(self):
+        self.assertEqual(earnings.boss_label({'name': '세렌', 'difficulty': 'hard'}), '선택받은 세렌 (하드)')
+        self.assertEqual(earnings.boss_label({'name': '스우', 'difficulty': 'extreme'}), '스우 (익스트림)')
+        self.assertTrue(earnings.crystal_price('자쿰', 'chaos'))
+        self.assertEqual(earnings.crystal_price('자쿰', 'chaos'), earnings.crystal_price('자쿰', '카오스'))
+
+    def test_scheduler_rows_get_official_price(self):
+        class Nexon:
+            def scheduler(self, name):
+                return {'character': name, 'bosses': [{'name': '세렌', 'difficulty': 'hard', 'complete': True, 'cycle': 'bossWeekly'},
+                                                      {'name': '모르는보스', 'difficulty': 'hard', 'complete': True, 'cycle': 'bossWeekly'}]}
+        store = Store(tempfile.mkdtemp())
+        d = earnings.scheduled_bosses(store, Nexon(), ['본캐'])
+        prices = {b['boss']: (b['price'], b['price_source']) for b in d['bosses']}
+        self.assertEqual(prices['선택받은 세렌 (하드)'][1], 'official')
+        self.assertIsNone(prices['모르는보스 (하드)'][0])          # 표에 없으면 직접 입력

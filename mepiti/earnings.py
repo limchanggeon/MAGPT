@@ -391,8 +391,29 @@ def overview(store, week=None, month=None, limit=200):
             'crystal_alert': store.setting('crystal_price_alert') or None}
 
 
+# 스케줄러(넥슨 API)는 난이도를 영어로 준다(easy·normal·hard·chaos·extreme). 결정석 표는 한국어라 맞춰 읽는다(2026-10-03 사용자 보고:
+# 주보 불러오기에서 결정석 가격이 안 채워짐 — 실제 응답 확인 '자쿰' 'chaos').
+DIFFICULTY_KO = {'easy': '이지', 'normal': '노멀', 'hard': '하드', 'chaos': '카오스', 'extreme': '익스트림'}
+
+
+def difficulty_ko(value):
+    text = str(value or '').strip()
+    return DIFFICULTY_KO.get(text.lower(), text)
+
+
+def table_name(name, difficulty):
+    """스케줄러의 짧은 이름('세렌')을 결정석 표 이름('선택받은 세렌')으로. 표에 없으면 그대로."""
+    key, level = _squash(name), _squash(difficulty_ko(difficulty))
+    for boss, diff, _, _ in CRYSTALS:
+        full = _squash(boss)
+        if diff == level and (full == key or key in full or full in key):
+            return boss
+    return name
+
+
 def boss_label(boss):
-    return crystal_label(boss['name'], boss.get('difficulty'))
+    level = difficulty_ko(boss.get('difficulty'))
+    return crystal_label(table_name(boss['name'], level), level)
 
 
 def scheduled_bosses(store, nexon, names):
@@ -419,9 +440,11 @@ def scheduled_bosses(store, nexon, names):
                 continue
             label = boss_label(boss)
             key = f"{week}|{state['character']}|{label}"
+            # 이전 버전은 스케줄러 이름·영어 난이도 그대로 키를 만들었다('세렌 (hard)'). 그 키로 이미 기록했으면 기록한 것으로 본다.
+            legacy = f"{week}|{state['character']}|{crystal_label(boss['name'], boss.get('difficulty'))}"
             official = crystal_price(boss['name'], boss.get('difficulty'))
             bosses.append({'key': key, 'character': state['character'], 'boss': label, 'cycle': boss.get('cycle'),
-                           'recorded': key in recorded, 'price': official or remembered.get(label),
+                           'recorded': key in recorded or legacy in recorded, 'price': official or remembered.get(label),
                            'price_source': 'official' if official else ('remembered' if remembered.get(label) else None)})
     for c in characters:
         if not c.get('error'):
@@ -490,7 +513,7 @@ def _squash(text):
 
 def crystal_price(name, difficulty, day=None):
     """보스 이름·난이도의 결정석 판매가. 스케줄러의 짧은 이름('세렌')도 표의 이름('선택받은 세렌')과 맞춘다."""
-    key, level = _squash(name), _squash(difficulty)
+    key, level = _squash(name), _squash(difficulty_ko(difficulty))
     if not key or not level:
         return None
     for boss, diff, old, new in CRYSTALS:

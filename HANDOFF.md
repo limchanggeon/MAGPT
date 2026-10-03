@@ -1,7 +1,7 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.5.1 릴리스 완료(시세표 이미지로 노작값 넣기). 전체 요구사항 완료 아님.
+- 현재 단계: v0.5.1 릴리스 후, 주보 불러오기 결정석 가격 자동(영어 난이도 맞춤)·닫기(미릴리스). 전체 요구사항 완료 아님.
 - 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.1(`0519e95`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
@@ -1431,3 +1431,8 @@ node tests/test_frontend.js
 - 사실: mitemprice.kr 약관이 자동 수집·2차 가공 금지, robots.txt가 api.php 금지 — 자동 수집하지 않음.
 - 변경: `mepiti/adapters.py`·`prices.py`·`server.py`, `static/index.html·app.js·style.css`, `scripts/demo_server.py`(가짜 시세표), README, 테스트 3개. 결과는 IMPLEMENTATION.md. 미릴리스.
 - **릴리스 v0.5.1**(2026-10-03, 사용자 "ㅇㅋㅇㅋ"): `0519e95`, CI 통과, `main` 빨리감기(`b974d90..0519e95`), 태그, 릴리스 성공(파일 5개), API latest v0.5.1. https://github.com/limchanggeon/MAGPT/releases/tag/v0.5.1
+
+### 2026-10-03 — 주보 불러오기 가격 자동·닫기 (사용자 보고)
+
+- 변경: `mepiti/earnings.py`(난이도·이름 맞춤, 예전 키 인정), `static/app.js`·`style.css`(닫기, 주기 표시), 테스트(`test_app.py` 기대값, `test_earnings_ui.py` 2개). 결과 IMPLEMENTATION.md. 미릴리스.
+- 남은 것: 결정석 표(업데이트 813 기준)에 없는 보스·난이도(칼로스 익스트림, 카링 익스트림, 림보·발드릭스·유피테르 하드 등)는 가격 직접 입력 — 공식 가격표를 받으면 추가.
