@@ -1,8 +1,8 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-03 (KST)
-- 현재 단계: v0.5.2 준비 — 주보 불러오기 결정석 가격 자동·닫기, 리부트(에오스·헬리오스) 결정석 절반. 전체 요구사항 완료 아님.
-- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.1(`0519e95`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
+- 현재 단계: v0.5.2 릴리스 완료(주보 불러오기 결정석 가격 자동·닫기, 리부트(에오스·헬리오스) 결정석 절반). 전체 요구사항 완료 아님.
+- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.2(`250e734`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
 - 앞선 점검 상세: [2026-10-03 보고서](docs/audit/2026-10-03.md), [측정 원자료](docs/audit/2026-10-03-benchmark.json). 이전 점검은 [2026-10-01 보고서](docs/audit/2026-10-01.md).
@@ -1442,4 +1442,4 @@ node tests/test_frontend.js
 - 변경: `mepiti/earnings.py`(`REBOOT_WORLDS`·`worlds`·`crystal_for`, 직접 기록·불러오기·overview), `static/app.js`(미리보기 절반·안내), `test_earnings_ui.py` 3개, README, IMPLEMENTATION.md. 버전 0.5.2(3개 파일).
 - 범위: 앱이 채우는 공식 결정석 가격만 절반. 직접 적은 금액은 그대로. 월드를 모르는 캐릭터(계정 목록·조회 기록 없음)는 일반 가격.
 - 검증(이번): Python 488개 통과, `tests/test_frontend.js` 통과. 실제 리부트 캐릭터 화면 확인은 안 함.
-
+- **릴리스 v0.5.2**(2026-10-03, 사용자 "ㅇㅇㅇㅇㅇ"): `250e734`, CI 통과, `main` 빨리감기(`0519e95..250e734`), 태그, 릴리스 성공(파일 5개), API latest v0.5.2. https://github.com/limchanggeon/MAGPT/releases/tag/v0.5.2
