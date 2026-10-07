@@ -1,0 +1,93 @@
+{
+  "checked_at": "2026-10-07",
+  "sources": [
+    {
+      "title": "보스 컨텐츠 진행 방법",
+      "url": "https://maplestory.nexon.com/Guide/N23GameInformation/Articles/458",
+      "topics": [
+        "보스",
+        "주보",
+        "결정석",
+        "보상"
+      ],
+      "status": "공식 가이드 본문 확인 · 적용 수치 별도 검토"
+    },
+    {
+      "title": "레벨과 경험치",
+      "url": "https://maplestory.nexon.com/Guide/N23GameInformation/Articles/377",
+      "topics": [
+        "경험치",
+        "레벨",
+        "성장",
+        "사냥"
+      ],
+      "status": "공식 가이드 검색 확인 · 계산표 미추출"
+    },
+    {
+      "title": "캐릭터 프리셋",
+      "url": "https://maplestory.nexon.com/Guide/N23GameInformation/Articles/417",
+      "topics": [
+        "장비",
+        "프리셋",
+        "스킬"
+      ],
+      "status": "공식 가이드 검색 확인 · API 대조 필요"
+    },
+    {
+      "title": "템세팅 가이드: 서론 및 유챔 라인",
+      "url": "https://m.inven.co.kr/board/maple/2304/48305?vtype=mobile",
+      "topics": [
+        "장비",
+        "템세팅",
+        "유니온",
+        "무기",
+        "보조무기",
+        "엠블렘",
+        "스펙업"
+      ],
+      "status": "커뮤니티 본문 접근 확인 · 의견 및 조건 검토 필요"
+    },
+    {
+      "title": "유니온코인 수급 환기팁",
+      "url": "https://m.inven.co.kr/board/maple/2304/48254",
+      "topics": [
+        "유니온",
+        "코인",
+        "수급"
+      ],
+      "status": "커뮤니티 본문 접근 확인 · 패치 대조 필요"
+    },
+    {
+      "title": "경험치 효율 도구 하루1소재",
+      "url": "https://m.inven.co.kr/board/maple/2304/47920?iskin=maple&vtype=mobile",
+      "topics": [
+        "경험치",
+        "사냥",
+        "재획",
+        "효율"
+      ],
+      "status": "검색 확인 · 외부 도구 계산 검증 전"
+    },
+    {
+      "title": "전투력 심층해저분석",
+      "url": "https://www.inven.co.kr/board/maple/2304/36114",
+      "topics": [
+        "전투력",
+        "방어율 무시",
+        "환산",
+        "보스 몬스터 데미지"
+      ],
+      "status": "과거 커뮤니티 분석 · 현행 공식으로 사용 불가"
+    },
+    {
+      "title": "사용자 제공 기대값 정리",
+      "url": "https://www.inven.co.kr/board/maple/2304/47782",
+      "topics": [
+        "기대값",
+        "강화",
+        "스타포스"
+      ],
+      "status": "본문 접근 실패 · 사용자 설명만 확인"
+    }
+  ]
+}

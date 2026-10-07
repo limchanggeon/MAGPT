@@ -598,7 +598,7 @@ class Ollama:
 
         Qwen3·3.5처럼 생각(thinking) 모드가 기본으로 켜진 모델은 답하기 전에 긴 추론부터 한다.
         그대로 부르면 생성 토큰을 추론에 다 써서 답이 비고, 작은 GPU에서는 몇 배 느려진다.
-        이 앱은 모델에게 추론을 맡기지 않으므로 지원하는 모델에서는 끈다.
+        긴 내부 추론 토큰으로 응답이 비는 것을 막는다. 구조화된 계획·도구 선택은 별도 모델 호출로 수행한다.
         """
         return {'think': False} if 'thinking' in self.capabilities(model) else {}
 
@@ -608,6 +608,21 @@ class Ollama:
             return {'connected':True,'models':[m['name'] for m in result.get('models',[])]}
         except AppError:
             return {'connected':False,'models':[]}
+
+    def structured(self, model, messages, schema):
+        result = request_json(self.BASE+'/api/chat', {
+            **self._switches(model), 'model':model, 'stream':False, 'format':schema,
+            'messages':messages, 'options':{'temperature':0,'num_ctx':8192,'num_predict':1400},
+            'keep_alive':'5m'}, timeout=120)
+        return result.get('message',{}).get('content',''), {k:result.get(k) for k in ('total_duration','eval_count','eval_duration')}
+
+    def plan(self, model, messages):
+        from .planner import schema_json
+        return self.structured(model, messages, schema_json())
+
+    def research(self, model, messages):
+        from .agent import schema_json
+        return self.structured(model, messages, schema_json())
 
     def select(self,model,question,passages):
         # The model may select IDs only. No generated game claim enters the final answer.
@@ -974,6 +989,11 @@ class Gemini:
                                'required': ['ids']}})
         return selected_ids(text, passages), meta
 
+    def research(self, model, messages):
+        from .agent import schema_gemini
+        return self.generate(messages, {'temperature':0,'maxOutputTokens':2048,
+                                        'responseMimeType':'application/json','responseSchema':schema_gemini()})
+
     def plan(self, model, messages):
         from .planner import schema_gemini
         text, meta = self.generate(messages, {'temperature': 0, 'maxOutputTokens': 2048, 'responseMimeType': 'application/json',
@@ -1124,6 +1144,10 @@ class Claude:
         text, meta = self.generate(select_messages(question, passages), {'format': {'type': 'json_schema', 'schema': schema}})
         return selected_ids(text, passages), meta
 
+    def research(self, model, messages):
+        from .agent import schema_json
+        return self.generate(messages, {'format':{'type':'json_schema','schema':schema_json()}}, max_tokens=2000)
+
     def plan(self, model, messages):
         from .planner import schema_json
         return self.generate(messages, {'format': {'type': 'json_schema', 'schema': schema_json()}}, max_tokens=2000)
@@ -1236,6 +1260,10 @@ class OpenAI:
                                    {'text': {'format': {'type': 'json_schema', 'name': 'evidence_ids', 'schema': schema, 'strict': True}}})
         return selected_ids(text, passages), meta
 
+    def research(self, model, messages):
+        from .agent import schema_json
+        return self.generate(messages, {'text':{'format':{'type':'json_schema','name':'research_step','schema':schema_json(),'strict':True}}}, max_output_tokens=3000)
+
     def plan(self, model, messages):
         from .planner import schema_json
         return self.generate(messages, {'text': {'format': {'type': 'json_schema', 'name': 'plan', 'schema': schema_json(), 'strict': True}}})
@@ -1264,11 +1292,17 @@ class ModelRouter:
         return self._for(model).select(model, *args, **kwargs)
 
     def plan(self, model, messages):
-        """질문 이해(planner.py). 로컬 모델은 이해가 불안정해 쓰지 않는다 — 호출한 쪽이 정규식 길로 간다."""
+        """로컬/클라우드 모두 같은 질문 이해 인터페이스를 사용한다."""
         target = self._for(model)
-        if target is self.local or not hasattr(target, 'plan'):
-            raise AppError('질문 이해는 클라우드 모델에서만 써요.', 400)
+        if not hasattr(target, 'plan'):
+            raise AppError('선택한 모델이 질문 해석을 지원하지 않습니다.', 400)
         return target.plan(model, messages)
+
+    def research(self, model, messages):
+        target = self._for(model)
+        if not hasattr(target, 'research'):
+            raise AppError('선택한 모델이 근거 탐색을 지원하지 않습니다.',400)
+        return target.research(model, messages)
 
     def read_capture(self, model, mime, data):
         """캡처에서 메소·조각 수 읽기. 로컬 모델은 이미지를 못 읽으므로 직접 입력하게 한다."""

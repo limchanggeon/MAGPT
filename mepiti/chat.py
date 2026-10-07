@@ -1,5 +1,5 @@
 import re
-from . import conditions, consult, context, notices, peers, planner, prices, starforce, statcalc, union
+from . import agent, language, conditions, consult, context, notices, peers, planner, prices, starforce, statcalc, union
 from .core import AppError, TERMS, normalize, now
 
 # 캐릭터 자신에 대한 질문으로 볼 표현. 여기 걸리면 API 사실을 근거로 모델이 서술한다.
@@ -141,22 +141,28 @@ def answer(store, model, data, nexon=None, peer_runner=None):
         store.message(sid,'user',{'content':question})
         store.message(sid,'assistant',result)
         return result
-    # 질문 이해: 클라우드 모델이면 앞 대화와 함께 '무엇을 계산·조회할지'를 먼저 정한다(planner.py). 실패하거나 로컬 모델이면 정규식 길.
+    # 로컬/클라우드 모두 맥락을 해석한다. 실패하면 기존 검증 도구 경로를 사용한다.
     plan = None
     if not structured and not picked and not skip_prices and not saved_prices:
-        plan = make_plan(store, model, question, history, topic)
+        plan = make_plan(store, model, question, history, topic, result.setdefault('actions', []))
     elif pending and isinstance(last.get('plan'), dict) and last['plan'].get('intents'):
         # 조건·노작값을 답하고 원래 질문을 이어 갈 때는 그때 세운 계획(여러 장비 등)을 그대로 쓴다.
         plan = {**{k: None for k in planner.FIELDS}, 'options': [], 'targets': [], 'combine': False, 'money': False, **last['plan'],
                 'rewritten': pending, 'clarify': None}
-    if plan and plan.get('clarify') and len(plan.get('options') or []) >= 2 and not asked_before:
+    if plan and plan.get('clarify') and not asked_before:
         ask(result, plan['clarify'], [{'label': o, 'reply': o} for o in plan['options']], question)
         store.message(sid, 'user', {'content': said})
         store.message(sid, 'assistant', result)
         return result
     if plan:
         question = planner.tool_question(plan, question)
+        query = question   # 실제 검색에도 문맥·줄임말을 푼 질문을 전달한다.
+        result.setdefault('actions', []).append({'action':'interpret','summary':'질문 해석: '+question[:300]})
         result['plan'] = {k: plan.get(k) for k in ('intents', 'slot', 'target_star', 'target_cp', 'rewritten', 'targets', 'item')}
+    query = language.expand(query)
+    known_terms = language.mappings(said)
+    if known_terms:
+        result.setdefault('actions', []).append({'action':'normalize','summary':'용어 연결: '+', '.join(t['term']+' → '+t['canonical'] for t in known_terms)})
     want = set(plan['intents']) if plan else set()
     if topic and not SLOT_WORDS.search(question) and topic['name'] not in question:
         question = f"{topic['slot']} {question}"
@@ -224,43 +230,44 @@ def answer(store, model, data, nexon=None, peer_runner=None):
                 notices.sync(store, nexon)       # 최신 공지 본문을 근거 문서로 넣어 둔다.
             except AppError:
                 pass
-        docs, conflict = store.search(query)
-        if conflict:
-            result['content'] = '같은 주제에 서로 다른 적용 버전의 자료가 검색되었습니다. 후속 수정과 실제 적용 시점을 검토하기 전까지 답변을 보류합니다.'
-        elif not docs:
-            result['content'] = '현재 질문에 답할 수 있는 검토 완료된 한국 본서버 근거를 찾지 못했습니다. 확인되지 않은 내용으로 답변하지 않겠습니다.\n\n자료실에서 출처·적용일·버전을 갖춘 자료를 등록하고 검토하거나, 질문의 직업·대상·조건을 더 알려 주세요. 검색 실패가 해당 정보의 부재를 뜻하지는 않습니다.'
-        else:
-            passages = []
-            tokens = re.findall(r'[가-힣A-Za-z0-9]{2,}',normalize(query))
-            for d in docs:
-                ranked = sorted(d['passages'],key=lambda p:sum(t in p for t in tokens),reverse=True)
-                for p in ranked[:3]:
-                    if len(p)<=1800:
-                        passages.append({'id':len(passages),'text':p,'doc_id':d['id']})
-            selected = list(range(min(3,len(passages))))
-            selected_model = store.setting('model')
-            model_note = 'AI 모델을 고르지 않아 원문 검색 결과를 표시합니다.'
-            if selected_model and passages:
-                try:
-                    selected, metrics = model.select(selected_model,query,passages)
-                    result['metrics'] = metrics
-                    model_note = 'AI 모델이 관련 문장을 골랐습니다. 출력은 검토된 원문으로 제한됩니다.'
-                except AppError as e:
-                    model_note = str(e)
-            if not selected:
-                result['content'] = '검색된 자료만으로 질문을 뒷받침하기 어려워 답변을 보류합니다. 대상과 조건을 구체적으로 알려 주세요.'
+        if not agent.research(store, model, query, history, plan, result):
+            docs, conflict = store.search(query)
+            if conflict:
+                result['content'] = '같은 주제에 서로 다른 적용 버전의 자료가 검색되었습니다. 후속 수정과 실제 적용 시점을 검토하기 전까지 답변을 보류합니다.'
+            elif not docs:
+                result['content'] = '현재 질문에 답할 수 있는 검토 완료된 한국 본서버 근거를 찾지 못했습니다. 확인되지 않은 내용으로 답변하지 않겠습니다.\n\n자료실에서 출처·적용일·버전을 갖춘 자료를 등록하고 검토하거나, 질문의 직업·대상·조건을 더 알려 주세요. 검색 실패가 해당 정보의 부재를 뜻하지는 않습니다.'
             else:
-                excerpts = []
-                for i in selected:
-                    p = passages[i]
-                    d = next(d for d in docs if d['id']==p['doc_id'])
-                    ref = next((s for s in result['sources'] if s['id']==d['id']),None)
-                    if ref is None:
-                        ref = {'id':d['id'],'title':d['title'],**d['metadata'],'citation':len(result['sources'])+1}
-                        result['sources'].append(ref)
-                    excerpts.append(f"[{ref['citation']}] {p['text']}")
-                result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
-                result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
+                passages = []
+                tokens = re.findall(r'[가-힣A-Za-z0-9]{2,}',normalize(query))
+                for d in docs:
+                    ranked = sorted(d['passages'],key=lambda p:sum(t in p for t in tokens),reverse=True)
+                    for p in ranked[:3]:
+                        if len(p)<=1800:
+                            passages.append({'id':len(passages),'text':p,'doc_id':d['id']})
+                selected = list(range(min(3,len(passages))))
+                selected_model = store.setting('model')
+                model_note = 'AI 모델을 고르지 않아 원문 검색 결과를 표시합니다.'
+                if selected_model and passages:
+                    try:
+                        selected, metrics = model.select(selected_model,query,passages)
+                        result['metrics'] = metrics
+                        model_note = 'AI 모델이 관련 문장을 골랐습니다. 출력은 검토된 원문으로 제한됩니다.'
+                    except AppError as e:
+                        model_note = str(e)
+                if not selected:
+                    result['content'] = '검색된 자료만으로 질문을 뒷받침하기 어려워 답변을 보류합니다. 대상과 조건을 구체적으로 알려 주세요.'
+                else:
+                    excerpts = []
+                    for i in selected:
+                        p = passages[i]
+                        d = next(d for d in docs if d['id']==p['doc_id'])
+                        ref = next((s for s in result['sources'] if s['id']==d['id']),None)
+                        if ref is None:
+                            ref = {'id':d['id'],'title':d['title'],**d['metadata'],'citation':len(result['sources'])+1}
+                            result['sources'].append(ref)
+                        excerpts.append(f"[{ref['citation']}] {p['text']}")
+                    result.update(status='evidence',content='질문과 관련해 검색된 검토 원문입니다. 아래 발췌가 질문의 모든 조건을 설명하는지는 별도 확인이 필요합니다.\n\n'+'\n\n'.join(excerpts))
+                    result['conditions'] = [model_note,'저장된 자료의 검토 시점 기준입니다. 현재 사이트의 변경 여부를 실시간 확인한 결과는 아닙니다.','커뮤니티 자료는 유저 설명·실험이며 공식 사실로 보장하지 않습니다.']
     notes += result.pop('auto_notes', None) or []
     notes += result.pop('topic_notes', None) or []
     if notes:
@@ -767,8 +774,8 @@ def last_starforce(history):
     return None
 
 
-def make_plan(store, model, question, history, topic=None):
-    """질문 이해(planner). 클라우드 모델이 아니거나 실패하면 None — 정규식 길로 간다."""
+def make_plan(store, model, question, history, topic=None, diagnostics=None):
+    """모든 모델에 구조화 질문 해석을 요청하고 실패는 공개 상태로 남긴다."""
     selected = store.setting('model')
     if not selected or not hasattr(model, 'plan'):
         return None
@@ -781,11 +788,14 @@ def make_plan(store, model, question, history, topic=None):
     turns = [{'role': m['role'], 'content': m['payload'].get('content', '')} for m in history[-4:] if m['payload'].get('content')]
     try:
         text, _ = model.plan(selected, planner.messages(question, turns, {k: v for k, v in context_info.items() if v}))
-    except AppError:
-        return None
     except Exception:
+        if diagnostics is not None:
+            diagnostics.append({'action':'fallback','summary':'AI 질문 해석에 실패해 기본 도구 해석으로 전환했습니다.'})
         return None
-    return planner.parse(text)
+    parsed = planner.parse(text)
+    if parsed is None and diagnostics is not None:
+        diagnostics.append({'action':'fallback','summary':'AI 계획 형식이 맞지 않아 기본 도구 해석으로 전환했습니다.'})
+    return parsed
 
 
 CAPABILITIES = (

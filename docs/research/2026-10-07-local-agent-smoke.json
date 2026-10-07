@@ -1,0 +1,190 @@
+{
+  "model": "qwen3.5:2b",
+  "date": "2026-10-07",
+  "data": "synthetic only",
+  "runs": [
+    {
+      "run": "mepiti-local-agent",
+      "results": [
+        {
+          "case": "alias-plan",
+          "seconds": 11.32,
+          "plan": {
+            "intents": [
+              "gear_status",
+              "starforce"
+            ],
+            "slot": "모자",
+            "item": "에테르넬 모자",
+            "current_star": 18,
+            "target_star": 22,
+            "target_cp": null,
+            "combine": false,
+            "money": false,
+            "rewritten": "에테르넬 모자 18성에서 22성까지 기대값은 얼마야?",
+            "clarify": null,
+            "targets": [
+              {
+                "slot": "모자",
+                "item": "에테르넬 모자",
+                "from_star": 18,
+                "to_star": 22
+              }
+            ],
+            "options": []
+          }
+        },
+        {
+          "case": "evidence-answer",
+          "seconds": 2.31,
+          "decision": {
+            "action": "answer",
+            "query": "",
+            "question": "",
+            "claims": [
+              {
+                "text": "시험 장비에는 시험 옵션을 사용합니다.",
+                "evidence_id": 1,
+                "quote": "시험 장비에는 시험 옵션을 사용합니다."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "run": "mepiti-local-agent-extra",
+      "results": [
+        {
+          "case": "followup",
+          "seconds": 5.06,
+          "plan": {
+            "intents": [
+              "gear_status"
+            ],
+            "slot": "모자",
+            "item": "에테뚝",
+            "current_star": 18,
+            "target_star": 21,
+            "target_cp": null,
+            "combine": false,
+            "money": false,
+            "rewritten": "에테뚝 18성에서 21성까지 기대값",
+            "clarify": null,
+            "targets": [
+              {
+                "slot": "모자",
+                "item": "에테뚝",
+                "from_star": 18,
+                "to_star": 21
+              }
+            ],
+            "options": []
+          }
+        },
+        {
+          "case": "unknown",
+          "seconds": 3.77,
+          "plan": {
+            "intents": [
+              "gear_status",
+              "consult"
+            ],
+            "slot": null,
+            "item": null,
+            "current_star": null,
+            "target_star": null,
+            "target_cp": null,
+            "combine": false,
+            "money": false,
+            "rewritten": "뿡빵셋으로 바꾸는 게 나아?",
+            "clarify": null,
+            "targets": [],
+            "options": [
+              "네",
+              "아니오"
+            ]
+          }
+        },
+        {
+          "case": "empty-search",
+          "seconds": 2.3,
+          "decision": {
+            "action": "clarify",
+            "query": "무기 보조무기 엠블렘 방어율 무시",
+            "question": "무기 보조무기 엠블렘의 '방어율 무시' 기능은 어떤 의미이며, 게임 내 어떤 상황에서 적용되는지 구체적으로 설명해 주세요.",
+            "claims": []
+          }
+        }
+      ]
+    },
+    {
+      "run": "mepiti-local-agent-recheck",
+      "results": [
+        {
+          "case": "followup",
+          "seconds": 5.36,
+          "plan": {
+            "intents": [
+              "gear_status",
+              "starforce"
+            ],
+            "slot": null,
+            "item": null,
+            "current_star": null,
+            "target_star": null,
+            "target_cp": null,
+            "combine": false,
+            "money": false,
+            "rewritten": "에테뚝 21성까지 기대값",
+            "clarify": null,
+            "targets": [
+              {
+                "slot": "모자",
+                "item": "에테뚝",
+                "from_star": null,
+                "to_star": 21
+              }
+            ],
+            "options": []
+          }
+        },
+        {
+          "case": "unknown",
+          "seconds": 3.81,
+          "plan": {
+            "intents": [
+              "gear_status",
+              "starforce"
+            ],
+            "slot": null,
+            "item": null,
+            "current_star": null,
+            "target_star": null,
+            "target_cp": null,
+            "combine": false,
+            "money": false,
+            "rewritten": "뿡빵셋으로 바꾸는 게 나아?",
+            "clarify": null,
+            "targets": [],
+            "options": []
+          }
+        },
+        {
+          "case": "empty-search",
+          "seconds": 2.26,
+          "decision": {
+            "action": "clarify",
+            "query": "무기 보조무기 엠블렘 방어율 무시",
+            "question": "무기 보조무기 엠블렘 방무는 어떤 장비를 의미하나요?",
+            "claims": []
+          }
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Small model missed unknown-term clarification and chose clarification on empty known-term search. A post-run deterministic guard now retries known-term explanations; covered by regression test, not re-evaluated live in this artifact.",
+    "Synthetic smoke results are not a general accuracy benchmark."
+  ]
+}

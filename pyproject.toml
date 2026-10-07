@@ -20,4 +20,4 @@ mepiti = "mepiti.server:main"
 include = ["mepiti*"]
 
 [tool.setuptools.package-data]
-mepiti = ["static/*"]
+mepiti = ["static/*", "data/*.json"]

@@ -4,10 +4,11 @@ ChatGPT처럼 자유롭게 묻게 하려면 정해진 말투(정규식)만으로
 스키마로 못박은 JSON(의도·부위·성·목표 전투력 등과 맥락을 채운 질문)만 받는다. 모델은 여기서 답을 쓰지 않는다.
 계산과 조회는 이 계획대로 앱이 하고(chat.py), 답 문장은 그 사실로만 쓴다.
 
-로컬 모델(작은 모델)은 이해가 불안정해 쓰지 않고, 실패하면 None을 돌려 기존 정규식 길로 간다.
+로컬과 클라우드에 같은 구조화 계획을 요청한다. 실패하면 None을 돌려 기존 도구 경로를 유지한다.
 """
 import json
 import re
+from . import language
 
 INTENTS = ('gear_status', 'starforce', 'consult', 'union', 'events', 'rules', 'chat')
 INTENT_HELP = {
@@ -58,9 +59,10 @@ def messages(question, history=None, context=None):
     system = (
         '너는 메이플스토리 도우미 앱의 질문 해석기다. 답을 쓰지 말고, 질문에 답하려면 앱이 무엇을 해야 하는지만 JSON으로 적는다.\n'
         f'intents(여러 개 가능):\n{help_text}\n'
+        '예: 모자 강화 이야기 뒤에 21성은? → intents에 starforce 포함. 모르는 장비명 뿡빵셋 → clarify로 정확한 장비명을 확인한다.\n'
         '- slot: 질문이 가리키는 장비 부위(모자, 상의, 하의, 신발, 장갑, 망토, 어깨장식, 얼굴장식, 눈장식, 귀고리, 반지, 펜던트, 벨트, '
         '무기, 보조무기, 엠블렘, 기계 심장, 포켓 아이템, 뱃지, 훈장). 앞 대화에서 이어지는 부위면 그것을 채운다. 없으면 null.\n'
-        '- item: 질문에 나온 장비 이름(있는 그대로). 없으면 null.\n'
+        '- item: 장비 약어를 문맥에 맞는 검색 가능한 명칭으로 풀어 쓴다. 원문은 별도로 보존된다. 모르는 약어는 지어내지 말고 clarify로 확인한다. 없으면 null.\n'
         '- current_star/target_star: 스타포스 현재·목표 성. 앞 대화에서 이어지면 채운다.\n'
         "- target_cp: 목표 전투력을 말했으면 그 말 그대로(예: '2억5천'). 없으면 null.\n"
         '- combine: 여러 부위를 함께(세트 맞추기, 추천대로 다) 바꾸는 효과를 묻는가.\n'
@@ -68,7 +70,7 @@ def messages(question, history=None, context=None):
         "- rewritten: 앞 대화의 맥락을 채워 질문 하나만 읽어도 뜻이 통하게 다시 쓴 문장. 예: 앞에서 모자 22성 기대값을 물었고 지금 '21성은?'이면 "
         "'모자 21성까지 기대값'. 부위·장비만 말한 짧은 질문('반지는?', '벨트는?')은 앞에서 하던 이야기(무엇으로 바꿀지, 기대값 등)를 "
         "그 부위에 대해 묻는 것이다 — 예: 앞에서 무엇부터 바꿀지 상담했다면 '반지는 무엇으로 바꾸면 좋아?'. "
-        "사용자가 쓴 수치·이름은 바꾸지 않는다.\n"
+        "사용자가 쓴 수치·고유 캐릭터명은 바꾸지 않는다. 장비·스탯 줄임말은 정식 명칭으로 풀고 원래 뜻·목표·직업군은 유지한다.\n"
         '- clarify/options: 질문만으로도, 앞 대화로도 무엇을 원하는지 정할 수 없을 때만(예: 맥락 없는 \'이거 어때?\') clarify에 되물을 한 문장을, '
         'options에 사용자가 고를 짧은 답 2~4개를 적는다. 부위·목표 성·목표 전투력처럼 계산에 필요한 값이 빠진 것은 앱이 따로 물으니 여기 쓰지 않는다. '
         '대부분의 질문은 clarify가 null이고 options는 빈 배열이다.\n'
@@ -82,7 +84,7 @@ def messages(question, history=None, context=None):
     for turn in (history or [])[-4:]:
         role = '사용자' if turn.get('role') == 'user' else '메피티'
         lines.append(f"{role}: {str(turn.get('content') or '')[:600]}")
-    ctx = json.dumps(context or {}, ensure_ascii=False)
+    ctx = json.dumps({**(context or {}), '용어 해석 보조': language.hints(question)}, ensure_ascii=False)
     user = (f"[앱 상태] {ctx}\n" + ('[앞 대화]\n' + '\n'.join(lines) + '\n' if lines else '') + f"[지금 질문]\n{question}")
     return [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}]
 
@@ -95,14 +97,21 @@ def parse(text):
         return None
     if not isinstance(data, dict):
         return None
-    intents = [i for i in data.get('intents') or [] if i in INTENTS]
+    raw_intents = data.get('intents')
+    if not isinstance(raw_intents,list):
+        return None
+    if not isinstance(data.get('targets',[]),list) or not isinstance(data.get('options',[]),list):
+        return None
+    intents = [i for i in raw_intents if isinstance(i,str) and i in INTENTS]
     if not intents:
         return None
     def star(v):
-        return v if isinstance(v, int) and 0 <= v <= 30 else None
+        return v if type(v) is int and 0 <= v <= 30 else None
     def short(v, n=40):
         return v.strip()[:n] if isinstance(v, str) and v.strip() else None
     rewritten = short(data.get('rewritten'), 300)
+    if star(data.get('target_star')) is not None and re.search(r'기대값|기댓값|강화 비용', rewritten or ''):
+        intents.append('starforce')  # 목표 성과 계산 요청을 해석했으면 계산 도구를 누락하지 않는다.
     return {'intents': list(dict.fromkeys(intents)), 'slot': short(data.get('slot'), 20), 'item': short(data.get('item')),
             'current_star': star(data.get('current_star')), 'target_star': star(data.get('target_star')),
             'target_cp': short(data.get('target_cp'), 20), 'combine': data.get('combine') is True,
@@ -116,12 +125,12 @@ def parse(text):
 
 def tool_question(plan, question):
     """앱의 기존 해석기(정규식)가 읽을 질문: 맥락을 채운 문장에 계획의 부위·성·목표를 붙인다."""
-    text = plan.get('rewritten') or question
+    text = language.expand(plan.get('rewritten') or question)
     extra = []
     if plan.get('slot') and plan['slot'] not in text:
         extra.append(plan['slot'])
-    if plan.get('item') and plan['item'] not in text:
-        extra.append(plan['item'])
+    if plan.get('item') and language.expand(plan['item']) not in text:
+        extra.append(language.expand(plan['item']))
     if 'starforce' in plan['intents'] and plan.get('target_star') and not re.search(rf"{plan['target_star']}\s*성", text):
         extra.append(f"{plan['target_star']}성 기대값")
     if plan.get('target_cp') and plan['target_cp'] not in text:

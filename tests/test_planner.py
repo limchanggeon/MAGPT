@@ -81,7 +81,7 @@ class PlannedRoutingTests(unittest.TestCase):
         self.assertNotIn('plan', result)
         self.assertNotEqual(result['status'], 'analysis')         # 정규식 길: 근거 검색 → 보류
 
-    def test_local_model_is_not_planned(self):
+    def test_provider_without_plan_falls_back(self):
         from mepiti.adapters import ModelRouter
         router = ModelRouter(object(), {'gemini': object()})
         self.store.set_setting('model', 'qwen3.5:2b')

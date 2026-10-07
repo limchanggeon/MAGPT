@@ -55,6 +55,8 @@ TERMS = [
 ]
 
 def normalize(text):
+    from .language import expand
+    text = expand(text)
     for term in TERMS:
         for alias in term['aliases']:
             text = text.replace(alias, term['term'])
