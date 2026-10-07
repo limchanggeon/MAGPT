@@ -1,8 +1,8 @@
 # 메피티 작업 인수인계
 
 - 최종 갱신: 2026-10-07 (KST)
-- 현재 단계: v0.5.4 릴리스 완료(검은 마법사 한 달 한 번 제한). 그 뒤 시세표 세트 추론·직업군 노작값 조회(2026-10-07, 미커밋·미릴리스). 전체 요구사항 완료 아님.
-- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.4(`dd11599`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
+- 현재 단계: v0.5.5 릴리스 완료(시세표 세트 추론·직업군 노작값 조회). 전체 요구사항 완료 아님.
+- 작업 브랜치: `claude/pensive-rubin-06leok`(원격과 같이 푸시). 원격 `main`은 v0.5.5(`a781d92`)까지. 로컬 `main` 브랜치는 오래돼 기준으로 쓰지 않는다.
 - 운영 규칙: 매 작업 시작 시 이 문서를 읽고, 종료·중단 전에 최신 상태 및 작업 이력을 갱신한다. 상세 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 - 최신 추가 점검: [저장소·대화 보고서](docs/audit/2026-10-03-round3.md), [측정 원자료](docs/audit/2026-10-03-round3-benchmark.json).
 - 앞선 점검 상세: [2026-10-03 보고서](docs/audit/2026-10-03.md), [측정 원자료](docs/audit/2026-10-03-benchmark.json). 이전 점검은 [2026-10-01 보고서](docs/audit/2026-10-01.md).
@@ -1475,3 +1475,4 @@ node tests/test_frontend.js
   - `tests/test_earnings_ui.py` 3개, README, IMPLEMENTATION.md.
 - 검증(이번): Python 493개 통과, `node --check mepiti/static/app.js`, `tests/test_frontend.js` 통과. 실제 Gemini의 세트 추론 정확도·브라우저 화면·실제 대화(되묻기 버튼 왕복)는 확인 안 함.
 - 남은 것: `consult.py`(가성비)·`history.py`(스페어 값)는 아직 직업·부위를 넘기지 않아 이름 정확 일치만 한다. 제논이 도적·해적 방어구를 모두 낀다는 점은 사용자 지시 기준이며 공식 자료로 대조하지 않았다.
+- **릴리스 v0.5.5**(2026-10-07, 사용자 "릴리즈 하삼"): 기능 `7a1b391`, 버전 `a781d92`, 브랜치 CI 두 OS 통과, `main` 빨리감기(`dd11599..a781d92`), 태그, 릴리스 성공(파일 5개), API latest v0.5.5. https://github.com/limchanggeon/MAGPT/releases/tag/v0.5.5
