@@ -749,8 +749,9 @@ def capture_messages():
 PIECE_ICON = Path(__file__).resolve().parent / 'static' / 'sol-erda-piece.png'
 
 # 시세표 이미지(커뮤니티의 경매장 최저가 정리 등)에서 노작값 읽기. 모델은 보이는 글자만 옮기고 숫자 변환은 앱이 한다(prices.read_table).
-PRICE_TABLE_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['unit', 'server', 'rows'], 'properties': {
-    'unit': {'type': ['string', 'null']}, 'server': {'type': ['string', 'null']},
+PRICE_TABLE_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['unit', 'server', 'set', 'set_basis', 'rows'], 'properties': {
+    'unit': {'type': ['string', 'null']}, 'server': {'type': ['string', 'null']}, 'set': {'type': ['string', 'null']},
+    'set_basis': {'type': ['string', 'null']},
     'rows': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False, 'required': ['item', 'price'],
                                         'properties': {'item': {'type': 'string'}, 'price': {'type': 'string'}}}}}}
 
@@ -760,6 +761,9 @@ def price_table_messages():
                 '메이플스토리 아이템 시세표 이미지에서 아이템 이름과 가격만 옮겨 적는다. 계산·추측하지 않는다.\n'
                 "- unit: 표 머리에 적힌 가격 단위(예: '단위 : 억' → '억'). 없으면 null.\n"
                 "- server: 표에 적힌 서버·월드(예: '본 서버', '스카니아'). 없으면 null.\n"
+                "- set, set_basis: 부위×직업 격자표 등 장비 세트의 시세표일 때 어느 세트인지. 표 제목·탭·머리에 세트 이름이 글자로 보이면 그 이름과 'text'. "
+                "글자가 없으면 아이템 아이콘 모양·색(예: 에테르넬은 금빛·흰빛 장식의 250제 방어구, 아케인셰이드는 보라·검은 200제, 앱솔랩스는 푸른 160제)과 "
+                "가격대로 추론해 세트 이름(에테르넬·아케인셰이드·앱솔랩스·루타비스 중 하나)과 'inferred'. 판단할 근거가 없거나 세트 표가 아니면 둘 다 null.\n"
                 "- rows: 아이템 한 줄마다 {item: 이미지에 적힌 이름 그대로, price: 가격 칸 글자 그대로(예: '19.56', '90만', '32억')}.\n"
                 "- 표가 줄 머리(부위 등)와 칸 머리(직업 등)로 된 격자이면 칸마다 한 항목으로, item은 '칸 머리 줄 머리'(예: '전사 모자')로 적는다. "
                 '표에 없는 세트 이름은 붙이지 않는다.\n'
@@ -775,6 +779,8 @@ def price_table_result(text):
     rows = [{'item': str(r.get('item') or '').strip()[:100], 'price': str(r.get('price') or '').strip()[:40]}
             for r in (data.get('rows') or []) if isinstance(r, dict) and str(r.get('item') or '').strip()]
     return {'unit': (str(data.get('unit')).strip()[:10] if data.get('unit') else None),
+            'set': (str(data.get('set')).strip()[:20] if data.get('set') else None),
+            'set_basis': data.get('set_basis') if data.get('set') and data.get('set_basis') in ('text', 'inferred') else None,
             'server': (str(data.get('server')).strip()[:30] if data.get('server') else None), 'rows': rows[:200]}
 
 
@@ -952,8 +958,9 @@ class Gemini:
         return capture_result(text), meta
 
     def read_price_table(self, mime, data):
-        schema = {'type': 'OBJECT', 'required': ['unit', 'server', 'rows'], 'properties': {
+        schema = {'type': 'OBJECT', 'required': ['unit', 'server', 'set', 'set_basis', 'rows'], 'properties': {
             'unit': {'type': 'STRING', 'nullable': True}, 'server': {'type': 'STRING', 'nullable': True},
+            'set': {'type': 'STRING', 'nullable': True}, 'set_basis': {'type': 'STRING', 'nullable': True, 'enum': ['text', 'inferred']},
             'rows': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'required': ['item', 'price'],
                                                   'properties': {'item': {'type': 'STRING'}, 'price': {'type': 'STRING'}}}}}}
         text, meta = self.generate(price_table_messages(), {'temperature': 0, 'maxOutputTokens': 8192,

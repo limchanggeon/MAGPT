@@ -160,6 +160,56 @@ class PriceTableTests(unittest.TestCase):
         self.assertEqual(out['saved'], 1)
         self.assertEqual(store.price_lookup('아케인셰이드 전사 모자', None)['price'], 30_000_000)
 
+    def test_grid_rows_need_a_set_name(self):
+        # 부위×직업 격자표: 세트 이름 없이 '전사 상의'로 저장하지 않는다(2026-10-07 사용자 제보).
+        from mepiti import prices
+        raw = {'unit': None, 'server': None, 'set': None, 'rows': [
+            {'item': '전사 상의', 'price': '0.30'}, {'item': '해적 견장', 'price': '0.24'}, {'item': '익셉셔널 해머 (벨트)', 'price': '55.00'}]}
+        r = prices.read_table(self.model(raw), 'gemini', 'data:image/png;base64,AA')
+        self.assertEqual([(x['item'], x.get('grid')) for x in r['rows']],
+                         [('전사 상의', '전사 상의'), ('해적 어깨장식', '해적 어깨장식'), ('익셉셔널 해머 (벨트)', None)])
+        raw.update(set='에테르넬', set_basis='inferred')          # 표에 글자가 없어 모델이 아이콘·가격대로 추론
+        r = prices.read_table(self.model(raw), 'gemini', 'data:image/png;base64,AA')
+        self.assertEqual((r['rows'][0]['item'], r['set_basis']), ('에테르넬 전사 상의', 'inferred'))
+        store = Store(tempfile.mkdtemp())
+        out = prices.save_many(store, [{'item': '전사 상의', 'price': '0.30'}, {'item': '에테르넬 전사 상의', 'price': '0.30'}])
+        self.assertEqual(out, {'saved': 1, 'unnamed': 1})
+        self.assertIsNone(store.price_lookup('전사 상의'))
+
+    def test_set_price_found_by_job_and_slot(self):
+        # '에테뚝' → 에테르넬 모자 → 렌은 전사 → '에테르넬 전사 모자' 저장값(2026-10-07 사용자 요청).
+        from mepiti import prices
+        store = Store(tempfile.mkdtemp())
+        prices.save_many(store, [{'item': '에테르넬 전사 모자', 'price': '0.21'}, {'item': '에테르넬 마법사 상의', 'price': '0.27'}])
+        self.assertEqual(prices.named_targets('에테뚝 노작값 얼마야'), [('에테르넬 모자', None, '모자')])
+        self.assertEqual([t[0] for t in prices.named_targets('아케인 상하의 시세')], ['아케인셰이드 상의', '아케인셰이드 하의'])
+        r = prices.resolve_many(store, prices.named_targets('에테뚝 노작값 얼마야'), '렌')[0]
+        self.assertEqual((r['known'], r['price'], r['matched']), (True, 21_000_000, '에테르넬 전사 모자'))
+        worn = prices.resolve(store, '에테르넬 나이트헬름', None, '히어로', '모자')     # 착용 장비 실제 이름 + 부위
+        self.assertEqual(worn['price'], 21_000_000)
+        self.assertEqual(prices.resolve(store, '에테르넬 상의', None, '비숍')['matched'], '에테르넬 마법사 상의')
+        self.assertFalse(prices.resolve(store, '에테르넬 모자', None, '비숍')['known'])     # 다른 직업군 값은 쓰지 않는다
+        self.assertEqual(prices.grid_name('법사 모자'), '마법사 모자')
+
+    def test_armor_group_said_first_and_xenon_asks(self):
+        # 말한 직업군 방어구가 캐릭터 직업보다 앞서고, 제논·직업 모름이면 직업군을 되묻는다(2026-10-07 사용자 요청).
+        from mepiti import prices
+        store = Store(tempfile.mkdtemp())
+        prices.save_many(store, [{'item': '에테르넬 전사 모자', 'price': '0.21'}, {'item': '에테르넬 도적 모자', 'price': '0.19'}])
+        q = '도적 에테뚝 노작값'
+        r = prices.resolve_many(store, prices.named_targets(q), '렌', prices.group_in(q))[0]
+        self.assertEqual((r['price'], r['matched']), (19_000_000, '에테르넬 도적 모자'))
+        self.assertEqual(prices.resolve(store, '에테르넬 모자', None, '데몬어벤져')['matched'], '에테르넬 전사 모자')
+        xenon = prices.resolve(store, '에테르넬 모자', None, '제논')
+        self.assertEqual((xenon['known'], xenon['reason'], xenon['groups']), (False, 'group', ['도적', '해적']))
+        text, options, note = prices.ask_group([xenon], '제논')
+        self.assertEqual([o['reply'] for o in options], ['도적 방어구', '해적 방어구'])
+        self.assertIn('제논', note)
+        answered = '에테뚝 노작값 해적 방어구'                      # 버튼 답이 원래 질문 뒤에 붙는다
+        self.assertEqual(prices.group_in(answered), '해적')
+        self.assertEqual(len(prices.resolve(store, '에테르넬 모자', None, None)['groups']), 5)
+        self.assertIsNone(prices.ask_group([prices.resolve(store, '몽환의 벨트', None, '제논')], '제논'))   # 세트 방어구가 아니면 묻지 않는다
+
     def test_rejects_non_image_and_local_model(self):
         from mepiti import prices
         from mepiti.adapters import ModelRouter

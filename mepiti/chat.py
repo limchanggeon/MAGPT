@@ -377,12 +377,18 @@ def analyse_character(store, model, nexon, managed, question, history, result, s
     asks_price = not consult_mode and PRICE_INTENT.search(question) and (
         not STARFORCE_INTENT.search(question) or ITEM_PRICE.search(question))
     if asks_price:
-        resolved = prices.resolve_many(store, price_targets(facts, question))
+        resolved = prices.resolve_many(store, prices.named_targets(question) or price_targets(facts, question),
+                                       facts.get('job'), prices.group_in(question))
         known = [r for r in resolved if r['known']]
         unknown = [r for r in resolved if not r['known']]
+        group = prices.ask_group(unknown, facts.get('job')) if not skip_prices else None
+        if group:                      # 제논 등: 직업군을 정하지 않고 다른 직업군 값을 쓰지 않는다
+            ask(result, *group[:2], question, note=group[2])
+            return
         if known:
             text += ('\n\n[저장된 노작값] 사용자가 알려 주었거나 조회해 둔 값이다. 여기 없는 장비의 값은 모른다.\n'
-                     + '\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소 ({r['source']}, {r['recorded_at'][:10]})"
+                     + '\n'.join(f"- {r['item']}: {r['price']:,.0f} 메소 ({r['source']}, {r['recorded_at'][:10]}"
+                                  + (f", 저장 이름 '{r['matched']}'" if r.get('matched') else '') + ')'
                                   for r in known))
         # 하나도 모를 때만 멈추고 묻는다. 일부라도 알면 그걸로 답하고 모르는 것은 각주로 남긴다.
         if unknown and not known and not skip_prices:
@@ -587,10 +593,10 @@ def price_targets(facts, question):
         for r in named:
             if r['name'] not in seen:
                 seen.add(r['name'])
-                picked.append((r['name'], r.get('grade')))
+                picked.append((r['name'], r.get('grade'), r.get('slot')))
         return picked
-    candidates = [(r['name'], r.get('grade')) for r in (facts.get('weak_add_options') or []) if not r.get('empty')]
-    candidates += [(r['name'], None) for r in (facts.get('low_starforce') or [])]
+    candidates = [(r['name'], r.get('grade'), r.get('slot')) for r in (facts.get('weak_add_options') or []) if not r.get('empty')]
+    candidates += [(r['name'], None, r.get('slot')) for r in (facts.get('low_starforce') or [])]
     return candidates[:4]
 
 
@@ -677,7 +683,12 @@ def starforce_facts(store, profile, question, result, topic_item=None):
         return (f"\n\n[강화 기대값] {item['slot']}({item['name']})의 목표 성을 알 수 없어 계산하지 않았다. "
                 f"현재 {current}성이다. 목표 성을 물어볼 것.")
     target = min(targets)
-    price = prices.resolve(store, item['name'], (item.get('add_grade') or {}).get('grade'))
+    price = prices.resolve(store, item['name'], (item.get('add_grade') or {}).get('grade'), profile.get('job'), item.get('slot'),
+                           prices.group_in(question))
+    group = prices.ask_group([price], profile.get('job'))
+    if group:
+        ask(result, *group[:2], question, note=group[2])
+        return None
     if not price['known']:
         result.update(status='ask_price', content=prices.ask_text([price]),
                       form=prices.form([price]), pending=question)
@@ -875,7 +886,7 @@ def asked_slot_items(profile, question, slot=None):
 
 # 지금 끼지 않은 장비의 장비 레벨(스타포스 최대 성·비용에 필요). 방어구 세트는 세트마다 레벨이 같다.
 SET_LEVELS = (('에테르넬', 250), ('아케인셰이드', 200), ('앱솔랩스', 160), ('루타비스', 150), ('하이네스', 150), ('이글아이', 150), ('트릭스터', 150))
-SLOT_ALIAS = {'견장': '어깨장식', '어깨': '어깨장식', '얼장': '얼굴장식', '눈장': '눈장식', '귀걸이': '귀고리', '목걸이': '펜던트', '보조': '보조무기'}
+SLOT_ALIAS = {'뚝': '모자', '뚝배기': '모자', '견장': '어깨장식', '어깨': '어깨장식', '얼장': '얼굴장식', '눈장': '눈장식', '귀걸이': '귀고리', '목걸이': '펜던트', '보조': '보조무기'}
 
 
 def all_items(profile):
@@ -947,7 +958,7 @@ def multi_starforce_facts(store, profile, targets, question, result):
         if x['to_star'] > max_star({'equip_level': level}):
             rows.append({'slot': slot, 'name': name, 'skip': f"레벨 {level} 장비는 {max_star({'equip_level': level})}성까지"})
             continue
-        price = prices.resolve(store, name, None)
+        price = prices.resolve(store, name, None, profile.get('job'), slot, prices.group_in(question))
         if not price['known']:
             unknown_price.append(price)
         rows.append({'slot': slot, 'name': name, 'level': level, 'from': start, 'to': x['to_star'], 'new': new, 'price': price})
@@ -955,6 +966,10 @@ def multi_starforce_facts(store, profile, targets, question, result):
         ask(result, f"{', '.join(unknown_level)}의 장비 레벨을 몰라요. 몇 레벨 장비인가요?",
             [{'label': f'{lv}제', 'reply': f"{unknown_level[0]} {lv}레벨"} for lv in (140, 150, 160, 200, 250)], question,
             note='방어구 세트(에테르넬·아케인셰이드·앱솔랩스·루타비스)는 이름만으로 알아요.')
+        return None
+    group = prices.ask_group(unknown_price, profile.get('job'))
+    if group:
+        ask(result, *group[:2], question, note=group[2])
         return None
     if not conditions.answered(store):
         result.update(status='ask_conditions', content=conditions.ask_text(),

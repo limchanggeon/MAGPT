@@ -1165,21 +1165,37 @@ function renderPriceReview(d){
   const box=$('#price-review');box.replaceChildren();
   if(!d.rows.length){box.append(el('p','hint','표에서 아이템과 가격을 찾지 못했어요.'));return;}
   box.append(el('p','hint',`${fmt(d.rows.length)}줄 읽음`+(d.unit?` · 표 단위 ${d.unit}`:' · 표에 단위가 없어 숫자는 억으로 읽었어요')+(d.server?` · ${d.server}`:'')+' · 저장 전에 이름·가격을 확인하세요.'));
-  const prefixRow=el('div','inline-form');const prefix=el('input');prefix.placeholder="앞에 붙일 이름(예: 아케인셰이드) — 표에 세트 이름이 없을 때";prefix.maxLength=40;
-  const apply=el('button','secondary','모든 이름 앞에 붙이기');apply.type='button';prefixRow.append(prefix,apply);box.append(prefixRow);
+  // 부위×직업 격자표는 세트 이름이 없어 '전사 상의'로 읽힌다. 세트를 붙여야 저장할 수 있게 한다.
+  const grid=d.rows.filter(r=>r.grid);
+  const prefixRow=el('div','inline-form');const prefix=el('input');prefix.maxLength=40;
+  prefix.placeholder=grid.length?'세트 이름(예: 에테르넬)':"앞에 붙일 이름(예: 아케인셰이드) — 표에 세트 이름이 없을 때";
+  const apply=el('button','secondary',grid.length?'부위 줄에 세트 붙이기':'모든 이름 앞에 붙이기');apply.type='button';
+  if(grid.length){
+    box.append(el('p','hint',d.set?(d.set_basis==='inferred'
+        ?`표에 세트 이름이 없어 AI가 아이콘·가격대로 '${d.set}'(으)로 추론해 부위×직업 ${fmt(grid.length)}칸에 붙였어요. 다르면 아래 버튼으로 바꾸세요.`
+        :`부위×직업 표 ${fmt(grid.length)}칸에 표에 적힌 세트 이름 '${d.set}'을 붙였어요. 다르면 고치세요.`)
+      :`부위×직업 표 ${fmt(grid.length)}칸은 표에 세트 이름이 없어요. 어느 세트 시세인지 골라야 저장할 수 있어요.`));
+    ['에테르넬','아케인셰이드','앱솔랩스'].forEach(n=>{const b=el('button','secondary',n);b.type='button';b.onclick=()=>{prefix.value=n;apply.onclick();};prefixRow.append(b);});
+  }
+  prefixRow.append(prefix,apply);box.append(prefixRow);
   const table=el('table','peer-table price-review-table');const head=el('tr');['저장','아이템 이름','가격','읽은 글자'].forEach(h=>head.append(el('th','',h)));table.append(head);
   const rows=d.rows.map(r=>{
-    const tr=el('tr');const check=el('input');check.type='checkbox';check.checked=!!r.price;
+    const tr=el('tr');const check=el('input');check.type='checkbox';check.checked=!!r.price&&!(r.grid&&!d.set);
     const name=el('input');name.value=r.item;name.maxLength=100;const price=el('input');price.value=r.price?exactAmount(r.price):'';price.placeholder='예: 32(억)';
     tr.append(Object.assign(el('td'),{}),el('td'),el('td'),el('td','hint',r.price_text));tr.children[0].append(check);tr.children[1].append(name);tr.children[2].append(price);table.append(tr);
-    return {check,name,price};
+    return {check,name,price,grid:r.grid,ok:!!r.price};
   });
-  apply.onclick=()=>{const p=prefix.value.trim();if(!p)return;rows.forEach(r=>{if(!r.name.value.startsWith(p))r.name.value=`${p} ${r.name.value}`;});};
+  apply.onclick=()=>{const p=prefix.value.trim();if(!p)return;
+    rows.filter(r=>!grid.length||r.grid).forEach(r=>{
+      if(r.grid){r.name.value=`${p} ${r.grid}`;if(r.ok)r.check.checked=true;}
+      else if(!r.name.value.startsWith(p))r.name.value=`${p} ${r.name.value}`;
+    });};
   box.append(table);
   const save=el('button','primary','고른 값 저장');save.type='button';
   save.onclick=()=>task(save,async()=>{
     const picked=rows.filter(r=>r.check.checked&&r.name.value.trim()&&r.price.value.trim()).map(r=>({item:r.name.value.trim(),price:r.price.value.trim()}));
     if(!picked.length)throw new Error('저장할 줄을 고르세요.');
+    if(rows.some(r=>r.grid&&r.check.checked&&r.name.value.trim()===r.grid))throw new Error("'전사 상의'처럼 세트 이름이 없는 줄이 있어요. 위에서 세트를 고르세요.");
     const res=await api('prices/bulk',{rows:picked,note:`시세표 이미지${d.server?' · '+d.server:''} · ${todayText()}`});
     toast(`노작값 ${fmt(res.saved)}개를 저장했어요.`);box.replaceChildren();await loadPrices();
   });

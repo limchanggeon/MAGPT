@@ -43,14 +43,24 @@ def _used_today(store):
     return store.price_fetch_count(now()[:10])
 
 
-def resolve(store, item, add_grade=None):
-    """한 장비의 노작값. 모르면 `known=False`로 돌려주고 지어내지 않는다."""
+def resolve(store, item, add_grade=None, job=None, slot=None, group=None):
+    """한 장비의 노작값. 모르면 `known=False`로 돌려주고 지어내지 않는다.
+
+    이름으로 못 찾으면 직업군·부위를 써서 '세트 직업군 부위' 값(시세표 격자에서 저장)을 찾는다.
+    세트 방어구인데 직업군을 정할 수 없으면(제논, 캐릭터 모름) reason 'group'과 고를 직업군을 돌려준다."""
     saved = store.price_lookup(item, add_grade)
     if saved:
         return _saved_result(item, saved)
+    key = set_key(item, job, slot, group)
+    saved = store.price_lookup(key, add_grade) if key and key != item else None
+    if saved:
+        return {**_saved_result(item, saved), 'matched': key}
     # 한도 확인부터 저장까지 묶어 중복 조회와 서로 다른 장비의 한도 경합을 막는다.
     with store.operation('price_fetch'):
-        return _resolve(store, item, add_grade)
+        found = _resolve(store, item, add_grade)
+    if not found['known'] and set_of(item) and slot_of(item, slot) and not (group or job_group(job)):
+        return {**found, 'reason': 'group', 'groups': list(MULTI_ARMOR.get(job, ARMOR_GROUPS))}
+    return found
 
 
 def _resolve(store, item, add_grade):
@@ -83,14 +93,14 @@ def _saved_result(item, saved):
             'recorded_at': saved['recorded_at'], 'add_grade': saved['add_grade']}
 
 
-def resolve_many(store, items):
-    """(장비 이름, 추옵 급) 목록을 한 번에. 같은 장비는 한 번만 본다."""
+def resolve_many(store, items, job=None, group=None):
+    """(장비 이름, 추옵 급[, 부위]) 목록을 한 번에. 같은 장비는 한 번만 본다."""
     seen, results = set(), []
-    for item, grade in items:
+    for item, grade, *rest in items:
         if not item or item in seen:
             continue
         seen.add(item)
-        results.append(resolve(store, item, grade))
+        results.append(resolve(store, item, grade, job, rest[0] if rest else None, group))
     return results
 
 
@@ -98,6 +108,18 @@ def status(store):
     return {'stored': store.price_count(), 'fetcher': fetcher_available(),
             'fetch_enabled': fetch_enabled(store), 'daily_limit': daily_limit(store),
             'used_today': _used_today(store) if fetcher_available() else 0}
+
+
+def ask_group(unknown, job=None):
+    """직업군을 정할 수 없는 세트 방어구가 있으면 되물을 (문구, 버튼, 안내). 없으면 None."""
+    need = [u for u in unknown if u.get('reason') == 'group']
+    if not need:
+        return None
+    names = ', '.join(u['item'] for u in need[:3])
+    note = (f"{job}은(는) 도적·해적 방어구를 모두 낄 수 있어 어느 쪽인지 정할 수 없어요." if job in MULTI_ARMOR
+            else '캐릭터 직업을 몰라 어느 직업군 방어구인지 정할 수 없어요.')
+    return (f'{names}은(는) 직업군마다 다른 장비예요. 어느 직업군 방어구의 노작값을 볼까요?',
+            [{'label': f'{g} 방어구', 'reply': f'{g} 방어구'} for g in need[0]['groups']], note)
 
 
 def ask_text(unknown):
@@ -164,6 +186,77 @@ def parse_price(text, default_unit=None):
 
 
 TABLE_TYPES = ('image/png', 'image/jpeg', 'image/webp')
+# 부위×직업 격자표(커뮤니티 방어구 시세표)는 세트 이름 없이 '전사 상의'로 읽힌다. 세트를 모르는 채 저장하면
+# 어느 세트의 값인지 알 수 없으므로 세트 이름을 붙여야 저장한다(표의 글자나 모델이 아이콘·가격대로 추론한 세트, 또는 화면에서 고른 세트).
+GRID_JOBS = ('전사', '법사', '마법사', '궁수', '도적', '해적')
+GRID_SLOTS = {'모자': '모자', '상의': '상의', '하의': '하의', '견장': '어깨장식', '어깨': '어깨장식', '어깨장식': '어깨장식',
+              '장갑': '장갑', '신발': '신발', '망토': '망토'}
+_GRID = re.compile(r'^\s*(' + '|'.join(GRID_JOBS) + r')\s*(' + '|'.join(sorted(GRID_SLOTS, key=len, reverse=True)) + r')\s*$')
+
+
+def grid_name(item):
+    """세트 이름 없는 격자 칸 이름('전사 견장', '법사 모자')이면 '전사 어깨장식', '마법사 모자'로 고쳐 돌려준다. 아니면 None."""
+    m = _GRID.match(str(item or ''))
+    return f"{'마법사' if m.group(1) == '법사' else m.group(1)} {GRID_SLOTS[m.group(2)]}" if m else None
+
+
+# 방어구 세트 노작값은 '세트 직업군 부위'(예: '에테르넬 전사 모자')로 저장된다(시세표 격자). 실제 장비 이름이나
+# 줄임말('에테뚝')로 물어도 세트·부위를 뽑고 캐릭터 직업을 직업군으로 바꿔 그 값을 찾는다.
+SET_ALIASES = (('에테르넬', '에테르넬'), ('에테', '에테르넬'), ('아케인셰이드', '아케인셰이드'), ('아케인', '아케인셰이드'),
+               ('앱솔랩스', '앱솔랩스'), ('앱솔', '앱솔랩스'), ('루타비스', '루타비스'), ('루타', '루타비스'))
+SLOT_WORDS = {**GRID_SLOTS, '뚝배기': '모자', '뚝': '모자'}
+_SET = '|'.join(a for a, _ in SET_ALIASES)
+_SLOT = '|'.join(sorted(SLOT_WORDS, key=len, reverse=True))
+_NAMED = re.compile(r'(' + _SET + r')\s*(상하의|' + _SLOT + r')')
+
+
+def set_of(name):
+    name = str(name or '').strip()
+    return next((full for alias, full in SET_ALIASES if name.startswith(alias)), None)
+
+
+ARMOR_GROUPS = ('전사', '마법사', '궁수', '도적', '해적')
+# 방어구 직업군이 주스탯 계열(peers.JOB_FAMILIES)과 다른 직업. 제논은 한 직업군으로 정할 수 없어 묻는다.
+ARMOR_JOBS = {'데몬어벤져': '전사'}
+MULTI_ARMOR = {'제논': ('도적', '해적')}
+_GROUP_WORD = re.compile(r'(전사|마법사|법사|궁수|도적|해적)')
+
+
+def group_in(text):
+    """질문에 직업군 방어구를 말했으면('도적 에테뚝', '해적 방어구') 그 직업군. 캐릭터 직업보다 앞선다."""
+    m = _GROUP_WORD.search(text or '')
+    return ('마법사' if m.group(1) == '법사' else m.group(1)) if m else None
+
+
+def job_group(job):
+    """직업 → 방어구 직업군('렌' → '전사', '데몬어벤져' → '전사'). 제논·모르는 직업은 None."""
+    if job in ARMOR_JOBS:
+        return ARMOR_JOBS[job]
+    from .peers import family_of          # peers가 무거워 필요할 때만 불러온다
+    label, _ = family_of(job or '')
+    return label.split('·')[0] if label else None
+
+
+def slot_of(item, slot=None):
+    return SLOT_WORDS.get(slot or '') or next((SLOT_WORDS[w] for w in sorted(SLOT_WORDS, key=len, reverse=True)
+                                              if str(item or '').endswith(w)), None)
+
+
+def set_key(item, job=None, slot=None, group=None):
+    """'에테르넬 모자'·실제 장비 이름 + 직업군(말한 것, 없으면 캐릭터 직업)·부위 → '에테르넬 전사 모자'. 하나라도 모르면 None."""
+    family, group, slot = set_of(item), group or job_group(job), slot_of(item, slot)
+    return f'{family} {group} {slot}' if family and group and slot else None
+
+
+def named_targets(question):
+    """질문에 나온 세트 방어구('에테뚝', '아케인 상하의') → [(이름, 급, 부위)]."""
+    out = []
+    for alias, word in _NAMED.findall(question or ''):
+        family = dict(SET_ALIASES)[alias]
+        for slot in (('상의', '하의') if word == '상하의' else (SLOT_WORDS[word],)):
+            if (f'{family} {slot}', None, slot) not in out:
+                out.append((f'{family} {slot}', None, slot))
+    return out
 
 
 def read_table(model, selected, image):
@@ -176,23 +269,32 @@ def read_table(model, selected, image):
         raise AppError('PNG·JPG·WEBP 시세표 이미지를 넣어 주세요.')
     raw, meta = model.read_price_table(selected, mime, data)
     unit = '만' if (raw.get('unit') or '').strip().startswith('만') else '억'
+    set_name = (raw.get('set') or '').strip() or None
     rows = []
     for r in raw['rows']:
         price = parse_price(r['price'], unit)
-        rows.append({'item': r['item'], 'price_text': r['price'], 'price': round(price) if price and price > 0 else None})   # 166.67억 같은 소수 오차는 메소 단위로 반올림
-    return {'unit': raw.get('unit'), 'server': raw.get('server'), 'rows': rows,
+        row = {'item': r['item'], 'price_text': r['price'], 'price': round(price) if price and price > 0 else None}   # 166.67억 같은 소수 오차는 메소 단위로 반올림
+        grid = grid_name(r['item'])
+        if grid:
+            row.update(item=f'{set_name} {grid}' if set_name else grid, grid=grid)
+        rows.append(row)
+    return {'unit': raw.get('unit'), 'server': raw.get('server'), 'set': set_name,
+            'set_basis': (raw.get('set_basis') or 'text') if set_name else None, 'rows': rows,
             'model': meta.get('model') if isinstance(meta, dict) else None}
 
 
 def save_many(store, rows, note=None):
     """시세표에서 고른 값들을 한 번에 저장(출처 '시세표 이미지')."""
-    saved = []
+    saved, unnamed = [], 0
     for r in rows[:200]:
         price = r.get('price')
         if isinstance(price, str):
             price = parse_price(price, '억')
         if not r.get('item') or not price:
             continue
+        if grid_name(r['item']):          # 세트 이름 없는 '전사 상의'는 어느 세트인지 몰라 저장하지 않는다
+            unnamed += 1
+            continue
         saved.append(store.price_save({'item': str(r['item'])[:100], 'price': price, 'source': '시세표 이미지',
                                        'note': (note or '')[:300] or None}))
-    return {'saved': len(saved)}
+    return {'saved': len(saved), 'unnamed': unnamed}
